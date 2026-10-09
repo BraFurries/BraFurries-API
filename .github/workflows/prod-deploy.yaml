@@ -152,8 +152,14 @@ jobs:
             echo "Invalid immutable API image reference" >&2
             exit 1
           fi
-          printf '%s' "$GHCR_TOKEN" \
-            | sudo -n /usr/local/sbin/deploy-brafurries-api deploy "$IMAGE" "$GHCR_USER"
+          [[ -n "$GHCR_TOKEN" ]] || { echo "GHCR token missing" >&2; exit 1; }
+          [[ "$GHCR_USER" =~ ^[A-Za-z0-9-]{1,39}$ ]] || { echo "Invalid GHCR user" >&2; exit 1; }
+
+          # sudo 1.9.9 cannot restrict dynamic arguments by regex.
+          # Header lines are bounded/validated by the root-owned no-argument gateway.
+          # The token stays on stdin, passed through to the original Docker login.
+          printf '%s\n%s\n%s' "$IMAGE" "$GHCR_USER" "$GHCR_TOKEN" \
+            | sudo -n /usr/local/sbin/deploy-brafurries-api-public
 
       - name: Validate local readiness
         run: curl -fsS --max-time 20 http://127.0.0.1:18080/actuator/health/readiness >/dev/null
