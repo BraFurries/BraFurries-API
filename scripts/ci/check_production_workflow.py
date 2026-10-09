@@ -33,7 +33,9 @@ assert "docker compose" not in production
 assert "mvnw" not in production
 assert "pm2 " not in production.lower()
 assert "run_migrations" not in workflow
-assert "sudo -n /usr/local/sbin/deploy-brafurries-api deploy" in production
+assert "sudo -n /usr/local/sbin/deploy-brafurries-api-public" in production
+assert "sudo -n /usr/local/sbin/deploy-brafurries-api deploy" not in production
+assert "printf '%s\\n%s\\n%s' " in production  # gateway stdin envelope
 assert "sudo -n /usr/local/sbin/update-brafurries-api-env stage" in production
 assert "sudo -n /usr/local/sbin/update-brafurries-api-env discard" in production
 
