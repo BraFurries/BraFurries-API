@@ -1,17 +1,16 @@
 name: Deploy API em Produção
 
+# During the cutover this workflow is manual-only.
+# Enable push trigger in a separate reviewed PR *after* the archive is frozen.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 permissions:
   contents: read
 
 jobs:
   deploy-secret-scan:
-    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.BRF_API_AUTO_DEPLOY_ENABLED == 'true') }}
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
