@@ -1,16 +1,20 @@
 name: Deploy API em Produção
 
-# During the cutover this workflow is manual-only.
-# Enable push trigger in a separate reviewed PR *after* the archive is frozen.
+# Automatic production deployment is disabled by default.
+# Requires repository variable BRF_API_AUTO_DEPLOY_ENABLED exactly "true".
+# Manual dispatch is independent of this switch.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
 
 jobs:
   deploy-secret-scan:
-    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && vars.BRF_API_AUTO_DEPLOY_ENABLED == 'true')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
