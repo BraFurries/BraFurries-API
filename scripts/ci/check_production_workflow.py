@@ -8,11 +8,12 @@ workflow = (ROOT / ".github/workflows/prod-deploy.yaml").read_text(encoding="utf
 assert "\non:\n" in workflow and "\njobs:\n" in workflow
 triggers = workflow.split("\non:\n", 1)[1].split("\njobs:\n", 1)[0]
 assert "workflow_dispatch:" in triggers
-assert "push:" not in triggers  # no automatic production runs before cutover
+assert "push:\n    branches:\n      - main" in triggers  # push restricted to main
 assert "pull_request:" not in triggers
 assert "workflow_run:" not in triggers
 
-assert "vars.BRF_API_AUTO_DEPLOY_ENABLED" not in workflow
+assert "vars.BRF_API_AUTO_DEPLOY_ENABLED == 'true'" in workflow
+assert "(github.event_name == 'push' && vars.BRF_API_AUTO_DEPLOY_ENABLED == 'true')" in workflow
 assert "github.event_name == 'workflow_dispatch'" in workflow
 assert "github.ref == 'refs/heads/main'" in workflow
 assert "needs: deploy-secret-scan" in workflow
