@@ -5,11 +5,12 @@
 Este repositorio publico e a autoridade do codigo da BraFurries-API apos o cutover de historico limpo. O repositorio historico permanece privado como arquivo, sem apagar branches, historico, PRs ou evidencias.
 
 - Nunca tornar o repositorio historico publico, mesmo temporariamente; seus commits antigos permanecem privados no arquivo.
-- O CI deste repositorio usa apenas runners hospedados pelo GitHub, com `contents: read`, para testes e empacotamento. Ele nao faz deploy, nao publica imagem e nao acessa runner `BRFAPI`, environment `Producao`, secrets ou permissoes privilegiadas.
-- A automacao de deploy e a configuracao operacional permanecem exclusivamente no arquivo privado. Publicar ou transferir infraestrutura produtiva exige revisao especifica de trust boundaries, pinning de actions, protecao de `main`, environment com aprovacao, privilegios minimos, ownership de GHCR e restricao de runner, alem de autorizacao de deploy separada.
+- O CI de PR usa runners hospedados pelo GitHub, com `contents: read`, para verificacao de workflow, Gitleaks, testes e empacotamento. Nao acessa o runner produtivo nem segredos.
+- O workflow de deploy publico foi preparado **somente com `workflow_dispatch` na `main`** para impedir publicacao automatica acidental antes do cutover. Adicionar evento `push` exige PR de ativacao separada apos congelar o deploy legado. Deploy manual requer runner dedicado `api-production`, Environment `Produção`, segredo `PROD_ENV_FILE` e permissao do novo repo no pacote GHCR existente. Nunca permitir PRs no runner de producao.
+- Ate validar o novo caminho, o workflow do arquivo privado ainda pode publicar a API; nao habilitar deploy automatico nos dois repositorios ao mesmo tempo. Consulte `docs/production-deploy-cutover.md`. Infraestrutura de producao exige trust boundaries, pinning de actions, `main` protegida, environment restrito, menor privilegio e autorizacao de deploy separada.
 - A API continua control plane, e o Database e autoridade do schema; nunca introduzir DDL runtime ou remover isolamento entre Communities durante a migracao.
 - Nao assumir que redirecionamentos do GitHub ou secrets, rulesets, ambientes e permissao de pacotes sejam configurados automaticamente.
-- Nao adicionar ou reativar workflows de producao sem autorizacao expressa.
+- Nao habilitar ou executar workflows de producao sem autorizacao expressa e sem os controles de cutover; alteracoes no workflow exigem revisao do diff e novos checks.
 - Nao executar deploy, DML, migracoes ou rotacao de tokens por conta de manutencao deste repositorio.
 
 ## Como Trabalhar Neste Repositorio
