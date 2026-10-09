@@ -37,7 +37,7 @@ export RESET_PASSWORD_BASE_URL=https://app.seudominio.com/reset-password
 
 O CI público executa validação do workflow, Gitleaks no histórico, testes e empacotamento Maven em runners hospedados pelo GitHub. A publicação produtiva está definida em [`.github/workflows/prod-deploy.yaml`](.github/workflows/prod-deploy.yaml), mas **continua desabilitada por padrão** e exige cutover operacional explícito.
 
-O deploy manual é feito com `workflow_dispatch` a partir da `main` protegida; o automático exige a repository variable `BRF_API_AUTO_DEPLOY_ENABLED=true`. Com a variável ausente/`false`, pushes na `main` não fazem build nem deploy no workflow produtivo.
+**Durante o cutover, o workflow de produção é somente manual (`workflow_dispatch` na `main`).** Não há gatilho `push` no workflow produtivo, mesmo que alguma variável do repositório esteja configurada. Depois de congelar o deploy do arquivo privado e validar o primeiro deploy manual, uma **PR separada** habilitará o gatilho automático, sob revisão.
 
 O runner `api-production`/label `BRFAPI` executa exclusivamente wrappers root-owned de deploy e staging na VM; não faz checkout, não recebe acesso genérico ao Docker e não executa SQL. O GitHub Environment `Produção` contém o segredo `PROD_ENV_FILE` para o deploy. A permissão `packages: write` é necessária somente no job de build hospedado pelo GitHub, e o acesso ao pacote GHCR preexistente deve ser explicitamente concedido a este repositório.
 
