@@ -1,0 +1,5 @@
+# One explicitly reviewed false positive from the sanitized public root commit.
+# Synthetic Discord snowflake in AdminDiscordIdentityClientTest's MockRestServiceServer
+# response, not a Discord OAuth client ID or credential.
+# Fingerprint is scoped to this commit, path, rule, and line only.
+d9280a1110c803b23849b97509e307479d58d934:src/test/java/com/Brafurries/API/admin/AdminDiscordIdentityClientTest.java:discord-client-id:30
