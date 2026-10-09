@@ -17,23 +17,23 @@ This PR **only prepares** the public workflow. It does not migrate an existing r
 3. Configure the existing `ghcr.io/brafurries/brafurries-api` **package's Actions access** so `BraFurries/BraFurries-API` can push using its `GITHUB_TOKEN`. Copying the Dockerfile does not migrate GHCR package ACLs. Check that the VM can pull by digest.
 4. Create **dedicated runner group `api-production`**, accessible only to `BraFurries/BraFurries-API` and only the workflow `.github/workflows/prod-deploy.yaml@refs/heads/main`. Assign the runner labels `self-hosted` and `BRFAPI`. The workflow intentionally does not use the old archive runner as a fallback.
 5. On the VM, provision a dedicated unprivileged runner identity if the old `BRFAPI` account has broad privileges. Whitelist narrowly only known root-owned entrypoints and their verified argument semantics: `update-brafurries-api-env stage/status/discard` and `deploy-brafurries-api deploy/status`. **Inspect actual sudoers and wrappers first; never grant general root, general Docker or repository-controlled script execution.** Verify that all scripts do not accept unsafe arbitrary args.
-6. Define the repository Actions variable `BRF_API_AUTO_DEPLOY_ENABLED=false`, **at repository scope**. Setting it to `true` before cutover is prohibited.
+6. The initial public workflow is **manual-only**. It contains no `push` trigger. Do not introduce automatic production deployment until after the cutover in a separate reviewed PR.
 
 ## Sequenced switchover (distinct approvals)
 
 1. Read-only inventory: deployed image/status, public health, old workflow and runner, pending staging state, current production `main` SHA. **Do not read secret values or run tests against shared MariaDB**.
-2. Merge the public workflow **while auto disabled**. The first `push` into `main` must skip all production jobs.
+2. Merge the public **manual-only** workflow. The merge into `main` cannot trigger its production pipeline because that workflow has no `push` event.
 3. Configure package permissions, `Produção` environment and restricted new runner. Verify it is online and eligible. Do not run a deployment if any precondition is unverified.
 4. **Freeze the archive's automatic `push` deployment trigger** (via reviewed archive change removing `push`; keep `workflow_dispatch` temporarily for rollback) before the new manual deployment. Ensure no archive workflow is running, queued or capable of re-deploying an older image. Never rely solely on a repository rename to remove workflow authority.
 5. Run the **public** workflow via `workflow_dispatch` on protected `main`. GitHub-hosted jobs scan secrets, run isolated tests, build and push an immutable GHCR digest; the restricted runner stages the production env and calls only root-owned wrappers.
 6. Verify local readiness, `/meta/locales`, local Preview CORS and public Cloudflare CORS, as well as Docker image digest, runner state and environment cleanup. A failed **post-deploy** smoke test does not necessarily roll back the container; investigate and use an explicitly approved manual recovery if needed.
 7. Stop/deregister the retired archive production runner only after the new route is validated and the archive workflow is frozen. Preserve historic config backups, branches and reviews.
-8. Set `BRF_API_AUTO_DEPLOY_ENABLED=true` in the **public repository variables**. Validate the next controlled `main` push triggers the desired image+deploy and records final status. No retroactive deploy occurs when toggling the variable.
+8. After the public manual deployment is fully validated, enable automatic deployment in **a separate protected-main PR** by adding a `push` trigger with appropriate guards. Do not rely on a repository variable alone; verify all migration gates before enabling. Validate the next controlled main push.
 9. Leave `BraFurries/BraFurries-Infrastructure` host script import / hardening for a dedicated follow-up with a separate rollout; merging Infrastructure never changes VM files.
 
 ## Recovery and operational constraints
 
-- Toggle `BRF_API_AUTO_DEPLOY_ENABLED=false` to pause *future* automatic push builds/deploys. It does **not** cancel an in-flight run. Cancel/allow the current run to settle using GitHub Actions, and ensure no staged environment remains.
+- Until a later approved PR introduces automatic triggers, this workflow is manual-only. After enabling the automatic trigger, pause future deployments using the trigger's reviewed opt-in guard or a controlled revert; disabling future triggers does **not** cancel in-flight jobs. Inspect and safely settle existing runs, including staged environments.
 - Prefer rolling back through the production Docker wrapper to a known previous immutable digest. Wrapper rollback applies only to errors during the wrapper's deployment phase; database changes and external API contract changes are not automatically reverted.
 - The API **never owns MariaDB schema**. Apply compatible Flyway changes from `BraFurries-Database` before introducing a dependent API build. Preserve Community tenant isolation, authorization and auditing.
 - Deploy secrets should be passed only to the restricted runner and root-owned wrappers, never to PR jobs or repository files.
