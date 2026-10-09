@@ -1,0 +1,40 @@
+# API production deploy cutover — private archive to public repository
+
+## Scope and current situation (2026-10-09)
+
+- **Public source:** `BraFurries/BraFurries-API`, protected `main`. Code content matches the private archive for the 497 unchanged blobs; differences concern docs / Maven wrapper line endings and the old deployment files.
+- **Current production publisher:** `BraFurries/Archive-BraFurries-API` (private) workflow `.github/workflows/prod-deploy.yaml` on pushes to `main`. **Do not delete the archived repo or its history.**
+- **Current production runtime:** Docker container on `127.0.0.1:18080`, reached via Apache, with GHCR `ghcr.io/brafurries/brafurries-api@sha256:...`. PM2 is already retired for the API.
+- **Root-owned wrappers known on VM:** `/usr/local/sbin/deploy-brafurries-api` and `/usr/local/sbin/update-brafurries-api-env`. This change does not modify them.
+- **Migration target:** public repository controls build, manual and optionally automatic deploy, with an isolated runner and explicit permissions. Front End Firebase deployment is a **later, separate** migration.
+
+This PR **only prepares** the public workflow. It does not migrate an existing runner, grant access to a GHCR package, create a production environment, disable archived workflows, change DNS/Apache, run SQL or deploy.
+
+## GitHub preconditions (operator check)
+
+1. Confirm the public `main` still requires reviewed PRs, signed commits and the CI job `test`. Add `secret-scan` as a required check when the organization supports it.
+2. Configure the public repository's **Environment `Produção`** with secret `PROD_ENV_FILE`; restrict deployments to `main`. Keep the secret outside Git and avoid printing its contents. Determine whether required reviewers will intentionally pause an automatic deployment.
+3. Configure the existing `ghcr.io/brafurries/brafurries-api` **package's Actions access** so `BraFurries/BraFurries-API` can push using its `GITHUB_TOKEN`. Copying the Dockerfile does not migrate GHCR package ACLs. Check that the VM can pull by digest.
+4. Create **dedicated runner group `api-production`**, accessible only to `BraFurries/BraFurries-API` and only the workflow `.github/workflows/prod-deploy.yaml@refs/heads/main`. Assign the runner labels `self-hosted` and `BRFAPI`. The workflow intentionally does not use the old archive runner as a fallback.
+5. On the VM, provision a dedicated unprivileged runner identity if the old `BRFAPI` account has broad privileges. Whitelist narrowly only known root-owned entrypoints and their verified argument semantics: `update-brafurries-api-env stage/status/discard` and `deploy-brafurries-api deploy/status`. **Inspect actual sudoers and wrappers first; never grant general root, general Docker or repository-controlled script execution.** Verify that all scripts do not accept unsafe arbitrary args.
+6. Define the repository Actions variable `BRF_API_AUTO_DEPLOY_ENABLED=false`, **at repository scope**. Setting it to `true` before cutover is prohibited.
+
+## Sequenced switchover (distinct approvals)
+
+1. Read-only inventory: deployed image/status, public health, old workflow and runner, pending staging state, current production `main` SHA. **Do not read secret values or run tests against shared MariaDB**.
+2. Merge the public workflow **while auto disabled**. The first `push` into `main` must skip all production jobs.
+3. Configure package permissions, `Produção` environment and restricted new runner. Verify it is online and eligible. Do not run a deployment if any precondition is unverified.
+4. **Freeze the archive's automatic `push` deployment trigger** (via reviewed archive change removing `push`; keep `workflow_dispatch` temporarily for rollback) before the new manual deployment. Ensure no archive workflow is running, queued or capable of re-deploying an older image. Never rely solely on a repository rename to remove workflow authority.
+5. Run the **public** workflow via `workflow_dispatch` on protected `main`. GitHub-hosted jobs scan secrets, run isolated tests, build and push an immutable GHCR digest; the restricted runner stages the production env and calls only root-owned wrappers.
+6. Verify local readiness, `/meta/locales`, local Preview CORS and public Cloudflare CORS, as well as Docker image digest, runner state and environment cleanup. A failed **post-deploy** smoke test does not necessarily roll back the container; investigate and use an explicitly approved manual recovery if needed.
+7. Stop/deregister the retired archive production runner only after the new route is validated and the archive workflow is frozen. Preserve historic config backups, branches and reviews.
+8. Set `BRF_API_AUTO_DEPLOY_ENABLED=true` in the **public repository variables**. Validate the next controlled `main` push triggers the desired image+deploy and records final status. No retroactive deploy occurs when toggling the variable.
+9. Leave `BraFurries/BraFurries-Infrastructure` host script import / hardening for a dedicated follow-up with a separate rollout; merging Infrastructure never changes VM files.
+
+## Recovery and operational constraints
+
+- Toggle `BRF_API_AUTO_DEPLOY_ENABLED=false` to pause *future* automatic push builds/deploys. It does **not** cancel an in-flight run. Cancel/allow the current run to settle using GitHub Actions, and ensure no staged environment remains.
+- Prefer rolling back through the production Docker wrapper to a known previous immutable digest. Wrapper rollback applies only to errors during the wrapper's deployment phase; database changes and external API contract changes are not automatically reverted.
+- The API **never owns MariaDB schema**. Apply compatible Flyway changes from `BraFurries-Database` before introducing a dependent API build. Preserve Community tenant isolation, authorization and auditing.
+- Deploy secrets should be passed only to the restricted runner and root-owned wrappers, never to PR jobs or repository files.
+- If package access, runner group restrictions, `PROD_ENV_FILE`, readiness or archive freeze cannot be verified, **stop before production deployment**.
