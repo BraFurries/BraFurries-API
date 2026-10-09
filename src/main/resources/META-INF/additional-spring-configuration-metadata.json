@@ -1,0 +1,12 @@
+{"properties": [
+  {
+    "name": "app.base-url",
+    "type": "java.lang.String",
+    "description": "Base URL for the application"
+  },
+  {
+    "name": "app.frontend-url",
+    "type": "java.lang.String",
+    "description": "Frontend URL"
+  }
+]}
