@@ -76,5 +76,26 @@ jobs:
       - name: Run tests
         run: ./mvnw test
 
+      - name: Checkout pinned Database baseline for disposable tests
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: BraFurries/BraFurries-Database
+          ref: 0df5070079d26d18752282c642a9ff10037c8bfb
+          path: .ci/database-baseline
+          persist-credentials: false
+
+      - name: Verify baseline source and run opt-in MariaDB Testcontainers compatibility
+        env:
+          BRF_BASELINE_JPA_INTEGRATION: "true"
+        run: |
+          set -euo pipefail
+          expected_sha="0df5070079d26d18752282c642a9ff10037c8bfb"
+          test "$(git -C .ci/database-baseline rev-parse HEAD)" = "$expected_sha"
+          baseline=".ci/database-baseline/flyway/sql/baseline/B20261020_001__adopt_production_schema.sql"
+          test "$(grep -c '^CREATE TABLE ' "$baseline")" -eq 107
+          mkdir -p src/test/resources
+          cp "$baseline" src/test/resources/brafurries_schema_baseline.sql
+          ./mvnw -B -Dtest=BaselineSchemaJpaMariaDbIntegrationTest test
+
       - name: Package without rerunning tests
         run: ./mvnw -DskipTests package
