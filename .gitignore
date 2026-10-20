@@ -60,3 +60,7 @@ build/
 
 .env
 
+
+# Disposable CI-only Database baseline checkout and transient Testcontainers input
+/.ci/database-baseline/
+/src/test/resources/brafurries_schema_baseline.sql
