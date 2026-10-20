@@ -110,10 +110,16 @@ class BaselineCoddyLiveHttpIntegrationTest {
                 "AND is_present=1",
             Integer.class
         ));
-        assertEquals(2, jdbc.queryForObject(
+        assertEquals(3, jdbc.queryForObject(
             "SELECT COUNT(*) FROM community_network_sync_runs " +
                 "WHERE external_network_id IN (991001,991002) AND status='SUCCESS' " +
-                "AND \u0060trigger\u0060 IN ('STARTUP','MANUAL')",
+                "AND \u0060trigger\u0060 IN ('STARTUP','MANUAL','RECOVERY')",
+            Integer.class
+        ));
+        assertEquals(1, jdbc.queryForObject(
+            "SELECT COUNT(*) FROM community_network_sync_runs " +
+                "WHERE external_network_id=991002 AND status='FAILED' " +
+                "AND error_code='CI_CROSS_GUILD_NEGATIVE_TEST'",
             Integer.class
         ));
     }
