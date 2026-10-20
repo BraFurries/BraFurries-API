@@ -82,6 +82,14 @@ async def verify(base_url: str, token: str) -> None:
     await client.finish_sync_run(
         guild_b.id, run_id, success=False, error_code="CI_CROSS_GUILD_NEGATIVE_TEST"
     )
+    # The failed membership run correctly degrades guild B only. Reconcile
+    # again to prove recovery reaches HEALTHY without mutating guild A.
+    recovered = await reconcile_guild(
+        guild_b, client, trigger="RECOVERY", approved_resolver=lambda _member: False
+    )
+    assert recovered["communityId"] == b["communityId"], recovered
+    assert recovered["guildId"] == "991002", recovered
+    assert recovered["observedMembers"] == 1, recovered
     print("CODDY_LOOPBACK_HTTP_CONTRACT_PASSED")
 
 
