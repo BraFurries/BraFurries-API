@@ -13,7 +13,8 @@ public class EventScheduling {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    // event_scheduling.id is INT, unlike Discord snowflake IDs and other BIGINT columns.
+    private Integer id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "event_id", nullable = false)
