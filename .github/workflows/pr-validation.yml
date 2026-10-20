@@ -97,5 +97,32 @@ jobs:
           cp "$baseline" src/test/resources/brafurries_schema_baseline.sql
           ./mvnw -B -Dtest=BaselineSchemaJpaMariaDbIntegrationTest,BaselineSchemaFullContextMariaDbIntegrationTest test
 
+      # Run a real loopback HTTP request path against the Spring service and
+      # canonical disposable MariaDB, using Coddy's pinned Python client.
+      # Nothing here contacts Discord or any production host.
+      - name: Checkout pinned Coddy runtime client (read only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: BraFurries/BraFurries-Discord
+          ref: f600081624e124874dfd558dfc8255722c3a8fc7
+          path: .ci/coddy-runtime
+          persist-credentials: false
+
+      - name: Install isolated Coddy HTTP client dependencies
+        run: |
+          set -euo pipefail
+          test "$(git -C .ci/coddy-runtime rev-parse HEAD)" = "f600081624e124874dfd558dfc8255722c3a8fc7"
+          python3 -m pip install --disable-pip-version-check aiohttp==3.9.3 discord.py==2.3.2
+
+      - name: Verify actual Coddy to Spring loopback HTTP contract on disposable MariaDB
+        env:
+          BRF_CODDY_LIVE_HTTP_INTEGRATION: "true"
+        run: |
+          set -euo pipefail
+          test "$(git -C .ci/database-baseline rev-parse HEAD)" = "0df5070079d26d18752282c642a9ff10037c8bfb"
+          test "$(git -C .ci/coddy-runtime rev-parse HEAD)" = "f600081624e124874dfd558dfc8255722c3a8fc7"
+          python3 -c "import ast, pathlib; ast.parse(pathlib.Path('src/test/resources/coddy_live_http_contract.py').read_text())"
+          ./mvnw -B -Dtest=BaselineCoddyLiveHttpIntegrationTest test
+
       - name: Package without rerunning tests
         run: ./mvnw -DskipTests package
