@@ -101,6 +101,51 @@ class ThemeControlPlaneServiceTest {
     }
 
     @Test
+    void foreignGuildThemeIdCannotBeReadEvenByAuthorizedGuildAdmin() {
+        when(access.authorize(auth, "123")).thenReturn(authorized);
+
+        ResponseStatusException error = assertThrows(
+            ResponseStatusException.class,
+            () -> service.get(auth, "123", 999L)
+        );
+
+        assertEquals(HttpStatus.NOT_FOUND, error.getStatusCode());
+        verify(store).findTheme(123L, 999L);
+        verifyNoMoreInteractions(store);
+        verifyNoInteractions(coddy, assets, auditLogs);
+    }
+
+    @Test
+    void foreignGuildThemeIdCannotBeDeletedOrAudited() {
+        when(access.authorize(auth, "123")).thenReturn(authorized);
+
+        ResponseStatusException error = assertThrows(
+            ResponseStatusException.class,
+            () -> service.delete(auth, "123", 999L)
+        );
+
+        assertEquals(HttpStatus.NOT_FOUND, error.getStatusCode());
+        verify(store).findThemeIncludingDeleted(123L, 999L);
+        verifyNoMoreInteractions(store);
+        verifyNoInteractions(coddy, assets, auditLogs);
+    }
+
+    @Test
+    void foreignGuildApplicationIdCannotBeReadOrTriggerCleanup() {
+        when(access.authorize(auth, "123")).thenReturn(authorized);
+
+        ResponseStatusException error = assertThrows(
+            ResponseStatusException.class,
+            () -> service.application(auth, "123", 888L)
+        );
+
+        assertEquals(HttpStatus.NOT_FOUND, error.getStatusCode());
+        verify(store).findApplication(123L, 888L);
+        verifyNoMoreInteractions(store);
+        verifyNoInteractions(coddy, assets, auditLogs);
+    }
+
+    @Test
     void resourcesExposeVipAndManagedRolesAsUnavailableButNormalRolesRemainEligible() {
         when(access.authorize(auth, "123")).thenReturn(authorized);
         when(store.vipCustomRoleIds(123L)).thenReturn(Set.of(202L));
