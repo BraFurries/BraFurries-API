@@ -2,6 +2,8 @@ package com.Brafurries.API.entity.community;
 
 import com.Brafurries.API.entity.user.User;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -23,6 +25,8 @@ public class CommunityStore {
     @JoinColumn(name = "owner_user_id")
     private User ownerUser;
 
+    // Preserve the legacy physical CHAR(50); do not migrate the database to VARCHAR.
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "item_name", nullable = false, length = 50)
     private String itemName;
 
