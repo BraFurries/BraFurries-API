@@ -11,7 +11,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public interface EventSchedulingRepository extends JpaRepository<EventScheduling, Long> {
+public interface EventSchedulingRepository extends JpaRepository<EventScheduling, Integer> {
     Optional<EventScheduling> findTopByEventIdOrderByEndingDatetimeDescIdDesc(Integer eventId);
     List<EventScheduling> findByEventId(Integer eventId);
     void deleteByEventId(Integer eventId);
