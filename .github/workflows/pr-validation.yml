@@ -95,7 +95,7 @@ jobs:
           test "$(grep -c '^CREATE TABLE ' "$baseline")" -eq 107
           mkdir -p src/test/resources
           cp "$baseline" src/test/resources/brafurries_schema_baseline.sql
-          ./mvnw -B -Dtest=BaselineSchemaJpaMariaDbIntegrationTest test
+          ./mvnw -B -Dtest=BaselineSchemaJpaMariaDbIntegrationTest,BaselineSchemaFullContextMariaDbIntegrationTest test
 
       - name: Package without rerunning tests
         run: ./mvnw -DskipTests package
