@@ -3,8 +3,11 @@ package com.Brafurries.API.user;
 import static org.junit.jupiter.api.Assertions.*;
 
 import com.Brafurries.API.entity.community.Community;
+import com.Brafurries.API.entity.community.CommunityStore;
+import com.Brafurries.API.repository.community.CommunityStoreRepository;
 import com.Brafurries.API.repository.community.CommunityRepository;
 import java.util.List;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,7 +31,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Testcontainers
 @DataJpaTest
 @TestPropertySource(properties = {
-    "spring.jpa.hibernate.ddl-auto=none",
+    "spring.jpa.hibernate.ddl-auto=validate",
     "spring.jpa.open-in-view=false"
 })
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -47,11 +50,13 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
 
     @Autowired private JdbcTemplate jdbc;
     @Autowired private CommunityRepository communities;
+    @Autowired private CommunityStoreRepository communityStore;
+    @Autowired private EntityManager entityManager;
     @Autowired private ThemeControlPlaneStore themes;
     @Autowired private BackupControlPlaneStore backups;
 
     @Test
-    void startsJpaWithProductionDdlNoneAndDatabaseOwnedSchema() {
+    void validatesEntityMappingsAgainstDatabaseOwnedSchema() {
         Integer count = jdbc.queryForObject(
             "SELECT COUNT(*) FROM information_schema.TABLES " +
             "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='BASE TABLE'",
@@ -67,9 +72,8 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
     }
 
     @Test
-    void preservesKnownLegacyColumnTypesForSeparateJpaReview() {
-        // Hibernate's strict validate currently reports CHAR vs VARCHAR
-        // and event_scheduling INT vs Long; do not silently rewrite DDL.
+    void retainsPhysicalCharAndIntegerColumnTypesAfterJpaMappingCorrections() {
+        // Verify physical schema remains unchanged: mapping fixes belong in API only.
         String nameType = jdbc.queryForObject(
             "SELECT COLUMN_TYPE FROM information_schema.COLUMNS " +
             "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='community_store' " +
@@ -82,8 +86,35 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
             "AND COLUMN_NAME='id'",
             String.class
         );
+        String roleColorType = jdbc.queryForObject(
+            "SELECT COLUMN_TYPE FROM information_schema.COLUMNS " +
+            "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='user_custom_roles' " +
+            "AND COLUMN_NAME='color'",
+            String.class
+        );
         assertEquals("char(50)", nameType);
         assertEquals("int(11)", scheduleIdType);
+        assertEquals("char(32)", roleColorType);
+    }
+
+    @Test
+    void roundTripsLegacyCharStoreItemWithoutDatabaseAlteration() {
+        Community community = new Community();
+        community.setName("CHAR compatibility synthetic tenant");
+        community = communities.saveAndFlush(community);
+
+        CommunityStore item = new CommunityStore();
+        item.setCommunity(community);
+        item.setItemName("Community badge");
+        item.setItemPrice(50);
+        item.setAllowMultiple(false);
+        item.setIsService(false);
+        Integer itemId = communityStore.saveAndFlush(item).getId();
+        entityManager.clear();
+
+        CommunityStore restored = communityStore.findById(itemId).orElseThrow();
+        assertEquals("Community badge", restored.getItemName());
+        assertEquals(community.getId(), restored.getCommunity().getId());
     }
 
     @Test
