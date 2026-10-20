@@ -28,7 +28,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Testcontainers
 @DataJpaTest
 @TestPropertySource(properties = {
-    "spring.jpa.hibernate.ddl-auto=none",
+    "spring.jpa.hibernate.ddl-auto=validate",
     "spring.jpa.open-in-view=false"
 })
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -51,7 +51,7 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
     @Autowired private BackupControlPlaneStore backups;
 
     @Test
-    void startsJpaWithProductionDdlNoneAndDatabaseOwnedSchema() {
+    void validatesEntityMappingsAgainstDatabaseOwnedSchema() {
         Integer count = jdbc.queryForObject(
             "SELECT COUNT(*) FROM information_schema.TABLES " +
             "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='BASE TABLE'",
@@ -68,8 +68,7 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
 
     @Test
     void preservesKnownLegacyColumnTypesForSeparateJpaReview() {
-        // Hibernate's strict validate currently reports CHAR vs VARCHAR
-        // and event_scheduling INT vs Long; do not silently rewrite DDL.
+        // Verify physical schema remains unchanged: mapping fixes belong in API only.
         String nameType = jdbc.queryForObject(
             "SELECT COLUMN_TYPE FROM information_schema.COLUMNS " +
             "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='community_store' " +
