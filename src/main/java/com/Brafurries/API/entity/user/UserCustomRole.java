@@ -2,6 +2,8 @@ package com.Brafurries.API.entity.user;
 
 import com.Brafurries.API.entity.community.CommunityDiscord;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -22,6 +24,8 @@ public class UserCustomRole {
     @Column(name = "owner_discord_user_id", nullable = false)
     private Long ownerDiscordUserId;
 
+    // color is CHAR(32) in the canonical legacy MariaDB schema (color2 is VARCHAR).
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(length = 32)
     private String color;
 
