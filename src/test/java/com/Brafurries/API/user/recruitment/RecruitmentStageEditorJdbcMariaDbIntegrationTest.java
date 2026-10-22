@@ -71,7 +71,7 @@ class RecruitmentStageEditorJdbcMariaDbIntegrationTest {
     void savesTwoIndependentFormSchemasAndRejectsForeignCommunityReadsAndWrites() {
         long process = drafts.create(981001, 981001, "Moderadores", null);
         var stage = drafts.appendDraftStage(981001, process, "Prova", "Prova",
-            StageType.AUTO_EVALUATION);
+            StageType.AUTO_EVALUATION, 0L);
         assertNotNull(stage);
         var staff = new RecruitmentFormDefinition(List.of(
             new Question("observation", "Parecer", QuestionType.LONG_TEXT, false,
@@ -79,7 +79,7 @@ class RecruitmentStageEditorJdbcMariaDbIntegrationTest {
         ));
         var saved = stages.save(981001, process, stage.id(),
             new SaveStageRequest("Exame interno", "Conhecimento", StageType.AUTO_EVALUATION,
-                candidate(), staff));
+                candidate(), staff, 1L));
         assertNotNull(saved);
         assertEquals(List.of("a"),
             saved.candidateForm().questions().get(0).correctAnswers());
@@ -89,47 +89,47 @@ class RecruitmentStageEditorJdbcMariaDbIntegrationTest {
         assertNull(stages.find(981002, process, stage.id()));
         assertNull(stages.save(981002, process, stage.id(),
             new SaveStageRequest("Ataque", "Ataque", StageType.AUTO_EVALUATION,
-                candidate(), staff)));
+                candidate(), staff, 0L)));
         assertEquals("Conhecimento", stages.find(981001, process, stage.id()).publicName());
     }
 
     @Test
     void reordersThroughTemporaryPositionsAndCompactsAfterDelete() {
         long process = drafts.create(981001, 981001, "Moderadores", null);
-        var first = drafts.appendDraftStage(981001, process, "Primeira", "Primeira", StageType.ANALYSIS);
-        var second = drafts.appendDraftStage(981001, process, "Segunda", "Segunda", StageType.INTERVIEW);
-        var third = drafts.appendDraftStage(981001, process, "Terceira", "Terceira", StageType.CUSTOM);
+        var first = drafts.appendDraftStage(981001, process, "Primeira", "Primeira", StageType.ANALYSIS, 0L);
+        var second = drafts.appendDraftStage(981001, process, "Segunda", "Segunda", StageType.INTERVIEW, 1L);
+        var third = drafts.appendDraftStage(981001, process, "Terceira", "Terceira", StageType.CUSTOM, 2L);
         assertTrue(stages.reorder(981001, process,
-            List.of(third.id(), first.id(), second.id())));
+            List.of(third.id(), first.id(), second.id()), 3L));
         assertEquals(List.of(third.id(), first.id(), second.id()),
             drafts.stages(981001, process).stream().map(StageResponse::id).toList());
         assertEquals(List.of(1, 2, 3),
             drafts.stages(981001, process).stream().map(StageResponse::position).toList());
 
-        assertTrue(stages.delete(981001, process, first.id()));
+        assertTrue(stages.delete(981001, process, first.id(), 4L));
         assertEquals(List.of(third.id(), second.id()),
             drafts.stages(981001, process).stream().map(StageResponse::id).toList());
         assertEquals(List.of(1, 2),
             drafts.stages(981001, process).stream().map(StageResponse::position).toList());
-        assertFalse(stages.delete(981002, process, second.id()));
+        assertFalse(stages.delete(981002, process, second.id(), 0L));
     }
 
     @Test
     void refusesBadPermutationsAndMutationAfterVersionPublished() {
         long process = drafts.create(981001, 981001, "Moderadores", null);
         var first = drafts.appendDraftStage(981001, process, "Primeira", "Primeira", StageType.ANALYSIS);
-        var second = drafts.appendDraftStage(981001, process, "Segunda", "Segunda", StageType.ANALYSIS);
+        var second = drafts.appendDraftStage(981001, process, "Segunda", "Segunda", StageType.ANALYSIS, 1L);
         assertThrows(IllegalArgumentException.class,
-            () -> stages.reorder(981001, process, List.of(first.id(), first.id())));
+            () -> stages.reorder(981001, process, List.of(first.id(), first.id()), 2L));
         assertThrows(IllegalArgumentException.class,
-            () -> stages.reorder(981001, process, List.of(first.id(), 99999L)));
-        assertFalse(stages.reorder(981002, process, List.of(first.id(), second.id())));
+            () -> stages.reorder(981001, process, List.of(first.id(), 99999L), 2L));
+        assertFalse(stages.reorder(981002, process, List.of(first.id(), second.id()), 0L));
 
         jdbc.update("UPDATE recruitment_process_versions SET status='PUBLISHED' "
             + "WHERE community_id=981001 AND process_id=?", process);
         assertNull(stages.save(981001, process, first.id(),
-            new SaveStageRequest("New", "New", StageType.ANALYSIS, null, null)));
-        assertFalse(stages.delete(981001, process, first.id()));
-        assertFalse(stages.reorder(981001, process, List.of(second.id(), first.id())));
+            new SaveStageRequest("New", "New", StageType.ANALYSIS, null, null, 2L)));
+        assertFalse(stages.delete(981001, process, first.id(), 2L));
+        assertFalse(stages.reorder(981001, process, List.of(second.id(), first.id()), 2L));
     }
 }
