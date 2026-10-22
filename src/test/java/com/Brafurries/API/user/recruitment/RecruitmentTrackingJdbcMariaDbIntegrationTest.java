@@ -144,6 +144,32 @@ class RecruitmentTrackingJdbcMariaDbIntegrationTest {
         assertNull(tracking.candidateAnswers(981002,applicationId,981002));
     }
 
+    @Test void futureOrBlockedStagesStayInvisibleEvenWithReviewerDesignation() {
+        long applicationId = submitOne();
+        long processId = tracking.reviewById(981001,applicationId).processId();
+        assignReviewer(applicationId);
+        jdbc.update(
+            "UPDATE recruitment_application_stages SET status='PENDING' "
+                + "WHERE community_id=? AND application_id=?", 981001, applicationId
+        );
+        assertFalse(tracking.canReview(981001, applicationId, 981002));
+        assertTrue(tracking.reviewProcesses(981001,981002).isEmpty());
+        assertTrue(tracking.queue(981001,processId,981002,null).isEmpty());
+        assertTrue(tracking.reviewStages(981001,applicationId,981002).isEmpty());
+        assertNull(tracking.candidateAnswers(981001,applicationId,981002));
+        jdbc.update(
+            "UPDATE recruitment_application_stages SET status='BLOCKED' "
+                + "WHERE community_id=? AND application_id=?", 981001, applicationId
+        );
+        assertFalse(tracking.canReview(981001,applicationId,981002));
+        jdbc.update(
+            "UPDATE recruitment_application_stages SET status='COMPLETED' "
+                + "WHERE community_id=? AND application_id=?", 981001, applicationId
+        );
+        assertTrue(tracking.canReview(981001,applicationId,981002));
+        assertEquals(1,tracking.queue(981001,processId,981002,null).size());
+    }
+
     @Test void paginatedQueueUsesStableIdsAndCannotEnumerateCrossProcess() {
         long first = submitOne();
         long processId = tracking.reviewById(981001,first).processId();
