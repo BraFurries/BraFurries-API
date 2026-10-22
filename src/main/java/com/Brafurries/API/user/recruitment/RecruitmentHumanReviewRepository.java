@@ -26,6 +26,30 @@ public class RecruitmentHumanReviewRepository {
 
     public record StageIdentity(long stageId, long processId, long processVersionId, String type) {}
     public record Assignment(long id, long stageId, Integer userId, Integer roleId) {}
+    public record ReviewableStage(
+        long stageId, long processId, long processVersionId, int versionNumber,
+        String versionStatus, int position, String publicName, String stageType
+    ) {}
+
+    /** Stage management sees versioned definitions, including frozen older versions. */
+    public List<ReviewableStage> stagesForProcess(Integer communityId, Long processId) {
+        return jdbc.query(
+            "SELECT s.id,s.process_id,s.process_version_id,v.version_number,v.status,"
+                + "s.position,s.public_name,s.stage_type "
+                + "FROM recruitment_stages s "
+                + "JOIN recruitment_process_versions v "
+                + "ON v.community_id=s.community_id AND v.process_id=s.process_id "
+                + "AND v.id=s.process_version_id "
+                + "WHERE s.community_id=? AND s.process_id=? "
+                + "AND v.status IN ('DRAFT','PUBLISHED','SUPERSEDED') "
+                + "ORDER BY v.version_number DESC,s.position,s.id",
+            (rs, row) -> new ReviewableStage(
+                rs.getLong(1), rs.getLong(2), rs.getLong(3), rs.getInt(4),
+                rs.getString(5), rs.getInt(6), rs.getString(7), rs.getString(8)
+            ), communityId, processId
+        );
+    }
+
     public record AssessmentTarget(
         long stageId, long applicationId, long processVersionId,
         int candidateUserId, String stageStatus, String stageType, String staffFormJson
