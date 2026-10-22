@@ -63,6 +63,12 @@ public class RecruitmentTrackingService {
     }
 
     @Transactional(readOnly = true)
+    public List<ReviewProcess> reviewProcesses(Authentication auth, Integer communityId) {
+        var reviewer = reviewer(auth, communityId);
+        return repository.reviewProcesses(communityId, reviewer.user().getId());
+    }
+
+    @Transactional(readOnly = true)
     public List<ReviewQueueItem> queue(
         Authentication auth, Integer communityId, Long processId, Long beforeId
     ) {
