@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import com.Brafurries.API.entity.community.Community;
+import com.Brafurries.API.entity.community.CommunityAuditLog;
+import com.Brafurries.API.repository.community.CommunityAuditLogRepository;
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.user.CommunityAuthorizationService;
 import com.Brafurries.API.user.CommunityCapability;
@@ -27,12 +29,13 @@ class RecruitmentTrackingServiceTest {
     @Mock CommunityAuthorizationService authorization;
     @Mock RecruitmentTrackingRepository repository;
     @Mock Authentication auth;
+    @Mock CommunityAuditLogRepository audits;
 
     RecruitmentTrackingService service;
 
     @BeforeEach void setup() {
         service = new RecruitmentTrackingService(
-            new RecruitmentFeatureGate(true, 11), authorization, repository, new ObjectMapper()
+            new RecruitmentFeatureGate(true, 11), authorization, repository, new ObjectMapper(), audits
         );
     }
 
@@ -115,6 +118,7 @@ class RecruitmentTrackingServiceTest {
             org.mockito.ArgumentMatchers.anyLong());
         verify(repository,never()).reviewStages(org.mockito.ArgumentMatchers.anyInt(),
             org.mockito.ArgumentMatchers.anyLong());
+        verifyNoInteractions(audits);
     }
 
     @Test void reviewerCanReadCandidateAnswersWithoutGabaritoOrStaffForm() {
@@ -132,6 +136,10 @@ class RecruitmentTrackingServiceTest {
         assertEquals("Quero ajudar",result.candidateAnswers().get("motivation").asText());
         assertEquals(501L,result.submittedStageId());
         assertFalse(result.candidateAnswers().has("correctAnswers"));
+        verify(audits).save(org.mockito.ArgumentMatchers.argThat(
+            (CommunityAuditLog item) -> item.getAction().equals("RECRUITMENT_APPLICATION_VIEWED")
+                && item.getTargetId().equals("100")
+        ));
     }
 
     @Test void malformedCursorRejectedBeforeDbQuery() {
