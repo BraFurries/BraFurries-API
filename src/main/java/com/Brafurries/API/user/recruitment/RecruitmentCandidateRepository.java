@@ -42,7 +42,9 @@ public class RecruitmentCandidateRepository {
         );
     }
 
-    public CandidateSelection openSelection(Integer communityId, Long processId, boolean forUpdate) {
+    public CandidateSelection publishedSelection(
+        Integer communityId, Long processId, boolean requireOpen, boolean forUpdate
+    ) {
         String sql =
             "SELECT p.id,p.title,p.description,p.enrollment_ends_at,"
                 + "v.id AS version_id,v.eligibility_rules_json,v.terms_json,"
@@ -55,14 +57,19 @@ public class RecruitmentCandidateRepository {
                 + "AND s.process_version_id=v.id AND s.position=1 "
                 + "AND s.stage_type='APPLICATION' "
                 + "WHERE p.community_id=? AND p.id=? AND p.status='ACTIVE' "
-                + "AND p.visibility='PUBLIC' AND p.enrollment_status='OPEN' "
-                + "AND p.enrollment_starts_at<=UTC_TIMESTAMP(6) "
-                + "AND p.enrollment_ends_at>UTC_TIMESTAMP(6) AND v.status='PUBLISHED' "
+                + "AND v.status='PUBLISHED' "
+                + (requireOpen
+                    ? "AND p.visibility='PUBLIC' AND p.enrollment_status='OPEN' "
+                        + "AND p.enrollment_starts_at<=UTC_TIMESTAMP(6) "
+                        + "AND p.enrollment_ends_at>UTC_TIMESTAMP(6) "
+                    : "")
                 + "ORDER BY v.version_number DESC LIMIT 1"
                 + (forUpdate ? " FOR UPDATE" : "");
         var results = jdbc.query(sql, (rs,row)->new CandidateSelection(
                 rs.getLong("id"),rs.getString("title"),rs.getString("description"),
-                rs.getObject("enrollment_ends_at",LocalDateTime.class).toInstant(ZoneOffset.UTC),
+                rs.getObject("enrollment_ends_at",LocalDateTime.class) == null
+                    ? null
+                    : rs.getObject("enrollment_ends_at",LocalDateTime.class).toInstant(ZoneOffset.UTC),
                 rs.getLong("version_id"),rs.getString("eligibility_rules_json"),
                 rs.getString("terms_json"),rs.getLong("stage_id"),
                 rs.getString("candidate_form_json")),
@@ -112,14 +119,17 @@ public class RecruitmentCandidateRepository {
     }
 
     public boolean openEnrollment(
-        Integer communityId, long processId, LocalDateTime closesAtUtc
+        Integer communityId, long processId, LocalDateTime closesAtUtc,
+        long expectedRevision
     ) {
         return jdbc.update(
             "UPDATE recruitment_processes SET visibility='PUBLIC', "
+                + "draft_revision=draft_revision+1, "
                 + "enrollment_status='OPEN',enrollment_starts_at=UTC_TIMESTAMP(6), "
                 + "enrollment_ends_at=? WHERE community_id=? AND id=? "
-                + "AND status='ACTIVE' AND visibility='PRIVATE' AND enrollment_status='CLOSED'",
-            closesAtUtc,communityId,processId
+                + "AND status='ACTIVE' AND visibility='PRIVATE' AND enrollment_status='CLOSED' "
+                + "AND draft_revision=?",
+            closesAtUtc,communityId,processId,expectedRevision
         )==1;
     }
 
