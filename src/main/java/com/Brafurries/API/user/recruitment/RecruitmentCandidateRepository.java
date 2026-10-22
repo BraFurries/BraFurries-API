@@ -115,7 +115,13 @@ public class RecruitmentCandidateRepository {
                 + "(community_id,application_id,stage_id,answers_json) VALUES (?,?,?,?)",
             communityId,id,applicationStageId,answerJson
         );
-        return new Applied(id,versionId,"IN_PROGRESS",Instant.now());
+        Instant submitted = jdbc.queryForObject(
+            "SELECT submitted_at FROM recruitment_applications "
+                + "WHERE community_id=? AND id=?",
+            (rs,row)->rs.getObject(1,LocalDateTime.class).toInstant(ZoneOffset.UTC),
+            communityId,id
+        );
+        return new Applied(id,versionId,"IN_PROGRESS",submitted);
     }
 
     public boolean openEnrollment(
