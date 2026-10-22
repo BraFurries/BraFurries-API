@@ -10,6 +10,9 @@ public enum CommunityCapability {
     TEAM_MANAGE_STRUCTURE(true, true, false),
     TEAM_MANAGE_DEMANDS(true, true, false),
 
+    // Recruitment grants do not inherit the Team hierarchy as an authorization scope.
+    RECRUITMENT_MANAGE_PROCESSES(false, true, true),
+
     MEMBERS_VIEW(false, true, true),
     MEMBER_DETAILS_VIEW(false, true, true),
 
