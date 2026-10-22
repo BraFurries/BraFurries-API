@@ -106,7 +106,7 @@ class RecruitmentStageEditorServiceTest {
     @Test void cannotPublishUnapprovedPermutation() {
         granted();
         doThrow(new IllegalArgumentException("Duplicated IDs"))
-            .when(stages).reorder(11, 100L, List.of(1L, 1L));
+            .when(stages).reorder(11, 100L, List.of(1L, 1L), 0L);
         assertEquals(HttpStatus.BAD_REQUEST,
             assertThrows(ResponseStatusException.class,
                 () -> service.reorder(auth, 11, 100L,
@@ -116,7 +116,7 @@ class RecruitmentStageEditorServiceTest {
 
     @Test void successfulReorderIsAudited() {
         granted();
-        when(stages.reorder(11, 100L, List.of(2L, 1L))).thenReturn(true);
+        when(stages.reorder(11, 100L, List.of(2L, 1L), 0L)).thenReturn(true);
         when(processes.stages(11, 100L)).thenReturn(List.of());
         assertEquals(List.of(), service.reorder(auth, 11, 100L,
             new ReorderStagesRequest(List.of(2L, 1L))));
