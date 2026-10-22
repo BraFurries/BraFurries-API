@@ -20,6 +20,8 @@ public final class RecruitmentTrackingDtos {
         String publicStatus
     ) {}
 
+    public record ReviewProcess(Long id, String title) {}
+
     public record ReviewQueueItem(
         Long id,
         Long processId,
