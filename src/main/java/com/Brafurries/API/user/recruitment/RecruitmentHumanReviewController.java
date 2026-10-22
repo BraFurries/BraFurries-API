@@ -4,6 +4,7 @@ import static com.Brafurries.API.user.recruitment.RecruitmentHumanReviewService.
 
 import com.Brafurries.API.user.recruitment.RecruitmentHumanReviewRepository.Assessment;
 import com.Brafurries.API.user.recruitment.RecruitmentHumanReviewRepository.Assignment;
+import com.Brafurries.API.user.recruitment.RecruitmentHumanReviewRepository.ReviewableStage;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -20,6 +21,13 @@ public class RecruitmentHumanReviewController {
 
     public RecruitmentHumanReviewController(RecruitmentHumanReviewService human) {
         this.human = human;
+    }
+
+    @GetMapping("/processes/{processId}/reviewer-stages")
+    public List<ReviewableStage> reviewableStages(
+        Authentication auth, @PathVariable Integer communityId, @PathVariable Long processId
+    ) {
+        return human.stagesForProcess(auth, communityId, processId);
     }
 
     @GetMapping("/stages/{stageId}/reviewers")
