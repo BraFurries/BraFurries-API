@@ -155,6 +155,6 @@ class RecruitmentDraftJdbcMariaDbIntegrationTest {
                 + "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='BASE TABLE'",
             Integer.class
         );
-        assertEquals(112, count);
+        assertEquals(113, count);
     }
 }
