@@ -91,6 +91,14 @@ class RecruitmentStageDecisionServiceTest {
         verifyNoInteractions(repository);
     }
 
+    @Test void managerCannotReadOwnCandidateDecisionThroughPrivilegedGet() {
+        manager(77,true);
+        when(repository.candidateId(11,100L)).thenReturn(77);
+        assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
+            () -> service.find(auth,11,100L,501L)).getStatusCode());
+        verify(repository,never()).decision(anyInt(),anyLong(),anyLong());
+    }
+
     @Test void ownApplicationCannotBeDecidedByManager() {
         manager(77,true); application(77);
         assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
