@@ -31,6 +31,16 @@ public class RecruitmentStageDecisionRepository {
         return rows.isEmpty() ? null : rows.get(0);
     }
 
+    /** Avoid locking in the privileged decision GET path; no self-decision disclosure. */
+    public Integer candidateId(Integer communityId,long applicationId) {
+        var rows=jdbc.query(
+            "SELECT candidate_user_id FROM recruitment_applications "
+                + "WHERE community_id=? AND id=?",
+            (rs,n)->rs.getInt(1),communityId,applicationId
+        );
+        return rows.isEmpty()?null:rows.get(0);
+    }
+
     public List<Stage> stages(Integer communityId, long applicationId, long versionId) {
         return jdbc.query(
             "SELECT s.id,s.position,s.stage_type,ras.status,s.candidate_form_json "
