@@ -45,6 +45,16 @@ public class RecruitmentStageDecisionRepository {
         );
     }
 
+    /** Read the frozen policy only for this Community and stage of this version. */
+    public String policyJson(Integer communityId,long stageId,long versionId) {
+        var items = jdbc.query(
+            "SELECT evaluation_config_json FROM recruitment_stages "
+                + "WHERE community_id=? AND id=? AND process_version_id=?",
+            (rs,n)->rs.getString(1),communityId,stageId,versionId
+        );
+        return items.isEmpty()? null:items.get(0);
+    }
+
     public int assessmentCount(Integer communityId, long applicationId, long stageId) {
         Integer count = jdbc.queryForObject(
             "SELECT COUNT(*) FROM recruitment_stage_assessments "
