@@ -151,7 +151,7 @@ jobs:
           review=".ci/recruitment-database/flyway/sql/versioned/V20261022_003__create_recruitment_human_review.sql"
           test -s "$review"
           cat "$baseline" "$migration" "$revision" "$submission" "$review" > src/test/resources/recruitment_schema.sql
-          ./mvnw -B -Dtest=RecruitmentDraftJdbcMariaDbIntegrationTest,RecruitmentStageEditorJdbcMariaDbIntegrationTest,RecruitmentPublicationJdbcMariaDbIntegrationTest,RecruitmentCandidateJdbcMariaDbIntegrationTest,RecruitmentTrackingJdbcMariaDbIntegrationTest test
+          ./mvnw -B -Dtest=RecruitmentDraftJdbcMariaDbIntegrationTest,RecruitmentStageEditorJdbcMariaDbIntegrationTest,RecruitmentPublicationJdbcMariaDbIntegrationTest,RecruitmentCandidateJdbcMariaDbIntegrationTest,RecruitmentTrackingJdbcMariaDbIntegrationTest,RecruitmentHumanReviewJdbcMariaDbIntegrationTest test
 
       - name: Package without rerunning tests
         run: ./mvnw -DskipTests package
