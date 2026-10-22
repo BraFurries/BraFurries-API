@@ -54,6 +54,19 @@ public class RecruitmentTrackingRepository {
         return rows.isEmpty() ? null : rows.get(0);
     }
 
+    public List<ReviewProcess> reviewProcesses(Integer communityId, Integer reviewerId) {
+        return jdbc.query(
+            "SELECT DISTINCT p.id,p.title "
+                + "FROM recruitment_processes p "
+                + "JOIN recruitment_applications a "
+                + "ON a.community_id=p.community_id AND a.process_id=p.id "
+                + "WHERE p.community_id=? AND a.candidate_user_id<>? "
+                + "ORDER BY p.id DESC LIMIT 100",
+            (rs, row) -> new ReviewProcess(rs.getLong(1), rs.getString(2)),
+            communityId, reviewerId
+        );
+    }
+
     public List<ReviewQueueItem> queue(Integer communityId, Long processId, Integer reviewerId, Long beforeId) {
         return jdbc.query(
             "SELECT a.id,a.process_id,a.process_version_id,a.candidate_user_id,"
