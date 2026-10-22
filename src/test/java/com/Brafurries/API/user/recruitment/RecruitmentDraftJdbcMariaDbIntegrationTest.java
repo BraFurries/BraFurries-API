@@ -115,6 +115,28 @@ class RecruitmentDraftJdbcMariaDbIntegrationTest {
     }
 
     @Test
+    void staleEditorCannotOverwriteProcessOrAppendStage() {
+        long process = drafts.create(981001, 981001, "Seleção", null);
+        assertEquals(0L, drafts.find(981001, process).draftRevision());
+
+        assertTrue(drafts.updateDraft(981001, process, "Versão salva", null, 0L));
+        assertEquals(1L, drafts.find(981001, process).draftRevision());
+        assertFalse(drafts.updateDraft(981001, process, "Sobrescrita perdida", null, 0L));
+        assertEquals("Versão salva", drafts.find(981001, process).title());
+
+        assertThrows(org.springframework.dao.OptimisticLockingFailureException.class,
+            () -> drafts.appendDraftStage(981001, process, "Etapa obsoleta",
+                "Etapa obsoleta", StageType.ANALYSIS, 0L));
+        assertTrue(drafts.stages(981001, process).isEmpty());
+        assertEquals(1L, drafts.find(981001, process).draftRevision());
+
+        var stage = drafts.appendDraftStage(981001, process, "Nova", "Nova",
+            StageType.ANALYSIS, 1L);
+        assertNotNull(stage);
+        assertEquals(2L, drafts.find(981001, process).draftRevision());
+    }
+
+    @Test
     void twoTenantsMaintainIndependentDraftsAndStagePositions() {
         Long first = drafts.create(981001, 981001, "Process A", null);
         Long second = drafts.create(981002, 981001, "Process B", null);
