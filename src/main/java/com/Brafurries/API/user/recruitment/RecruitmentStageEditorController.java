@@ -48,8 +48,9 @@ public class RecruitmentStageEditorController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(
         Authentication auth, @PathVariable Integer communityId,
-        @PathVariable Long processId, @PathVariable Long stageId
+        @PathVariable Long processId, @PathVariable Long stageId,
+        @RequestParam Long expectedRevision
     ) {
-        service.delete(auth, communityId, processId, stageId);
+        service.delete(auth, communityId, processId, stageId, expectedRevision);
     }
 }
