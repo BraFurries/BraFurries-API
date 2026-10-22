@@ -155,6 +155,7 @@ class RecruitmentDraftJdbcMariaDbIntegrationTest {
                 + "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='BASE TABLE'",
             Integer.class
         );
-        assertEquals(115, count);
+        // Includes the stage-decision table from Database #16.
+        assertEquals(116, count);
     }
 }
