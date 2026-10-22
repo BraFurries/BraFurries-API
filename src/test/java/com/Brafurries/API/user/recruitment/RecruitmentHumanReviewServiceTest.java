@@ -62,6 +62,20 @@ class RecruitmentHumanReviewServiceTest {
         return new AssessmentTarget(501L,100L,80L,applicantId,status,"HUMAN_EVALUATION",null);
     }
 
+    @Test void onlyProcessManagersCanDiscoverVersionedStages() {
+        manager(77);
+        var stage = new ReviewableStage(501L,70L,80L,1,"PUBLISHED",2,"Entrevista","INTERVIEW");
+        when(repository.stagesForProcess(11,70L)).thenReturn(List.of(stage));
+        assertEquals(List.of(stage), service.stagesForProcess(auth,11,70L));
+        verify(repository).stagesForProcess(11,70L);
+    }
+
+    @Test void wrongCommunityCannotDiscoverReviewableStages() {
+        assertEquals(HttpStatus.NOT_FOUND, assertThrows(ResponseStatusException.class,
+            () -> service.stagesForProcess(auth,12,70L)).getStatusCode());
+        verifyNoInteractions(authorization, repository);
+    }
+
     @Test void crossTenantFeatureGateRejectsBeforeAnyQuery() {
         assertEquals(HttpStatus.NOT_FOUND, assertThrows(ResponseStatusException.class,
             () -> service.assign(auth,12,501L,new RecruitmentHumanReviewService.AssignmentRequest(99,null))
