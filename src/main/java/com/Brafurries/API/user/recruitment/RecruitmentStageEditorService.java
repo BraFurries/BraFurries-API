@@ -8,6 +8,7 @@ import com.Brafurries.API.user.CommunityAuthorizationService;
 import com.Brafurries.API.user.CommunityCapability;
 import java.util.List;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -64,11 +65,15 @@ public class RecruitmentStageEditorService {
         var candidate = forms.validate(request.candidateForm(), false, request.stageType());
         var staff = forms.validate(request.staffForm(), true, request.stageType());
         var validated = new SaveStageRequest(
-            internalName, publicName, request.stageType(), candidate, staff
+            internalName, publicName, request.stageType(), candidate, staff,
+            requireRevision(request.expectedRevision())
         );
-        StageDefinitionResponse updated = stages.save(
-            communityId, processId, stageId, validated
-        );
+        StageDefinitionResponse updated;
+        try {
+            updated = stages.save(communityId, processId, stageId, validated);
+        } catch (OptimisticLockingFailureException conflict) {
+            throw stale(conflict);
+        }
         if (updated == null) throw missingOrImmutable(communityId, processId);
         audit(actor, "RECRUITMENT_STAGE_UPDATED", stageId);
         return updated;
@@ -85,9 +90,14 @@ public class RecruitmentStageEditorService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Ordem de etapas inválida");
         }
         try {
-            if (!stages.reorder(communityId, processId, request.stageIds())) {
+            if (!stages.reorder(
+                communityId, processId, request.stageIds(),
+                requireRevision(request.expectedRevision())
+            )) {
                 throw missingOrImmutable(communityId, processId);
             }
+        } catch (OptimisticLockingFailureException conflict) {
+            throw stale(conflict);
         } catch (IllegalArgumentException invalid) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage(), invalid);
         }
@@ -97,13 +107,17 @@ public class RecruitmentStageEditorService {
 
     @Transactional
     public void delete(
-        Authentication authentication, Integer communityId, Long processId, Long stageId
+        Authentication authentication, Integer communityId, Long processId, Long stageId,
+        Long expectedRevision
     ) {
         var actor = authorize(authentication, communityId);
         try {
-            if (!stages.delete(communityId, processId, stageId)) {
+            if (!stages.delete(communityId, processId, stageId,
+                requireRevision(expectedRevision))) {
                 throw missingOrImmutable(communityId, processId);
             }
+        } catch (OptimisticLockingFailureException conflict) {
+            throw stale(conflict);
         } catch (DataIntegrityViolationException conflict) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                 "Etapa já utilizada não pode ser removida", conflict);
@@ -125,6 +139,19 @@ public class RecruitmentStageEditorService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nome de etapa inválido");
         }
         return value.strip();
+    }
+
+    private Long requireRevision(Long revision) {
+        if (revision == null || revision < 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                "Revisão do rascunho obrigatória");
+        }
+        return revision;
+    }
+
+    private ResponseStatusException stale(OptimisticLockingFailureException cause) {
+        return new ResponseStatusException(HttpStatus.CONFLICT,
+            "Rascunho desatualizado. Recarregue antes de salvar", cause);
     }
 
     private ResponseStatusException missingOrImmutable(Integer communityId, Long processId) {
