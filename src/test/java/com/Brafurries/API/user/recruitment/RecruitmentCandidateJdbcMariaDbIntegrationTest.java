@@ -67,7 +67,7 @@ class RecruitmentCandidateJdbcMariaDbIntegrationTest {
         jdbc.update("UPDATE recruitment_process_versions SET "
             + "eligibility_rules_json=?, terms_json=? WHERE community_id=981001 AND process_id=?",
             "{\"minMembershipDays\":0,\"requireVip\":false,\"requirePartner\":false}",
-            "{\"text\":\"Aceito todos os termos da seleção da BraFurries.\\"}",process);
+            "{\"text\":\"Aceito todos os termos da seleção da BraFurries.\"}",process);
         long version = publication.drafts(981001,process).get(0).id();
         assertTrue(publication.publish(981001,process,version,1L));
         return process;
