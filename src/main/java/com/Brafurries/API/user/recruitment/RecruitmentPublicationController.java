@@ -38,6 +38,15 @@ public class RecruitmentPublicationController {
         return service.configureEligibility(auth, communityId, processId, request);
     }
 
+    @PutMapping("/terms")
+    public PublicationCheck terms(
+        Authentication auth, @PathVariable Integer communityId,
+        @PathVariable Long processId,
+        @RequestBody @Valid UpdateTermsRequest request
+    ) {
+        return service.configureTerms(auth, communityId, processId, request);
+    }
+
     @PostMapping("/publish")
     public PublicationResult publish(
         Authentication auth,
