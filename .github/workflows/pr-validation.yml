@@ -130,7 +130,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: BraFurries/BraFurries-Database
-          ref: 47832d4f4ed69e83f4d9b82f2fff947b7ff8ce2b
+          ref: 564f1e2b3525cabd9df49dd660692da0b7560d15
           path: .ci/recruitment-database
           persist-credentials: false
 
@@ -139,12 +139,14 @@ jobs:
           BRF_RECRUITMENT_JDBC_INTEGRATION: "true"
         run: |
           set -euo pipefail
-          test "$(git -C .ci/recruitment-database rev-parse HEAD)" = "47832d4f4ed69e83f4d9b82f2fff947b7ff8ce2b"
+          test "$(git -C .ci/recruitment-database rev-parse HEAD)" = "564f1e2b3525cabd9df49dd660692da0b7560d15"
           baseline=".ci/database-baseline/flyway/sql/baseline/B20261020_001__adopt_production_schema.sql"
           migration=".ci/recruitment-database/flyway/sql/versioned/V20261021_001__create_recruitment_foundation.sql"
+          revision=".ci/recruitment-database/flyway/sql/versioned/V20261022_001__add_recruitment_draft_revision.sql"
           test "$(grep -c '^CREATE TABLE ' "$baseline")" -eq 107
           test "$(grep -c '^CREATE TABLE ' "$migration")" -eq 5
-          cat "$baseline" "$migration" > src/test/resources/recruitment_schema.sql
+          test "$(grep -c '^ALTER TABLE ' "$revision")" -eq 1
+          cat "$baseline" "$migration" "$revision" > src/test/resources/recruitment_schema.sql
           ./mvnw -B -Dtest=RecruitmentDraftJdbcMariaDbIntegrationTest,RecruitmentStageEditorJdbcMariaDbIntegrationTest test
 
       - name: Package without rerunning tests
