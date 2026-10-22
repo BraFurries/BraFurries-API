@@ -2,6 +2,8 @@ package com.Brafurries.API.user.recruitment;
 
 import static com.Brafurries.API.user.recruitment.RecruitmentTrackingDtos.*;
 
+import com.Brafurries.API.entity.community.CommunityAuditLog;
+import com.Brafurries.API.repository.community.CommunityAuditLogRepository;
 import com.Brafurries.API.user.CommunityAuthorizationService;
 import com.Brafurries.API.user.CommunityCapability;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -24,17 +26,20 @@ public class RecruitmentTrackingService {
     private final CommunityAuthorizationService authorization;
     private final RecruitmentTrackingRepository repository;
     private final ObjectMapper json;
+    private final CommunityAuditLogRepository audits;
 
     public RecruitmentTrackingService(
         RecruitmentFeatureGate gate,
         CommunityAuthorizationService authorization,
         RecruitmentTrackingRepository repository,
-        ObjectMapper json
+        ObjectMapper json,
+        CommunityAuditLogRepository audits
     ) {
         this.gate = gate;
         this.authorization = authorization;
         this.repository = repository;
         this.json = json;
+        this.audits = audits;
     }
 
     @Transactional(readOnly = true)
@@ -68,7 +73,7 @@ public class RecruitmentTrackingService {
         );
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public ReviewApplication reviewDetail(
         Authentication auth, Integer communityId, Long applicationId
     ) {
@@ -93,10 +98,18 @@ public class RecruitmentTrackingService {
                 throw new IllegalStateException("Respostas persistidas não são um objeto");
             }
         }
-        return new ReviewApplication(
+        var result = new ReviewApplication(
             item, repository.reviewStages(communityId, applicationId),
             raw == null ? null : raw.stageId(), answers
         );
+        var log = new CommunityAuditLog();
+        log.setCommunity(reviewer.community());
+        log.setActorUser(reviewer.user());
+        log.setAction("RECRUITMENT_APPLICATION_VIEWED");
+        log.setTargetType("RECRUITMENT_APPLICATION");
+        log.setTargetId(applicationId.toString());
+        audits.save(log);
+        return result;
     }
 
     private CommunityAuthorizationService.CommunityAccessContext candidate(
