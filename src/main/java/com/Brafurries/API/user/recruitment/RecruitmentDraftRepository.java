@@ -72,14 +72,14 @@ public class RecruitmentDraftRepository {
     public ProcessResponse find(Integer communityId, Long processId) {
         List<ProcessResponse> values = jdbc.query(
             "SELECT p.id,p.community_id,p.title,p.description,p.status,p.visibility,"
-                + "p.enrollment_status,COALESCE(MAX(v.version_number),0) AS draft_version "
+                + "p.enrollment_status,p.draft_revision,COALESCE(MAX(v.version_number),0) AS draft_version "
                 + "FROM recruitment_processes p "
                 + "LEFT JOIN recruitment_process_versions v "
                 + "ON v.community_id=p.community_id AND v.process_id=p.id "
                 + "AND v.status='DRAFT' "
                 + "WHERE p.community_id=? AND p.id=? "
                 + "GROUP BY p.id,p.community_id,p.title,p.description,p.status,"
-                + "p.visibility,p.enrollment_status",
+                + "p.visibility,p.enrollment_status,p.draft_revision",
             PROCESS_MAPPER, communityId, processId
         );
         return values.isEmpty() ? null : values.get(0);
