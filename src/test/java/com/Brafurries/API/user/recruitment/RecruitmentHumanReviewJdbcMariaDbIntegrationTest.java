@@ -110,6 +110,33 @@ class RecruitmentHumanReviewJdbcMariaDbIntegrationTest {
         assertFalse(repository.assignedToStage(981001,984001,983001,981002));
     }
 
+    @Test void roleDelegationFollowsLiveMembershipAndActiveTeamRoles() {
+        jdbc.update(
+            "INSERT INTO community_team_roles (id,community_id,name,active) "
+                + "VALUES (991001,981001,'Recruitment reviewers',1),"
+                + "(991002,981002,'Other tenant reviewers',1)"
+        );
+        assertTrue(repository.eligibleRole(981001,991001));
+        assertFalse(repository.eligibleRole(981001,991002));
+        var stage = repository.stage(981001,984001L);
+        assertNotNull(stage);
+        repository.assign(981001,stage,null,991001,981002);
+        assertFalse(repository.assignedToStage(981001,984001,983001,981002));
+        jdbc.update(
+            "INSERT INTO community_team_role_assignments (community_id,role_id,user_id) "
+                + "VALUES (981001,991001,981002)"
+        );
+        assertTrue(repository.assignedToStage(981001,984001,983001,981002));
+        jdbc.update(
+            "UPDATE community_team_roles SET active=0 "
+                + "WHERE community_id=981001 AND id=991001"
+        );
+        assertFalse(repository.assignedToStage(981001,984001,983001,981002));
+        assertThrows(DataIntegrityViolationException.class, () ->
+            repository.assign(981001,stage,null,991002,981002)
+        );
+    }
+
     @Test void humanAssessmentsAreIndividualAndUniqueForStage() {
         var target = repository.lockAssessmentTarget(981001,985001L,984001L);
         assertNotNull(target);
