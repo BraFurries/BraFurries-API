@@ -103,6 +103,46 @@ public class RecruitmentHumanReviewService {
             "RECRUITMENT_STAGE_REVIEWER", assignmentId.toString());
     }
 
+    /**
+     * Only the designated reviewer sees the Staff questions; strip any unexpected
+     * answer keys and grading metadata from a malformed historical JSON document.
+     */
+    @Transactional(readOnly = true)
+    public RecruitmentFormDefinition assessmentForm(
+        Authentication auth, Integer communityId, Long applicationId, Long stageId
+    ) {
+        var actor = requireReviewer(auth, communityId);
+        if (applicationId == null || applicationId <= 0 || stageId == null || stageId <= 0) {
+            throw invalid("Candidatura ou etapa inválida");
+        }
+        var target = repository.assessmentTarget(communityId, applicationId, stageId, false);
+        if (target == null) throw missing();
+        if (target.candidateUserId() == actor.user().getId()) {
+            throw forbidden("Não é possível avaliar a própria candidatura");
+        }
+        if (!repository.assignedToStage(
+            communityId, target.stageId(), target.processVersionId(), actor.user().getId()
+        )) throw missing();
+        if (!List.of("AWAITING_REVIEW", "IN_PROGRESS").contains(target.stageStatus())
+            || "AUTO_EVALUATION".equals(target.stageType())) {
+            throw conflict("Esta etapa não está disponível para avaliação");
+        }
+        if (target.staffFormJson() == null) {
+            return new RecruitmentFormDefinition(List.of());
+        }
+        try {
+            var form = mapper.readValue(target.staffFormJson(), RecruitmentFormDefinition.class);
+            if (form == null || form.questions() == null) throw new IllegalStateException("Formulário interno inválido");
+            var safe = form.questions().stream().map(q -> new RecruitmentFormDefinition.Question(
+                q.id(), q.label(), q.type(), q.required(), q.options(), q.minValue(),
+                q.maxValue(), null, List.of()
+            )).toList();
+            return new RecruitmentFormDefinition(safe);
+        } catch (JsonProcessingException invalid) {
+            throw new IllegalStateException("Formulário de Staff persistido inválido", invalid);
+        }
+    }
+
     @Transactional
     public Assessment assess(
         Authentication auth, Integer communityId, Long applicationId, Long stageId,
