@@ -86,6 +86,7 @@ class CommunityAuthorizationServiceTest {
             "TEAM_ASSIGN_MEMBERS",
             "TEAM_MANAGE_STRUCTURE",
             "TEAM_MANAGE_DEMANDS",
+            "RECRUITMENT_MANAGE_PROCESSES",
             "MEMBERS_VIEW",
             "MEMBER_DETAILS_VIEW",
             "MEMBER_NOTES_VIEW",
