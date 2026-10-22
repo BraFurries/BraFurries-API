@@ -154,7 +154,7 @@ public class RecruitmentPublicationService {
         var versions = repository.drafts(communityId, processId);
         if (versions.size() != 1) {
             blockers.add("É necessária exatamente uma versão de rascunho");
-            return new PublicationCheck(processId, null, process.revision(), false, 0, blockers, null);
+            return new PublicationCheck(processId, null, process.revision(), false, 0, blockers, null, null);
         }
         var version = versions.get(0);
         EligibilityRules configuredEligibility = null;
@@ -187,6 +187,16 @@ public class RecruitmentPublicationService {
             }
         }
 
+        String configuredTermsText = null;
+        if (version.termsJson() != null) {
+            try {
+                TermsText terms = mapper.readValue(version.termsJson(), TermsText.class);
+                configuredTermsText = terms == null ? null : terms.text();
+            } catch (JsonProcessingException ignored) {
+                // Already reported as a publication blocker above.
+            }
+        }
+
         var stages = repository.stages(communityId, processId, version.id());
         if (stages.isEmpty()) blockers.add("Adicione ao menos uma etapa");
         if (stages.size() > 60) blockers.add("O processo excede 60 etapas");
@@ -212,7 +222,7 @@ public class RecruitmentPublicationService {
         return new PublicationCheck(
             processId, version.id(), process.revision(),
             blockers.isEmpty(), stages.size(), List.copyOf(blockers),
-            configuredEligibility
+            configuredEligibility, configuredTermsText
         );
     }
 
