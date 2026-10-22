@@ -31,7 +31,7 @@ public class RecruitmentStageEditorRepository {
         var rows = jdbc.query(
             "SELECT s.id,s.process_id,s.process_version_id,s.position,"
                 + "s.internal_name,s.public_name,s.stage_type,"
-                + "s.candidate_form_json,s.staff_form_json "
+                + "s.candidate_form_json,s.staff_form_json,p.draft_revision "
                 + "FROM recruitment_stages s JOIN recruitment_process_versions v "
                 + "ON v.community_id=s.community_id AND v.process_id=s.process_id "
                 + "AND v.id=s.process_version_id "
@@ -45,7 +45,8 @@ public class RecruitmentStageEditorRepository {
                 rs.getString("internal_name"), rs.getString("public_name"),
                 StageType.valueOf(rs.getString("stage_type")),
                 readForm(rs.getString("candidate_form_json")),
-                readForm(rs.getString("staff_form_json"))
+                readForm(rs.getString("staff_form_json")),
+                rs.getLong("draft_revision")
             ),
             communityId, processId, stageId
         );
@@ -55,7 +56,7 @@ public class RecruitmentStageEditorRepository {
     public StageDefinitionResponse save(
         Integer communityId, Long processId, Long stageId, SaveStageRequest definition
     ) {
-        Long version = lockDraftVersion(communityId, processId);
+        Long version = lockDraftVersion(communityId, processId, definition.expectedRevision());
         if (version == null) return null;
 
         int changed = jdbc.update(
@@ -73,8 +74,8 @@ public class RecruitmentStageEditorRepository {
      * Exact permutation only. Two-pass position shifting avoids unique-key
      * collisions on MariaDB even for swaps (1 -> 2, 2 -> 1).
      */
-    public boolean reorder(Integer communityId, Long processId, List<Long> order) {
-        Long version = lockDraftVersion(communityId, processId);
+    public boolean reorder(Integer communityId, Long processId, List<Long> order, Long expectedRevision) {
+        Long version = lockDraftVersion(communityId, processId, expectedRevision);
         if (version == null) return false;
         List<Long> existing = stageIds(communityId, version);
         if (existing.size() != order.size()
@@ -87,8 +88,8 @@ public class RecruitmentStageEditorRepository {
         return true;
     }
 
-    public boolean delete(Integer communityId, Long processId, Long stageId) {
-        Long version = lockDraftVersion(communityId, processId);
+    public boolean delete(Integer communityId, Long processId, Long stageId, Long expectedRevision) {
+        Long version = lockDraftVersion(communityId, processId, expectedRevision);
         if (version == null) return false;
         int deleted = jdbc.update(
             "DELETE FROM recruitment_stages WHERE community_id=? "
@@ -101,7 +102,7 @@ public class RecruitmentStageEditorRepository {
     }
 
     /** Locks the parent for serializable writer order under normal READ COMMITTED/REPEATABLE READ. */
-    private Long lockDraftVersion(Integer communityId, Long processId) {
+    private Long lockDraftVersion(Integer communityId, Long processId, Long expectedRevision) {
         var process = jdbc.query(
             "SELECT id FROM recruitment_processes "
                 + "WHERE community_id=? AND id=? AND status='DRAFT' FOR UPDATE",
@@ -114,7 +115,17 @@ public class RecruitmentStageEditorRepository {
                 + "ORDER BY version_number DESC LIMIT 1 FOR UPDATE",
             (rs, row) -> rs.getLong(1), communityId, processId
         );
-        return versions.isEmpty() ? null : versions.get(0);
+        if (versions.isEmpty()) return null;
+        if (jdbc.update(
+            "UPDATE recruitment_processes SET draft_revision=draft_revision+1 "
+                + "WHERE community_id=? AND id=? AND status='DRAFT' AND draft_revision=?",
+            communityId, processId, expectedRevision
+        ) != 1) {
+            throw new org.springframework.dao.OptimisticLockingFailureException(
+                "O rascunho foi alterado por outro gestor"
+            );
+        }
+        return versions.get(0);
     }
 
     private List<Long> stageIds(Integer communityId, Long versionId) {
