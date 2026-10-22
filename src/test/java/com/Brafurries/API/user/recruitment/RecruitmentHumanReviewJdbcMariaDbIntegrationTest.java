@@ -92,6 +92,16 @@ class RecruitmentHumanReviewJdbcMariaDbIntegrationTest {
         );
     }
 
+    @Test void stageDiscoveryIsVersionScopedAndTenantScoped() {
+        var stages = repository.stagesForProcess(981001, 982001L);
+        assertEquals(1, stages.size());
+        assertEquals(984001L, stages.get(0).stageId());
+        assertEquals("PUBLISHED", stages.get(0).versionStatus());
+        assertEquals(1, stages.get(0).versionNumber());
+        assertEquals(0, repository.stagesForProcess(981002, 982001L).size());
+        assertEquals(0, repository.stagesForProcess(981001, 982002L).size());
+    }
+
     @Test void designationIsRequiredAndCannotCrossCommunity() {
         assertFalse(repository.assignedToStage(981001,984001,983001,981002));
         assertTrue(repository.eligiblePerson(981001,981002));
