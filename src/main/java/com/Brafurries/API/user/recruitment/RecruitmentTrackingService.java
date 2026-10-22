@@ -92,7 +92,9 @@ public class RecruitmentTrackingService {
         if (item.candidateUserId().equals(reviewer.user().getId())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Não é possível revisar a própria candidatura");
         }
-        var raw = repository.candidateAnswers(communityId, applicationId);
+        // A global reviewer grant alone must not reveal candidate answers.
+        if (!repository.canReview(communityId, applicationId, reviewer.user().getId())) throw missing();
+        var raw = repository.candidateAnswers(communityId, applicationId, reviewer.user().getId());
         JsonNode answers = null;
         if (raw != null) {
             try {
@@ -105,7 +107,7 @@ public class RecruitmentTrackingService {
             }
         }
         var result = new ReviewApplication(
-            item, repository.reviewStages(communityId, applicationId),
+            item, repository.reviewStages(communityId, applicationId, reviewer.user().getId()),
             raw == null ? null : raw.stageId(), answers
         );
         var log = new CommunityAuditLog();
