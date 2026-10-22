@@ -78,7 +78,9 @@ class RecruitmentPublicationServiceTest {
         ));
         when(drafts.stages(tenant, processId, 70L)).thenReturn(List.of(
             new RecruitmentPublicationRepository.DraftStage(
-                80L, 1, "APPLICATION", null, null
+                80L, 1, "APPLICATION",
+                "{\"questions\":[{\"id\":\"why\",\"label\":\"Motivação\",\"type\":\"SHORT_TEXT\",\"required\":true}]}",
+                null
             ),
             new RecruitmentPublicationRepository.DraftStage(
                 81L, 2, "DECISION", null, null
@@ -189,6 +191,27 @@ class RecruitmentPublicationServiceTest {
             (CommunityAuditLog event) -> event.getAction().equals("RECRUITMENT_PROCESS_PUBLISHED")
                 && event.getTargetId().equals("50")
         ));
+    }
+
+    @Test
+    void publishedDraftMustHaveAnApplicationFormInFirstStage() {
+        publisher();
+        when(drafts.lockProcess(tenant, processId)).thenReturn(
+            new RecruitmentPublicationRepository.DraftProcess(processId, 0L, "DRAFT")
+        );
+        when(drafts.drafts(tenant, processId)).thenReturn(List.of(
+            new RecruitmentPublicationRepository.DraftVersion(
+                70L, "DRAFT",
+                "{\"minMembershipDays\":0,\"requireVip\":false,\"requirePartner\":false}",
+                "{\"text\":\"Aceito e conheço as condições da seleção BraFurries.\"}"
+            )
+        ));
+        when(drafts.stages(tenant, processId, 70L)).thenReturn(List.of(
+            new RecruitmentPublicationRepository.DraftStage(80L, 1, "ANALYSIS", null, null)
+        ));
+        assertEquals(HttpStatus.CONFLICT, assertThrows(ResponseStatusException.class,
+            () -> service.publish(auth, tenant, processId, new PublishRequest(0L))).getStatusCode());
+        verifyNoInteractions(audits);
     }
 
     @Test
