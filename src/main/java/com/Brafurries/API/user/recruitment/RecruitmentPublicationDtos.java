@@ -25,6 +25,13 @@ public final class RecruitmentPublicationDtos {
         @NotNull @Valid EligibilityRules eligibility
     ) {}
 
+    public record TermsText(String text) {}
+
+    public record UpdateTermsRequest(
+        @NotNull @PositiveOrZero Long expectedRevision,
+        @NotNull String termsText
+    ) {}
+
     public record PublishRequest(@NotNull @PositiveOrZero Long expectedRevision) {}
 
     public record PublicationCheck(
