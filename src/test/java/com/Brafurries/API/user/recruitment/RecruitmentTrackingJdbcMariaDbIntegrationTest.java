@@ -56,7 +56,8 @@ class RecruitmentTrackingJdbcMariaDbIntegrationTest {
         );
         jdbc.update(
             "INSERT INTO user_community_status (community_id,user_id,member_since,is_present,banned) "
-                + "VALUES (981001,981001,UTC_TIMESTAMP(),1,0),"\n                + "(981001,981002,UTC_TIMESTAMP(),1,0)"
+                + "VALUES (981001,981001,UTC_TIMESTAMP(),1,0),"
+                + "(981001,981002,UTC_TIMESTAMP(),1,0)"
         );
     }
 
