@@ -203,7 +203,7 @@ class RecruitmentStageDecisionServiceTest {
         when(repository.stages(11,100L,80L)).thenReturn(List.of(
             stage(501L,1,"APPLICATION","AWAITING_REVIEW",null)));
         when(repository.policyJson(11,501L,80L)).thenReturn(
-            "{\\"reviewMode\\":\\"COLLECTIVE\\",\\"decisionMode\\":\\"MANUAL\\",\\"minimumAssessments\\":3}"
+            "{\"reviewMode\":\"COLLECTIVE\",\"decisionMode\":\"MANUAL\",\"minimumAssessments\":3}"
         );
         when(repository.assessmentCount(11,100L,501L)).thenReturn(2);
         assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
@@ -218,7 +218,7 @@ class RecruitmentStageDecisionServiceTest {
         when(repository.stages(11,100L,80L)).thenReturn(List.of(
             stage(501L,1,"APPLICATION","AWAITING_REVIEW",null)));
         when(repository.policyJson(11,501L,80L)).thenReturn(
-            "{\\"reviewMode\\":\\"COLLECTIVE\\",\\"decisionMode\\":\\"AUTOMATIC_VOTE\\",\\"minimumAssessments\\":2}"
+            "{\"reviewMode\":\"COLLECTIVE\",\"decisionMode\":\"AUTOMATIC_VOTE\",\"minimumAssessments\":2}"
         );
         assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
             () -> service.decide(auth,11,100L,501L,
