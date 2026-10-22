@@ -56,7 +56,7 @@ class RecruitmentTrackingJdbcMariaDbIntegrationTest {
         );
         jdbc.update(
             "INSERT INTO user_community_status (community_id,user_id,member_since,is_present,banned) "
-                + "VALUES (981001,981001,UTC_TIMESTAMP(),1,0)"
+                + "VALUES (981001,981001,UTC_TIMESTAMP(),1,0),"\n                + "(981001,981002,UTC_TIMESTAMP(),1,0)"
         );
     }
 
@@ -76,6 +76,21 @@ class RecruitmentTrackingJdbcMariaDbIntegrationTest {
             candidates.stageIds(981001,process,version),
             "{\"why\":\"Quero contribuir\"}","a".repeat(64)
         ).applicationId();
+    }
+
+    private void assignReviewer(long applicationId) {
+        var instance = jdbc.queryForMap(
+            "SELECT process_version_id,stage_id FROM recruitment_application_stages "
+                + "WHERE community_id=? AND application_id=?",
+            981001, applicationId
+        );
+        jdbc.update(
+            "INSERT INTO recruitment_stage_reviewers "
+                + "(community_id,process_version_id,stage_id,user_id,created_by_user_id) "
+                + "VALUES (?,?,?,?,?)",
+            981001, ((Number) instance.get("process_version_id")).longValue(),
+            ((Number) instance.get("stage_id")).longValue(), 981002, 981002
+        );
     }
 
     @Test void ownReceiptsNeverExposeInternalStageOrApplicationStatus() {
@@ -100,6 +115,10 @@ class RecruitmentTrackingJdbcMariaDbIntegrationTest {
         long applicationId = submitOne();
         long processId = tracking.reviewById(981001,applicationId).processId();
 
+        assertEquals(0,tracking.reviewProcesses(981001,981002).size());
+        assertFalse(tracking.canReview(981001,applicationId,981002));
+        assignReviewer(applicationId);
+        assertTrue(tracking.canReview(981001,applicationId,981002));
         assertEquals(1,tracking.reviewProcesses(981001,981002).size());
         assertEquals(0,tracking.reviewProcesses(981001,981001).size());
         assertEquals(0,tracking.reviewProcesses(981002,981002).size());
@@ -112,21 +131,22 @@ class RecruitmentTrackingJdbcMariaDbIntegrationTest {
         assertEquals("IN_PROGRESS",item.internalStatus());
         assertNull(tracking.reviewById(981002,applicationId));
 
-        var stages = tracking.reviewStages(981001,applicationId);
+        var stages = tracking.reviewStages(981001,applicationId,981002);
         assertEquals(1,stages.size());
         assertEquals("AWAITING_REVIEW",stages.get(0).internalStatus());
-        assertEquals(0,tracking.reviewStages(981002,applicationId).size());
+        assertEquals(0,tracking.reviewStages(981002,applicationId,981002).size());
 
-        var answers = tracking.candidateAnswers(981001,applicationId);
+        var answers = tracking.candidateAnswers(981001,applicationId,981002);
         assertNotNull(answers);
         assertEquals("{\"why\":\"Quero contribuir\"}",answers.json());
         assertEquals(stages.get(0).stageId(),answers.stageId());
-        assertNull(tracking.candidateAnswers(981002,applicationId));
+        assertNull(tracking.candidateAnswers(981002,applicationId,981002));
     }
 
     @Test void paginatedQueueUsesStableIdsAndCannotEnumerateCrossProcess() {
         long first = submitOne();
         long processId = tracking.reviewById(981001,first).processId();
+        assignReviewer(first);
         assertEquals(1,tracking.queue(981001,processId,981002,null).size());
         assertEquals(0,tracking.queue(981001,processId,981002,first).size());
         assertEquals(0,tracking.own(981001,981001,first).size());
