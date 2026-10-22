@@ -37,13 +37,13 @@ public class RecruitmentDraftService {
 
     @Transactional(readOnly = true)
     public List<ProcessResponse> list(Authentication auth, Integer communityId) {
-        requireManager(auth, communityId);
+        requireViewer(auth, communityId);
         return drafts.list(communityId);
     }
 
     @Transactional(readOnly = true)
     public ProcessDraftResponse detail(Authentication auth, Integer communityId, Long id) {
-        requireManager(auth, communityId);
+        requireViewer(auth, communityId);
         ProcessResponse process = requireProcess(communityId, id);
         return new ProcessDraftResponse(process, drafts.stages(communityId, id));
     }
@@ -120,6 +120,18 @@ public class RecruitmentDraftService {
         }
         audit(actor, "RECRUITMENT_STAGE_ADDED", stage.id());
         return stage;
+    }
+
+    private CommunityAuthorizationService.CommunityAccessContext requireViewer(
+        Authentication auth, Integer communityId
+    ) {
+        gate.requireEnabledFor(communityId);
+        var context = authorization.resolve(auth, communityId);
+        if (!context.capabilities().contains(CommunityCapability.RECRUITMENT_MANAGE_PROCESSES)
+            && !context.capabilities().contains(CommunityCapability.RECRUITMENT_PUBLISH_PROCESSES)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Permissão insuficiente");
+        }
+        return context;
     }
 
     private CommunityAuthorizationService.CommunityAccessContext requireManager(
