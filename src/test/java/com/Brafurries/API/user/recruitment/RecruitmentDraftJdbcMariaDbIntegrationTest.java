@@ -70,9 +70,9 @@ class RecruitmentDraftJdbcMariaDbIntegrationTest {
         assertEquals(1, drafts.list(981001).size());
         assertEquals(List.of(), drafts.list(981002));
 
-        assertTrue(drafts.updateDraft(981001, id, "Renamed", "Test"));
+        assertTrue(drafts.updateDraft(981001, id, "Renamed", "Test", 0L));
         assertEquals("Renamed", drafts.find(981001, id).title());
-        assertFalse(drafts.updateDraft(981002, id, "Cross-tenant", null));
+        assertFalse(drafts.updateDraft(981002, id, "Cross-tenant", null, 0L));
         assertNull(drafts.find(981002, id));
         assertEquals("Renamed", drafts.find(981001, id).title());
 
@@ -80,17 +80,17 @@ class RecruitmentDraftJdbcMariaDbIntegrationTest {
             "UPDATE recruitment_processes SET status='ACTIVE' "
                 + "WHERE id=? AND community_id=981001", id
         );
-        assertFalse(drafts.updateDraft(981001, id, "Published override", null));
+        assertFalse(drafts.updateDraft(981001, id, "Published override", null, 1L));
     }
 
     @Test
     void appendsSequentialStagesAndBlocksWrongTenantAndPublishedMutation() {
         Long processId = drafts.create(981001, 981001, "Process A", null);
         StageResponse first = drafts.appendDraftStage(
-            981001, processId, "Internal analysis", "In review", StageType.ANALYSIS
+            981001, processId, "Internal analysis", "In review", StageType.ANALYSIS, 0L
         );
         StageResponse second = drafts.appendDraftStage(
-            981001, processId, "Internal interview", "Interview", StageType.INTERVIEW
+            981001, processId, "Internal interview", "Interview", StageType.INTERVIEW, 1L
         );
         assertNotNull(first);
         assertNotNull(second);
@@ -101,7 +101,7 @@ class RecruitmentDraftJdbcMariaDbIntegrationTest {
         assertEquals(List.of(first, second), drafts.stages(981001, processId));
         assertEquals(List.of(), drafts.stages(981002, processId));
         assertNull(drafts.appendDraftStage(
-            981002, processId, "Intruder", "Intruder", StageType.CUSTOM
+            981002, processId, "Intruder", "Intruder", StageType.CUSTOM, 0L
         ));
 
         jdbc.update(
@@ -109,7 +109,7 @@ class RecruitmentDraftJdbcMariaDbIntegrationTest {
                 + "WHERE community_id=981001 AND id=?", processId
         );
         assertNull(drafts.appendDraftStage(
-            981001, processId, "Too late", "Too late", StageType.CUSTOM
+            981001, processId, "Too late", "Too late", StageType.CUSTOM, 2L
         ));
         assertEquals(2, drafts.stages(981001, processId).size());
     }
@@ -120,10 +120,10 @@ class RecruitmentDraftJdbcMariaDbIntegrationTest {
         Long second = drafts.create(981002, 981001, "Process B", null);
         assertNotEquals(first, second);
         assertEquals(1, drafts.appendDraftStage(
-            981001, first, "A", "A", StageType.ANALYSIS
+            981001, first, "A", "A", StageType.ANALYSIS, 0L
         ).position());
         assertEquals(1, drafts.appendDraftStage(
-            981002, second, "B", "B", StageType.ANALYSIS
+            981002, second, "B", "B", StageType.ANALYSIS, 0L
         ).position());
         assertEquals("Process B", drafts.find(981002, second).title());
         assertNull(drafts.find(981002, first));
