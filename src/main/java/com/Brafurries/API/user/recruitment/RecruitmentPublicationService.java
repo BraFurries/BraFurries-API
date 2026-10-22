@@ -124,9 +124,10 @@ public class RecruitmentPublicationService {
         var versions = repository.drafts(communityId, processId);
         if (versions.size() != 1) {
             blockers.add("É necessária exatamente uma versão de rascunho");
-            return new PublicationCheck(processId, null, process.revision(), false, 0, blockers);
+            return new PublicationCheck(processId, null, process.revision(), false, 0, blockers, null);
         }
         var version = versions.get(0);
+        EligibilityRules configuredEligibility = null;
         if (version.eligibilityJson() == null || version.eligibilityJson().isBlank()) {
             blockers.add("Configure os requisitos de elegibilidade");
         } else {
@@ -135,6 +136,7 @@ public class RecruitmentPublicationService {
                     version.eligibilityJson(), EligibilityRules.class
                 );
                 validateEligibility(rules);
+                configuredEligibility = rules;
             } catch (JsonProcessingException | ResponseStatusException invalid) {
                 blockers.add("As regras de elegibilidade são inválidas");
             }
@@ -164,7 +166,8 @@ public class RecruitmentPublicationService {
         }
         return new PublicationCheck(
             processId, version.id(), process.revision(),
-            blockers.isEmpty(), stages.size(), List.copyOf(blockers)
+            blockers.isEmpty(), stages.size(), List.copyOf(blockers),
+            configuredEligibility
         );
     }
 
