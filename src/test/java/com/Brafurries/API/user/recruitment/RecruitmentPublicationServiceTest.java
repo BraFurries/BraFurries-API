@@ -72,7 +72,8 @@ class RecruitmentPublicationServiceTest {
         when(drafts.drafts(tenant, processId)).thenReturn(List.of(
             new RecruitmentPublicationRepository.DraftVersion(
                 70L, "DRAFT",
-                "{\"minMembershipDays\":30,\"requireVip\":false,\"requirePartner\":false}"
+                "{\"minMembershipDays\":30,\"requireVip\":false,\"requirePartner\":false}",
+                "{\"text\":\"Eu li e aceito os termos de inscrição na seleção BraFurries.\"}"
             )
         ));
         when(drafts.stages(tenant, processId, 70L)).thenReturn(List.of(
