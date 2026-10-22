@@ -106,6 +106,16 @@ class RecruitmentTrackingServiceTest {
         verify(repository).reviewProcesses(11,99);
     }
 
+    @Test void ownerWithoutActiveMembershipCannotBrowsePrivilegedTriage() {
+        when(authorization.requireCapability(auth,11,
+            CommunityCapability.RECRUITMENT_REVIEW_APPLICATIONS))
+            .thenReturn(actor(77,false,Set.of(CommunityCapability.RECRUITMENT_REVIEW_APPLICATIONS)));
+        assertEquals(HttpStatus.NOT_FOUND,
+            assertThrows(ResponseStatusException.class, () ->
+                service.reviewProcesses(auth,11)).getStatusCode());
+        verifyNoInteractions(repository);
+    }
+
     @Test void reviewersGetTenantAndSelfExcludedQueue() {
         when(authorization.requireCapability(auth,11,
             CommunityCapability.RECRUITMENT_REVIEW_APPLICATIONS))
