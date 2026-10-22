@@ -33,7 +33,8 @@ public final class RecruitmentPublicationDtos {
         Long draftRevision,
         boolean ready,
         int stageCount,
-        List<String> blockers
+        List<String> blockers,
+        EligibilityRules configuredEligibility
     ) {}
 
     /** Admin-only: does not imply intake is open or candidates can see the process. */
