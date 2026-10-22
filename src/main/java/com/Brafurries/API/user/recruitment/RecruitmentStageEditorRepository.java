@@ -7,6 +7,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -77,7 +78,7 @@ public class RecruitmentStageEditorRepository {
         if (version == null) return false;
         List<Long> existing = stageIds(communityId, version);
         if (existing.size() != order.size()
-            || order.contains(null)
+            || order.stream().anyMatch(Objects::isNull)
             || new HashSet<>(order).size() != order.size()
             || !Set.copyOf(existing).equals(Set.copyOf(order))) {
             throw new IllegalArgumentException("Ordem deve conter cada etapa exatamente uma vez");
