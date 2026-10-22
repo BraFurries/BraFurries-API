@@ -24,8 +24,13 @@ public class RecruitmentPublicationRepository {
     }
     public record DraftStage(
         Long id, int position, String stageType,
-        String candidateFormJson, String staffFormJson
-    ) {}
+        String candidateFormJson, String staffFormJson, String evaluationConfigJson
+    ) {
+        public DraftStage(Long id, int position, String stageType,
+                          String candidateFormJson, String staffFormJson) {
+            this(id,position,stageType,candidateFormJson,staffFormJson,null);
+        }
+    }
 
     private static final RowMapper<DraftProcess> PROCESS_MAPPER = (rs, row) ->
         new DraftProcess(rs.getLong("id"), rs.getLong("draft_revision"), rs.getString("status"));
@@ -62,12 +67,13 @@ public class RecruitmentPublicationRepository {
 
     public List<DraftStage> stages(Integer communityId, Long processId, Long versionId) {
         return jdbc.query(
-            "SELECT id,position,stage_type,candidate_form_json,staff_form_json "
+            "SELECT id,position,stage_type,candidate_form_json,staff_form_json,evaluation_config_json "
                 + "FROM recruitment_stages WHERE community_id=? AND process_id=? "
                 + "AND process_version_id=? ORDER BY position,id",
             (rs, row) -> new DraftStage(
                 rs.getLong("id"), rs.getInt("position"), rs.getString("stage_type"),
-                rs.getString("candidate_form_json"), rs.getString("staff_form_json")
+                rs.getString("candidate_form_json"), rs.getString("staff_form_json"),
+                rs.getString("evaluation_config_json")
             ), communityId, processId, versionId
         );
     }
