@@ -149,7 +149,7 @@ jobs:
           submission=".ci/recruitment-database/flyway/sql/versioned/V20261022_002__create_recruitment_application_submissions.sql"
           test "$(grep -c '^CREATE TABLE ' "$submission")" -eq 1
           cat "$baseline" "$migration" "$revision" "$submission" > src/test/resources/recruitment_schema.sql
-          ./mvnw -B -Dtest=RecruitmentDraftJdbcMariaDbIntegrationTest,RecruitmentStageEditorJdbcMariaDbIntegrationTest,RecruitmentPublicationJdbcMariaDbIntegrationTest,RecruitmentCandidateJdbcMariaDbIntegrationTest test
+          ./mvnw -B -Dtest=RecruitmentDraftJdbcMariaDbIntegrationTest,RecruitmentStageEditorJdbcMariaDbIntegrationTest,RecruitmentPublicationJdbcMariaDbIntegrationTest,RecruitmentCandidateJdbcMariaDbIntegrationTest,RecruitmentTrackingJdbcMariaDbIntegrationTest test
 
       - name: Package without rerunning tests
         run: ./mvnw -DskipTests package
