@@ -117,7 +117,7 @@ class RecruitmentStageEditorJdbcMariaDbIntegrationTest {
     @Test
     void refusesBadPermutationsAndMutationAfterVersionPublished() {
         long process = drafts.create(981001, 981001, "Moderadores", null);
-        var first = drafts.appendDraftStage(981001, process, "Primeira", "Primeira", StageType.ANALYSIS);
+        var first = drafts.appendDraftStage(981001, process, "Primeira", "Primeira", StageType.ANALYSIS, 0L);
         var second = drafts.appendDraftStage(981001, process, "Segunda", "Segunda", StageType.ANALYSIS, 1L);
         assertThrows(IllegalArgumentException.class,
             () -> stages.reorder(981001, process, List.of(first.id(), first.id()), 2L));
