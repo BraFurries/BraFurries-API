@@ -130,7 +130,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: BraFurries/BraFurries-Database
-          ref: 792f5ba2d0b3b792c5dec8f4805bde1c688123f0
+          ref: 52879b08e574193702da4d1ee686d32eea9f3d36
           path: .ci/recruitment-database
           persist-credentials: false
 
@@ -148,7 +148,9 @@ jobs:
           test "$(grep -c '^ALTER TABLE ' "$revision")" -eq 1
           submission=".ci/recruitment-database/flyway/sql/versioned/V20261022_002__create_recruitment_application_submissions.sql"
           test "$(grep -c '^CREATE TABLE ' "$submission")" -eq 1
-          cat "$baseline" "$migration" "$revision" "$submission" > src/test/resources/recruitment_schema.sql
+          review=".ci/recruitment-database/flyway/sql/versioned/V20261022_003__create_recruitment_human_review.sql"
+          test -s "$review"
+          cat "$baseline" "$migration" "$revision" "$submission" "$review" > src/test/resources/recruitment_schema.sql
           ./mvnw -B -Dtest=RecruitmentDraftJdbcMariaDbIntegrationTest,RecruitmentStageEditorJdbcMariaDbIntegrationTest,RecruitmentPublicationJdbcMariaDbIntegrationTest,RecruitmentCandidateJdbcMariaDbIntegrationTest,RecruitmentTrackingJdbcMariaDbIntegrationTest test
 
       - name: Package without rerunning tests
