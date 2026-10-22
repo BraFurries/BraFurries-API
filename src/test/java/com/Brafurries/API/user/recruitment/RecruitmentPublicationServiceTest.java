@@ -131,6 +131,28 @@ class RecruitmentPublicationServiceTest {
     }
 
     @Test
+    void automaticVotePolicyBlocksPublicationUntilEngineExists() {
+        when(authorization.resolve(auth,tenant)).thenReturn(
+            actor(CommunityCapability.RECRUITMENT_MANAGE_PROCESSES));
+        when(drafts.findProcess(tenant,processId)).thenReturn(
+            new RecruitmentPublicationRepository.DraftProcess(processId,0L,"DRAFT"));
+        when(drafts.drafts(tenant,processId)).thenReturn(List.of(
+            new RecruitmentPublicationRepository.DraftVersion(70L,"DRAFT",
+                "{\"minMembershipDays\":0,\"requireVip\":false,\"requirePartner\":false}",
+                "{\"text\":\"Eu li e aceito os termos de inscrição na seleção BraFurries.\"}")));
+        when(drafts.stages(tenant,processId,70L)).thenReturn(List.of(
+            new RecruitmentPublicationRepository.DraftStage(80L,1,"APPLICATION",
+                "{\"questions\":[{\"id\":\"why\",\"label\":\"Motivação\",\"type\":\"SHORT_TEXT\",\"required\":true}]}",
+                null),
+            new RecruitmentPublicationRepository.DraftStage(81L,2,"DECISION",null,null,
+                "{\"reviewMode\":\"COLLECTIVE\",\"decisionMode\":\"AUTOMATIC_VOTE\",\"minimumAssessments\":2}")));
+        var check=service.preview(auth,tenant,processId);
+        assertFalse(check.ready());
+        assertTrue(check.blockers().stream().anyMatch(b->b.contains("votação automática")));
+        verify(drafts,never()).publish(anyInt(),anyLong(),anyLong(),anyLong());
+    }
+
+    @Test
     void incompleteDraftCannotBePublished() {
         publisher();
         when(drafts.lockProcess(tenant, processId)).thenReturn(
