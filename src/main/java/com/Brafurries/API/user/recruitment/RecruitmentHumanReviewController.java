@@ -48,6 +48,14 @@ public class RecruitmentHumanReviewController {
         human.revoke(auth, communityId, stageId, assignmentId);
     }
 
+    @GetMapping("/applications/{applicationId}/stages/{stageId}/assessments/form")
+    public RecruitmentFormDefinition assessmentForm(
+        Authentication auth, @PathVariable Integer communityId,
+        @PathVariable Long applicationId, @PathVariable Long stageId
+    ) {
+        return human.assessmentForm(auth, communityId, applicationId, stageId);
+    }
+
     @PostMapping("/applications/{applicationId}/stages/{stageId}/assessments/mine")
     @ResponseStatus(HttpStatus.CREATED)
     public Assessment assess(
