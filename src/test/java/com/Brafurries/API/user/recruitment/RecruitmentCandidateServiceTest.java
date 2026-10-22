@@ -38,7 +38,7 @@ class RecruitmentCandidateServiceTest {
     @Mock CommunityAuditLogRepository audits;
     @Mock Authentication auth;
 
-    final ObjectMapper json = new ObjectMapper();
+    final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
     RecruitmentCandidateService service;
     Community community;
     User user;
