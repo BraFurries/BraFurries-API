@@ -142,7 +142,7 @@ class RecruitmentDraftServiceTest {
     void canAppendSequentialStageToDraftAndAudit() {
         authorized();
         when(drafts.appendDraftStage(BRAFURRIES_COMMUNITY_ID, 7L,
-            "Análise interna", "Em análise", StageType.ANALYSIS))
+            "Análise interna", "Em análise", StageType.ANALYSIS, 0L))
             .thenReturn(new StageResponse(50L, 7L, 30L, 2,
                 "Análise interna", "Em análise", StageType.ANALYSIS));
 
