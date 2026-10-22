@@ -8,6 +8,7 @@ import com.Brafurries.API.user.CommunityAuthorizationService;
 import com.Brafurries.API.user.CommunityCapability;
 import java.util.List;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -67,13 +68,15 @@ public class RecruitmentDraftService {
         var actor = requireManager(auth, communityId);
         String title = normalizedTitle(request.title());
         String description = normalizedDescription(request.description());
-        if (!drafts.updateDraft(communityId, processId, title, description)) {
+        if (!drafts.updateDraft(
+            communityId, processId, title, description, requireRevision(request.expectedRevision())
+        )) {
             ProcessResponse existing = drafts.find(communityId, processId);
             if (existing == null) {
                 throw missing();
             }
             throw new ResponseStatusException(
-                HttpStatus.CONFLICT, "Processo publicado não pode ser editado como rascunho"
+                HttpStatus.CONFLICT, "Rascunho desatualizado ou processo não editável"
             );
         }
         audit(actor, "RECRUITMENT_DRAFT_UPDATED", processId);
@@ -94,7 +97,12 @@ public class RecruitmentDraftService {
         StageResponse stage;
         try {
             stage = drafts.appendDraftStage(
-                communityId, processId, internalName, publicName, request.stageType()
+                communityId, processId, internalName, publicName, request.stageType(),
+                requireRevision(request.expectedRevision())
+            );
+        } catch (OptimisticLockingFailureException exception) {
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT, "Rascunho desatualizado. Recarregue antes de salvar", exception
             );
         } catch (DataIntegrityViolationException exception) {
             throw new ResponseStatusException(
@@ -129,6 +137,14 @@ public class RecruitmentDraftService {
             throw missing();
         }
         return process;
+    }
+
+    private Long requireRevision(Long revision) {
+        if (revision == null || revision < 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                "Revisão do rascunho obrigatória");
+        }
+        return revision;
     }
 
     private ResponseStatusException missing() {
