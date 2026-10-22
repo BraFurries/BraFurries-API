@@ -22,7 +22,9 @@
    também exige membro ativo e designação direta na etapa ou atribuição atual
    de cargo interno **ativo** designado nessa etapa.
 4. A fila só inclui candidaturas de processos/versões com pelo menos uma etapa
-   designada; a resposta detalhada devolve somente etapas designadas.
+   designada **já disponível** (IN_PROGRESS/AWAITING_REVIEW/COMPLETED/AWAITING_PUBLICATION);
+   etapas futuras PENDING, SKIPPED e BLOCKED não liberam a candidatura.
+   A resposta detalhada devolve somente etapas designadas e disponíveis.
    Respostas da inscrição só aparecem para avaliador da primeira etapa de
    APPLICATION. Uma designação para etapa futura não libera todo o processo.
 5. Candidato jamais pode ler sua candidatura pelas rotas privilegiadas nem
@@ -38,6 +40,7 @@ Base: `/user/me/communities/{communityId}/recruitment`
 
 | Método | Caminho | Capacidade |
 | --- | --- | --- |
+| GET | `/processes/{processId}/reviewer-stages` | Gerir processos; versões DRAFT/PUBLISHED/SUPERSEDED |
 | GET | `/stages/{stageId}/reviewers` | Gerir processos |
 | POST | `/stages/{stageId}/reviewers` | Gerir processos |
 | DELETE | `/stages/{stageId}/reviewers/{assignmentId}` | Gerir processos |
@@ -85,7 +88,8 @@ A API não permite avaliar etapa PENDING, AUTO_EVALUATION nem candidatura própr
 
 ## Fora deste recorte / bloqueadores de liberação operacional
 
-- Interface administrativa com seletor de membros/cargos para designação.
+- A gestão administrativa inicial oferece seleção por cargo interno e designação
+  por ID interno de pessoa. Busca nominal de membros depende de contrato próprio.
 - Política individual **ou coletiva** por etapa, contagem de votos, quórum,
   desempate e decisão humana/automática.
 - Avanço sequencial, formulários de etapas subsequentes, prazos, tentativas,
