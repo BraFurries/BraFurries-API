@@ -34,7 +34,8 @@ class RecruitmentStageDecisionServiceTest {
 
     @BeforeEach void setup() {
         service = new RecruitmentStageDecisionService(
-            new RecruitmentFeatureGate(true,11),authz,repository,audits
+            new RecruitmentFeatureGate(true,11),authz,repository,audits,
+            new com.fasterxml.jackson.databind.ObjectMapper()
         );
     }
 
@@ -195,6 +196,35 @@ class RecruitmentStageDecisionServiceTest {
         assertEquals("AWAITING_PUBLICATION",result.applicationStatus());
         verify(repository).blockRemaining(11,100L);
         verify(repository,never()).advance(anyInt(),anyLong(),anyLong(),any());
+    }
+
+    @Test void collectivePolicyRequiresMultipleAssessments() {
+        manager(77,true); application(99);
+        when(repository.stages(11,100L,80L)).thenReturn(List.of(
+            stage(501L,1,"APPLICATION","AWAITING_REVIEW",null)));
+        when(repository.policyJson(11,501L,80L)).thenReturn(
+            "{\\"reviewMode\\":\\"COLLECTIVE\\",\\"decisionMode\\":\\"MANUAL\\",\\"minimumAssessments\\":3}"
+        );
+        when(repository.assessmentCount(11,100L,501L)).thenReturn(2);
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            () -> service.decide(auth,11,100L,501L,
+                new DecisionRequest("APPROVE",null))).getStatusCode());
+        verify(repository,never()).insertDecision(anyInt(),anyLong(),anyLong(),
+            anyInt(),any(),any());
+    }
+
+    @Test void automaticVotingCannotBeBypassedWithManualDecision() {
+        manager(77,true); application(99);
+        when(repository.stages(11,100L,80L)).thenReturn(List.of(
+            stage(501L,1,"APPLICATION","AWAITING_REVIEW",null)));
+        when(repository.policyJson(11,501L,80L)).thenReturn(
+            "{\\"reviewMode\\":\\"COLLECTIVE\\",\\"decisionMode\\":\\"AUTOMATIC_VOTE\\",\\"minimumAssessments\\":2}"
+        );
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            () -> service.decide(auth,11,100L,501L,
+                new DecisionRequest("APPROVE",null))).getStatusCode());
+        verify(repository,never()).insertDecision(anyInt(),anyLong(),anyLong(),
+            anyInt(),any(),any());
     }
 
     @Test void duplicateDecisionCannotMoveStageAgain() {
