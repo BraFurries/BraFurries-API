@@ -130,7 +130,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: BraFurries/BraFurries-Database
-          ref: 52879b08e574193702da4d1ee686d32eea9f3d36
+          ref: 01c8b39f933a59d8ef1b301ca12f24a1e27d1e13
           path: .ci/recruitment-database
           persist-credentials: false
 
@@ -139,7 +139,7 @@ jobs:
           BRF_RECRUITMENT_JDBC_INTEGRATION: "true"
         run: |
           set -euo pipefail
-          test "$(git -C .ci/recruitment-database rev-parse HEAD)" = "52879b08e574193702da4d1ee686d32eea9f3d36"
+          test "$(git -C .ci/recruitment-database rev-parse HEAD)" = "01c8b39f933a59d8ef1b301ca12f24a1e27d1e13"
           baseline=".ci/database-baseline/flyway/sql/baseline/B20261020_001__adopt_production_schema.sql"
           migration=".ci/recruitment-database/flyway/sql/versioned/V20261021_001__create_recruitment_foundation.sql"
           revision=".ci/recruitment-database/flyway/sql/versioned/V20261022_001__add_recruitment_draft_revision.sql"
