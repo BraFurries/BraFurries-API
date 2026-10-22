@@ -119,7 +119,7 @@ class RecruitmentPublicationServiceTest {
         ));
         var check = service.preview(auth, tenant, processId);
         assertFalse(check.ready());
-        assertEquals(2, check.blockers().size());
+        assertEquals(3, check.blockers().size());
         assertEquals(0, check.stageCount());
         verify(drafts, never()).publish(
             org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyLong(),
