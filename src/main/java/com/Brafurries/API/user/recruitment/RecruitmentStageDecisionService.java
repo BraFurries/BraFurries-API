@@ -6,6 +6,7 @@ import com.Brafurries.API.user.CommunityAuthorizationService;
 import com.Brafurries.API.user.CommunityCapability;
 import com.Brafurries.API.user.recruitment.RecruitmentStageDecisionRepository.*;
 import java.util.List;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -23,15 +24,18 @@ public class RecruitmentStageDecisionService {
     private final CommunityAuthorizationService authorization;
     private final RecruitmentStageDecisionRepository repository;
     private final CommunityAuditLogRepository audits;
+    private final ObjectMapper json;
 
     public RecruitmentStageDecisionService(
         RecruitmentFeatureGate gate, CommunityAuthorizationService authorization,
-        RecruitmentStageDecisionRepository repository, CommunityAuditLogRepository audits
+        RecruitmentStageDecisionRepository repository, CommunityAuditLogRepository audits,
+        ObjectMapper json
     ) {
         this.gate = gate;
         this.authorization = authorization;
         this.repository = repository;
         this.audits = audits;
+        this.json = json;
     }
 
     public record DecisionRequest(String outcome, String reason) {}
@@ -96,10 +100,14 @@ public class RecruitmentStageDecisionService {
                 throw conflict("Existe etapa posterior já iniciada");
             }
         }
-        // For now, one or more individual assessments are mandatory. No implicit
-        // quorum, averaging, ranking or grade-to-decision mapping is introduced.
-        if (repository.assessmentCount(communityId,applicationId,stageId) < 1) {
-            throw conflict("A etapa precisa de pelo menos um parecer humano registrado");
+        var policy = RecruitmentDecisionPolicy.parse(json,
+            repository.policyJson(communityId,stageId,application.versionId()));
+        if (policy.decisionMode() != RecruitmentDecisionPolicy.DecisionMode.MANUAL) {
+            throw conflict("Esta etapa exige votação automática, ainda não liberada");
+        }
+        if (repository.assessmentCount(communityId,applicationId,stageId)
+            < policy.minimumAssessments()) {
+            throw conflict("A etapa ainda não atingiu a quantidade mínima de pareceres");
         }
         if (repository.decision(communityId,applicationId,stageId) != null) {
             throw conflict("Esta etapa já possui uma decisão");
