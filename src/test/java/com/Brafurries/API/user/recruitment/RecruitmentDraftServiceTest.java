@@ -65,6 +65,8 @@ class RecruitmentDraftServiceTest {
             auth, BRAFURRIES_COMMUNITY_ID,
             CommunityCapability.RECRUITMENT_MANAGE_PROCESSES
         )).thenReturn(actor);
+        lenient().when(authorization.resolve(auth, BRAFURRIES_COMMUNITY_ID))
+            .thenReturn(actor);
     }
 
     private ProcessResponse process(long id, String title) {
@@ -110,13 +112,43 @@ class RecruitmentDraftServiceTest {
 
     @Test
     void missingRecruitmentCapabilityDeniesBeforeDatabaseRead() {
-        when(authorization.requireCapability(auth, BRAFURRIES_COMMUNITY_ID,
-            CommunityCapability.RECRUITMENT_MANAGE_PROCESSES))
-            .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
+        when(authorization.resolve(auth, BRAFURRIES_COMMUNITY_ID))
+            .thenReturn(new CommunityAuthorizationService.CommunityAccessContext(
+                community, actorUser, false, false, true, Set.of(),
+                List.of(), Map.of(), Set.of()
+            ));
         assertEquals(HttpStatus.FORBIDDEN,
             assertThrows(ResponseStatusException.class,
                 () -> service.list(auth, BRAFURRIES_COMMUNITY_ID)).getStatusCode());
         verifyNoInteractions(drafts, audits);
+    }
+
+    @Test
+    void publisherOnlyCanReadSummariesButCannotEdit() {
+        var actor = new CommunityAuthorizationService.CommunityAccessContext(
+            community, actorUser, false, false, true,
+            Set.of(CommunityCapability.RECRUITMENT_PUBLISH_PROCESSES),
+            List.of(), Map.of(), Set.of()
+        );
+        when(authorization.resolve(auth, BRAFURRIES_COMMUNITY_ID)).thenReturn(actor);
+        when(drafts.list(BRAFURRIES_COMMUNITY_ID))
+            .thenReturn(List.of(process(7L, "Processo")));
+
+        assertEquals(1, service.list(auth, BRAFURRIES_COMMUNITY_ID).size());
+        when(authorization.requireCapability(auth, BRAFURRIES_COMMUNITY_ID,
+            CommunityCapability.RECRUITMENT_MANAGE_PROCESSES))
+            .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
+        assertEquals(HttpStatus.FORBIDDEN,
+            assertThrows(ResponseStatusException.class, () ->
+                service.update(auth, BRAFURRIES_COMMUNITY_ID, 7L,
+                    new UpdateProcessRequest("Não autorizado", null, 0L))).getStatusCode());
+        verify(drafts, never()).updateDraft(
+            org.mockito.ArgumentMatchers.anyInt(),
+            org.mockito.ArgumentMatchers.anyLong(),
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.anyLong()
+        );
     }
 
     @Test
