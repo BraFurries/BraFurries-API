@@ -33,7 +33,8 @@ public class RecruitmentDraftRepository {
             rs.getString("status"),
             rs.getString("visibility"),
             rs.getString("enrollment_status"),
-            rs.getInt("draft_version")
+            rs.getInt("draft_version"),
+            rs.getLong("draft_revision")
         );
 
     private static final RowMapper<StageResponse> STAGE_MAPPER = (rs, row) ->
@@ -54,14 +55,14 @@ public class RecruitmentDraftRepository {
     public List<ProcessResponse> list(Integer communityId) {
         return jdbc.query(
             "SELECT p.id,p.community_id,p.title,p.description,p.status,p.visibility,"
-                + "p.enrollment_status,COALESCE(MAX(v.version_number),0) AS draft_version "
+                + "p.enrollment_status,p.draft_revision,COALESCE(MAX(v.version_number),0) AS draft_version "
                 + "FROM recruitment_processes p "
                 + "LEFT JOIN recruitment_process_versions v "
                 + "ON v.community_id=p.community_id AND v.process_id=p.id "
                 + "AND v.status='DRAFT' "
                 + "WHERE p.community_id=? "
                 + "GROUP BY p.id,p.community_id,p.title,p.description,p.status,"
-                + "p.visibility,p.enrollment_status "
+                + "p.visibility,p.enrollment_status,p.draft_revision "
                 + "ORDER BY p.id DESC",
             PROCESS_MAPPER,
             communityId
@@ -100,11 +101,12 @@ public class RecruitmentDraftRepository {
     }
 
     /** Returns false when the process does not exist or is no longer a draft. */
-    public boolean updateDraft(Integer communityId, Long processId, String title, String description) {
+    public boolean updateDraft(Integer communityId, Long processId, String title, String description, Long expectedRevision) {
         return jdbc.update(
-            "UPDATE recruitment_processes SET title=?,description=? "
-                + "WHERE community_id=? AND id=? AND status='DRAFT'",
-            title, description, communityId, processId
+            "UPDATE recruitment_processes SET title=?,description=?,"
+                + "draft_revision=draft_revision+1 "
+                + "WHERE community_id=? AND id=? AND status='DRAFT' AND draft_revision=?",
+            title, description, communityId, processId, expectedRevision
         ) == 1;
     }
 
@@ -128,7 +130,7 @@ public class RecruitmentDraftRepository {
      */
     public StageResponse appendDraftStage(
         Integer communityId, Long processId, String internalName,
-        String publicName, StageType stageType
+        String publicName, StageType stageType, Long expectedRevision
     ) {
         List<Long> locked = jdbc.query(
             "SELECT id FROM recruitment_processes "
@@ -137,6 +139,17 @@ public class RecruitmentDraftRepository {
         );
         if (locked.isEmpty()) {
             return null;
+        }
+        // While holding the process lock, only the editor with the currently
+        // observed revision may change this draft. A failed write rolls back.
+        if (jdbc.update(
+            "UPDATE recruitment_processes SET draft_revision=draft_revision+1 "
+                + "WHERE community_id=? AND id=? AND status='DRAFT' AND draft_revision=?",
+            communityId, processId, expectedRevision
+        ) != 1) {
+            throw new org.springframework.dao.OptimisticLockingFailureException(
+                "O rascunho foi alterado por outro gestor"
+            );
         }
         List<Long> drafts = jdbc.query(
             "SELECT id FROM recruitment_process_versions "
