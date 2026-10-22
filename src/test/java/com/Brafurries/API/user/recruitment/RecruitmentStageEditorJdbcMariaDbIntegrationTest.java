@@ -85,6 +85,12 @@ class RecruitmentStageEditorJdbcMariaDbIntegrationTest {
             saved.candidateForm().questions().get(0).correctAnswers());
         assertEquals("observation", saved.staffForm().questions().get(0).id());
         assertEquals("Conhecimento", stages.find(981001, process, stage.id()).publicName());
+        // Saving the exact same values must not return a false 409 on MariaDB.
+        var identical = stages.save(981001, process, stage.id(),
+            new SaveStageRequest("Exame interno", "Conhecimento", StageType.AUTO_EVALUATION,
+                candidate(), staff, 2L));
+        assertNotNull(identical);
+        assertEquals(3L, identical.draftRevision());
 
         assertNull(stages.find(981002, process, stage.id()));
         assertNull(stages.save(981002, process, stage.id(),
