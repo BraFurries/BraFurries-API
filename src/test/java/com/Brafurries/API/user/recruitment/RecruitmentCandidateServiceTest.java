@@ -120,6 +120,30 @@ class RecruitmentCandidateServiceTest {
         assertFalse(encoded.contains("points"));
     }
 
+    @Test void activeEligibleMemberCanSubmitLockedPublishedApplicationOnce() {
+        activeMember();
+        when(candidateRepo.publishedSelection(11,70L,true,false)).thenReturn(process(false));
+        when(memberships.findByUserAndCommunity(user,community))
+            .thenReturn(Optional.of(membership));
+        String reviewedHash = service.form(auth,11,70L).termsHash();
+
+        when(memberships.findAllForAssignmentByUserIdAndCommunityId(99,11))
+            .thenReturn(List.of(membership));
+        when(candidateRepo.publishedSelection(11,70L,true,true)).thenReturn(process(false));
+        when(candidateRepo.stageIds(11,70L,71L)).thenReturn(List.of(72L));
+        when(candidateRepo.submit(
+            eq(11),eq(70L),eq(71L),eq(99L),eq(72L),
+            eq(List.of(72L)),anyString(),eq(reviewedHash)
+        )).thenReturn(new Applied(180L,71L,"IN_PROGRESS",java.time.Instant.now()));
+
+        Applied submitted = service.apply(auth,11,70L,request(reviewedHash));
+        assertEquals(180L,submitted.applicationId());
+        verify(audits).save(argThat(event ->
+            event.getAction().equals("RECRUITMENT_APPLICATION_SUBMITTED")
+                && event.getTargetId().equals("180")
+        ));
+    }
+
     @Test void staleTermsCannotBeAcceptedOrPersisted() {
         activeMember();
         when(memberships.findAllForAssignmentByUserIdAndCommunityId(99,11))
