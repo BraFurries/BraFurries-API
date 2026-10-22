@@ -86,6 +86,36 @@ public class RecruitmentPublicationService {
     }
 
     @Transactional
+    public PublicationCheck configureTerms(
+        Authentication auth, Integer communityId, Long processId, UpdateTermsRequest request
+    ) {
+        var actor = require(auth, communityId, CommunityCapability.RECRUITMENT_MANAGE_PROCESSES);
+        long revision = requireRevision(request == null ? null : request.expectedRevision());
+        String normalized = request.termsText() == null ? "" : request.termsText().strip();
+        if (normalized.length() < 20 || normalized.length() > 12000) {
+            throw invalid("Os termos devem conter entre 20 e 12000 caracteres");
+        }
+        var locked = repository.lockProcess(communityId, processId);
+        if (locked == null) throw missing();
+        if (!"DRAFT".equals(locked.status()) || locked.revision() != revision) {
+            throw conflict("Rascunho desatualizado ou já publicado");
+        }
+        var drafts = repository.drafts(communityId, processId);
+        if (drafts.size() != 1) throw conflict("É necessária uma versão de rascunho");
+        final String serialized;
+        try {
+            serialized = mapper.writeValueAsString(new TermsText(normalized));
+        } catch (JsonProcessingException exception) {
+            throw invalid("Termos inválidos");
+        }
+        if (!repository.updateTerms(
+            communityId, processId, drafts.get(0).id(), revision, serialized
+        )) throw conflict("Rascunho alterado");
+        audit(actor, "RECRUITMENT_TERMS_UPDATED", processId);
+        return evaluate(communityId, processId, repository.findProcess(communityId, processId));
+    }
+
+    @Transactional
     public PublicationResult publish(
         Authentication auth, Integer communityId, Long processId, PublishRequest request
     ) {
@@ -139,6 +169,21 @@ public class RecruitmentPublicationService {
                 configuredEligibility = rules;
             } catch (JsonProcessingException | ResponseStatusException invalid) {
                 blockers.add("As regras de elegibilidade são inválidas");
+            }
+        }
+
+        if (version.termsJson() == null || version.termsJson().isBlank()) {
+            blockers.add("Configure os termos de participação");
+        } else {
+            try {
+                TermsText terms = mapper.readValue(version.termsJson(), TermsText.class);
+                if (terms == null || terms.text() == null
+                    || terms.text().strip().length() < 20
+                    || terms.text().strip().length() > 12000) {
+                    blockers.add("Termos de participação inválidos");
+                }
+            } catch (JsonProcessingException exception) {
+                blockers.add("Termos de participação inválidos");
             }
         }
 
