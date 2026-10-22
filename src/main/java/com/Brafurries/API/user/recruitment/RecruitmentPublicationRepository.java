@@ -17,7 +17,11 @@ public class RecruitmentPublicationRepository {
     }
 
     public record DraftProcess(Long id, long revision, String status) {}
-    public record DraftVersion(Long id, String status, String eligibilityJson) {}
+    public record DraftVersion(Long id, String status, String eligibilityJson, String termsJson) {
+        public DraftVersion(Long id, String status, String eligibilityJson) {
+            this(id, status, eligibilityJson, null);
+        }
+    }
     public record DraftStage(
         Long id, int position, String stageType,
         String candidateFormJson, String staffFormJson
@@ -46,12 +50,12 @@ public class RecruitmentPublicationRepository {
 
     public List<DraftVersion> drafts(Integer communityId, Long processId) {
         return jdbc.query(
-            "SELECT id,status,eligibility_rules_json FROM recruitment_process_versions "
+            "SELECT id,status,eligibility_rules_json,terms_json FROM recruitment_process_versions "
                 + "WHERE community_id=? AND process_id=? AND status='DRAFT' "
                 + "ORDER BY version_number DESC LIMIT 2",
             (rs, row) -> new DraftVersion(
                 rs.getLong("id"), rs.getString("status"),
-                rs.getString("eligibility_rules_json")
+                rs.getString("eligibility_rules_json"), rs.getString("terms_json")
             ), communityId, processId
         );
     }
@@ -85,6 +89,23 @@ public class RecruitmentPublicationRepository {
         ) != 1) {
             throw new IllegalStateException("A versão do rascunho mudou durante a atualização");
         }
+        return true;
+    }
+
+    public boolean updateTerms(
+        Integer communityId, Long processId, Long versionId,
+        long expectedRevision, String termsJson
+    ) {
+        if (jdbc.update(
+            "UPDATE recruitment_processes SET draft_revision=draft_revision+1 "
+                + "WHERE community_id=? AND id=? AND status='DRAFT' AND draft_revision=?",
+            communityId, processId, expectedRevision
+        ) != 1) return false;
+        if (jdbc.update(
+            "UPDATE recruitment_process_versions SET terms_json=? "
+                + "WHERE community_id=? AND process_id=? AND id=? AND status='DRAFT'",
+            termsJson, communityId, processId, versionId
+        ) != 1) throw new IllegalStateException("A versão mudou durante a gravação dos termos");
         return true;
     }
 
