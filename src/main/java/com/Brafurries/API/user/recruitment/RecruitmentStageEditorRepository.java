@@ -59,6 +59,7 @@ public class RecruitmentStageEditorRepository {
         Long version = lockDraftVersion(communityId, processId, definition.expectedRevision());
         if (version == null) return null;
 
+        advanceDraftRevision(communityId, processId, definition.expectedRevision());
         int changed = jdbc.update(
             "UPDATE recruitment_stages SET internal_name=?,public_name=?,"
                 + "stage_type=?,candidate_form_json=?,staff_form_json=? "
@@ -84,6 +85,7 @@ public class RecruitmentStageEditorRepository {
             || !Set.copyOf(existing).equals(Set.copyOf(order))) {
             throw new IllegalArgumentException("Ordem deve conter cada etapa exatamente uma vez");
         }
+        advanceDraftRevision(communityId, processId, expectedRevision);
         reorderVersion(communityId, version, order);
         return true;
     }
@@ -91,6 +93,7 @@ public class RecruitmentStageEditorRepository {
     public boolean delete(Integer communityId, Long processId, Long stageId, Long expectedRevision) {
         Long version = lockDraftVersion(communityId, processId, expectedRevision);
         if (version == null) return false;
+        advanceDraftRevision(communityId, processId, expectedRevision);
         int deleted = jdbc.update(
             "DELETE FROM recruitment_stages WHERE community_id=? "
                 + "AND process_id=? AND process_version_id=? AND id=?",
@@ -115,7 +118,10 @@ public class RecruitmentStageEditorRepository {
                 + "ORDER BY version_number DESC LIMIT 1 FOR UPDATE",
             (rs, row) -> rs.getLong(1), communityId, processId
         );
-        if (versions.isEmpty()) return null;
+        return versions.isEmpty() ? null : versions.get(0);
+    }
+
+    private void advanceDraftRevision(Integer communityId, Long processId, Long expectedRevision) {
         if (jdbc.update(
             "UPDATE recruitment_processes SET draft_revision=draft_revision+1 "
                 + "WHERE community_id=? AND id=? AND status='DRAFT' AND draft_revision=?",
@@ -125,7 +131,6 @@ public class RecruitmentStageEditorRepository {
                 "O rascunho foi alterado por outro gestor"
             );
         }
-        return versions.get(0);
     }
 
     private List<Long> stageIds(Integer communityId, Long versionId) {
