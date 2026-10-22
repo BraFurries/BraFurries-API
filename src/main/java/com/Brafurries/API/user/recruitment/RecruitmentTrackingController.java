@@ -34,6 +34,13 @@ public class RecruitmentTrackingController {
         return tracking.ownDetail(auth, communityId, applicationId);
     }
 
+    @GetMapping("/review/processes")
+    public List<ReviewProcess> reviewProcesses(
+        Authentication auth, @PathVariable Integer communityId
+    ) {
+        return tracking.reviewProcesses(auth, communityId);
+    }
+
     @GetMapping("/review")
     public List<ReviewQueueItem> reviewQueue(
         Authentication auth,
