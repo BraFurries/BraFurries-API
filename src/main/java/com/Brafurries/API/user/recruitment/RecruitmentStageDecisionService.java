@@ -45,8 +45,14 @@ public class RecruitmentStageDecisionService {
 
     @Transactional(readOnly = true)
     public Decision find(Authentication auth, Integer communityId, Long applicationId, Long stageId) {
-        manager(auth,communityId);
+        var actor = manager(auth,communityId);
         requireIds(applicationId,stageId);
+        Integer candidateId = repository.candidateId(communityId,applicationId);
+        if (candidateId == null) throw missing();
+        if (candidateId.equals(actor.user().getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                "Não é possível consultar a própria decisão administrativa");
+        }
         var decision = repository.decision(communityId,applicationId,stageId);
         if (decision == null) throw missing();
         return decision;
