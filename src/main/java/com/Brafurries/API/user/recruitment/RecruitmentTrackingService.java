@@ -133,9 +133,13 @@ public class RecruitmentTrackingService {
         Authentication auth, Integer communityId
     ) {
         gate.requireEnabledFor(communityId);
-        return authorization.requireCapability(
+        var reviewer = authorization.requireCapability(
             auth, communityId, CommunityCapability.RECRUITMENT_REVIEW_APPLICATIONS
         );
+        // Owners and Community admins can possess global capabilities without
+        // an active membership. Private applicant data still requires membership.
+        if (!reviewer.activeMember()) throw missing();
+        return reviewer;
     }
 
     private Long cursor(Long value) {
