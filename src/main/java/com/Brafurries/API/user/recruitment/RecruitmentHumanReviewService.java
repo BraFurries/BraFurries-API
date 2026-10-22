@@ -54,6 +54,15 @@ public class RecruitmentHumanReviewService {
     public record AssignmentReceipt(long id, long stageId, Integer userId, Integer roleId) {}
 
     @Transactional(readOnly = true)
+    public List<ReviewableStage> stagesForProcess(
+        Authentication auth, Integer communityId, Long processId
+    ) {
+        requireManager(auth, communityId);
+        if (processId == null || processId <= 0) throw invalid("Processo inválido");
+        return repository.stagesForProcess(communityId, processId);
+    }
+
+    @Transactional(readOnly = true)
     public List<Assignment> assignments(Authentication auth, Integer communityId, Long stageId) {
         requireManager(auth, communityId);
         var stage = requireStage(communityId, stageId);
