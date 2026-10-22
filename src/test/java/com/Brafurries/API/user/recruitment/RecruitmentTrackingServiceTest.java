@@ -95,6 +95,17 @@ class RecruitmentTrackingServiceTest {
         verifyNoInteractions(repository);
     }
 
+    @Test void reviewerOnlyCanDiscoverProcessesWithOtherApplicants() {
+        when(authorization.requireCapability(auth,11,
+            CommunityCapability.RECRUITMENT_REVIEW_APPLICATIONS))
+            .thenReturn(actor(99,true,Set.of(CommunityCapability.RECRUITMENT_REVIEW_APPLICATIONS)));
+        when(repository.reviewProcesses(11,99))
+            .thenReturn(List.of(new ReviewProcess(70L,"Seleção de Staff")));
+        var processes = service.reviewProcesses(auth,11);
+        assertEquals(70L,processes.get(0).id());
+        verify(repository).reviewProcesses(11,99);
+    }
+
     @Test void reviewersGetTenantAndSelfExcludedQueue() {
         when(authorization.requireCapability(auth,11,
             CommunityCapability.RECRUITMENT_REVIEW_APPLICATIONS))
