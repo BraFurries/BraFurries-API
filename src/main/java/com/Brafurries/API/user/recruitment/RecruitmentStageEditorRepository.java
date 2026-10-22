@@ -60,7 +60,7 @@ public class RecruitmentStageEditorRepository {
         if (version == null) return null;
 
         advanceDraftRevision(communityId, processId, definition.expectedRevision());
-        int changed = jdbc.update(
+        jdbc.update(
             "UPDATE recruitment_stages SET internal_name=?,public_name=?,"
                 + "stage_type=?,candidate_form_json=?,staff_form_json=? "
                 + "WHERE community_id=? AND process_id=? AND process_version_id=? AND id=?",
@@ -68,7 +68,9 @@ public class RecruitmentStageEditorRepository {
             writeForm(definition.candidateForm()), writeForm(definition.staffForm()),
             communityId, processId, version, stageId
         );
-        return changed == 1 ? find(communityId, processId, stageId) : null;
+        // MariaDB reports 0 changed rows when the submitted definition matches
+        // existing values. That is still a valid save, not a missing stage.
+        return find(communityId, processId, stageId);
     }
 
     /**
