@@ -108,6 +108,12 @@ public class RecruitmentHumanReviewRepository {
     public AssessmentTarget lockAssessmentTarget(
         Integer communityId, Long applicationId, Long stageId
     ) {
+        return assessmentTarget(communityId, applicationId, stageId, true);
+    }
+
+    public AssessmentTarget assessmentTarget(
+        Integer communityId, Long applicationId, Long stageId, boolean forUpdate
+    ) {
         var items = jdbc.query(
             "SELECT ras.stage_id,ras.application_id,ras.process_version_id,"
                 + "a.candidate_user_id,ras.status,s.stage_type,s.staff_form_json "
@@ -116,7 +122,8 @@ public class RecruitmentHumanReviewRepository {
                 + "AND a.id=ras.application_id AND a.process_version_id=ras.process_version_id "
                 + "JOIN recruitment_stages s ON s.community_id=ras.community_id "
                 + "AND s.id=ras.stage_id AND s.process_version_id=ras.process_version_id "
-                + "WHERE ras.community_id=? AND ras.application_id=? AND ras.stage_id=? FOR UPDATE",
+                + "WHERE ras.community_id=? AND ras.application_id=? AND ras.stage_id=?"
+                + (forUpdate ? " FOR UPDATE" : ""),
             (rs, row) -> new AssessmentTarget(
                 rs.getLong(1), rs.getLong(2), rs.getLong(3), rs.getInt(4),
                 rs.getString(5), rs.getString(6), rs.getString(7)
