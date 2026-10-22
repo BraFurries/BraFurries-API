@@ -55,7 +55,8 @@ public class RecruitmentStageDecisionService {
     ) {
         var actor = manager(auth,communityId);
         requireIds(applicationId,stageId);
-        if (request == null || request.outcome() == null ||\n            !List.of("APPROVE","REJECT").contains(request.outcome())) {
+        if (request == null || request.outcome() == null ||
+            !List.of("APPROVE","REJECT").contains(request.outcome())) {
             throw invalid("Decisão deve ser APPROVE ou REJECT");
         }
         String reason = request.reason() == null ? null : request.reason().strip();
