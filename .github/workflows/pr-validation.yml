@@ -145,7 +145,7 @@ jobs:
           test "$(grep -c '^CREATE TABLE ' "$baseline")" -eq 107
           test "$(grep -c '^CREATE TABLE ' "$migration")" -eq 5
           cat "$baseline" "$migration" > src/test/resources/recruitment_schema.sql
-          ./mvnw -B -Dtest=RecruitmentDraftJdbcMariaDbIntegrationTest test
+          ./mvnw -B -Dtest=RecruitmentDraftJdbcMariaDbIntegrationTest,RecruitmentStageEditorJdbcMariaDbIntegrationTest test
 
       - name: Package without rerunning tests
         run: ./mvnw -DskipTests package
