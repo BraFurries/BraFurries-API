@@ -226,6 +226,19 @@ public class RecruitmentPublicationService {
                 blockers.add("A ordenação das etapas não é consecutiva");
                 break;
             }
+            if (!"AUTO_EVALUATION".equals(stage.stageType())) {
+                try {
+                    var decisionPolicy = RecruitmentDecisionPolicy.parse(
+                        mapper,stage.evaluationConfigJson());
+                    if (decisionPolicy.decisionMode() ==
+                        RecruitmentDecisionPolicy.DecisionMode.AUTOMATIC_VOTE) {
+                        blockers.add("A etapa " + stage.position()
+                            + " usa votação automática ainda indisponível");
+                    }
+                } catch (IllegalStateException invalid) {
+                    blockers.add("Política de decisão inválida na etapa " + stage.position());
+                }
+            }
             try {
                 StageType type = StageType.valueOf(stage.stageType());
                 RecruitmentFormDefinition candidate =
