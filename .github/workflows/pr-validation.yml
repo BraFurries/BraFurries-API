@@ -124,5 +124,28 @@ jobs:
           python3 -c "import ast, pathlib; ast.parse(pathlib.Path('src/test/resources/coddy_live_http_contract.py').read_text())"
           ./mvnw -B -Dtest=BaselineCoddyLiveHttpIntegrationTest test
 
+      # Recruitment is disabled by default; opt-in JDBC integration uses
+      # the exact unmerged Database PR #12 migration on disposable MariaDB.
+      - name: Checkout pinned recruitment schema migration (read only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: BraFurries/BraFurries-Database
+          ref: 47832d4f4ed69e83f4d9b82f2fff947b7ff8ce2b
+          path: .ci/recruitment-database
+          persist-credentials: false
+
+      - name: Verify recruitment drafts JDBC with canonical baseline plus additive migration
+        env:
+          BRF_RECRUITMENT_JDBC_INTEGRATION: "true"
+        run: |
+          set -euo pipefail
+          test "$(git -C .ci/recruitment-database rev-parse HEAD)" = "47832d4f4ed69e83f4d9b82f2fff947b7ff8ce2b"
+          baseline=".ci/database-baseline/flyway/sql/baseline/B20261020_001__adopt_production_schema.sql"
+          migration=".ci/recruitment-database/flyway/sql/versioned/V20261021_001__create_recruitment_foundation.sql"
+          test "$(grep -c '^CREATE TABLE ' "$baseline")" -eq 107
+          test "$(grep -c '^CREATE TABLE ' "$migration")" -eq 5
+          cat "$baseline" "$migration" > src/test/resources/recruitment_schema.sql
+          ./mvnw -B -Dtest=RecruitmentDraftJdbcMariaDbIntegrationTest test
+
       - name: Package without rerunning tests
         run: ./mvnw -DskipTests package
