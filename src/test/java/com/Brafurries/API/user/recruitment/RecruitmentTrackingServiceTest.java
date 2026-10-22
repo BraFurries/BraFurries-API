@@ -126,9 +126,9 @@ class RecruitmentTrackingServiceTest {
             assertThrows(ResponseStatusException.class, () ->
                 service.reviewDetail(auth,11,100L)).getStatusCode());
         verify(repository,never()).candidateAnswers(org.mockito.ArgumentMatchers.anyInt(),
-            org.mockito.ArgumentMatchers.anyLong());
+            org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyInt());
         verify(repository,never()).reviewStages(org.mockito.ArgumentMatchers.anyInt(),
-            org.mockito.ArgumentMatchers.anyLong());
+            org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyInt());
         verifyNoInteractions(audits);
     }
 
@@ -139,7 +139,8 @@ class RecruitmentTrackingServiceTest {
         when(repository.reviewById(11,100L)).thenReturn(
             new ReviewQueueItem(100L,70L,80L,99,"Staff","IN_PROGRESS",Instant.now())
         );
-        when(repository.candidateAnswers(11,100L)).thenReturn(
+        when(repository.canReview(11,100L,77)).thenReturn(true);
+        when(repository.candidateAnswers(11,100L,77)).thenReturn(
             new RecruitmentTrackingRepository.SubmittedAnswers(501L,
                 "{\"motivation\":\"Quero ajudar\"}")
         );
@@ -151,6 +152,24 @@ class RecruitmentTrackingServiceTest {
             (CommunityAuditLog item) -> item.getAction().equals("RECRUITMENT_APPLICATION_VIEWED")
                 && item.getTargetId().equals("100")
         ));
+    }
+
+    @Test void broadCapabilityWithoutStageAssignmentCannotOpenAnswers() {
+        when(authorization.requireCapability(auth,11,
+            CommunityCapability.RECRUITMENT_REVIEW_APPLICATIONS))
+            .thenReturn(actor(77,true,Set.of(CommunityCapability.RECRUITMENT_REVIEW_APPLICATIONS)));
+        when(repository.reviewById(11,100L)).thenReturn(
+            new ReviewQueueItem(100L,70L,80L,99,"Staff","IN_PROGRESS",Instant.now())
+        );
+        assertEquals(HttpStatus.NOT_FOUND,
+            assertThrows(ResponseStatusException.class, () ->
+                service.reviewDetail(auth,11,100L)).getStatusCode());
+        verify(repository).canReview(11,100L,77);
+        verify(repository,never()).candidateAnswers(
+            org.mockito.ArgumentMatchers.anyInt(),
+            org.mockito.ArgumentMatchers.anyLong(),
+            org.mockito.ArgumentMatchers.anyInt());
+        verifyNoInteractions(audits);
     }
 
     @Test void malformedCursorRejectedBeforeDbQuery() {
