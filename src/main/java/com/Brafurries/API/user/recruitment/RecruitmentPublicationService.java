@@ -200,6 +200,24 @@ public class RecruitmentPublicationService {
         var stages = repository.stages(communityId, processId, version.id());
         if (stages.isEmpty()) blockers.add("Adicione ao menos uma etapa");
         if (stages.size() > 60) blockers.add("O processo excede 60 etapas");
+        if (!stages.isEmpty()) {
+            var first = stages.get(0);
+            if (first.position() != 1 || !"APPLICATION".equals(first.stageType())
+                || first.candidateFormJson() == null) {
+                blockers.add("A primeira etapa deve ser Inscrição e possuir formulário do candidato");
+            } else {
+                try {
+                    RecruitmentFormDefinition enrollment = readForm(first.candidateFormJson());
+                    validator.validate(enrollment, false, StageType.APPLICATION);
+                    if (enrollment == null || enrollment.questions().isEmpty()) {
+                        blockers.add("O formulário da primeira etapa não pode estar vazio");
+                    }
+                } catch (JsonProcessingException | IllegalArgumentException
+                    | ResponseStatusException malformed) {
+                    blockers.add("Formulário de inscrição da primeira etapa inválido");
+                }
+            }
+        }
         // Application intake is a separate system concern, not tied to a fixed
         // first stage type. Stages remain arbitrary, sequential and configurable.
         int expectedPosition = 1;
