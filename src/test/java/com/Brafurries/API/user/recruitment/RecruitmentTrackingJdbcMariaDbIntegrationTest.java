@@ -100,6 +100,9 @@ class RecruitmentTrackingJdbcMariaDbIntegrationTest {
         long applicationId = submitOne();
         long processId = tracking.reviewById(981001,applicationId).processId();
 
+        assertEquals(1,tracking.reviewProcesses(981001,981002).size());
+        assertEquals(0,tracking.reviewProcesses(981001,981001).size());
+        assertEquals(0,tracking.reviewProcesses(981002,981002).size());
         assertEquals(1,tracking.queue(981001,processId,981002,null).size());
         assertEquals(0,tracking.queue(981001,processId,981001,null).size());
         assertEquals(0,tracking.queue(981002,processId,981002,null).size());
