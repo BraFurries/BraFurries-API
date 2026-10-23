@@ -127,6 +127,17 @@ class RecruitmentObjectiveGradeServiceTest {
             (CommunityAuditLog e)->"RECRUITMENT_GRADE_SUMMARY_VIEWED".equals(e.getAction())));
     }
 
+    @Test void previouslyProvisionalSummaryBecomesFinalAfterObjectiveDecision() {
+        manager(77,true);
+        when(grades.stage(11,100L,501L)).thenReturn(
+            new StageRef(80,99,"AUTO_EVALUATION"));
+        when(grades.policy(11,80L,501L)).thenReturn(
+            new GradePolicy(new BigDecimal("70.00"),"BEST"));
+        when(grades.grades(11,100L,501L)).thenReturn(List.of(grade(800,80,100)));
+        when(grades.finalized(11,100L,501L)).thenReturn(true);
+        assertFalse(service.managerSummary(auth,11,100L,501L).provisional());
+    }
+
     @Test void lastStrategyReturnsNewestSubmittedAttemptEvenIfLower() {
         manager(77,true);
         when(grades.stage(11,100L,501L)).thenReturn(
