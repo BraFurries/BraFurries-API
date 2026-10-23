@@ -115,6 +115,39 @@ class RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest {
         assertEquals("{\"q\":\"b\"}",stored);
     }
 
+    @Test void integrityEventsAreTenantScopedUniqueAndBlockedAttemptsCannotSubmit() {
+        jdbc.update("UPDATE recruitment_stage_attempt_policies "
+            +"SET max_focus_losses=3,block_copy=1 "
+            +"WHERE community_id=981001 AND stage_id=984001");
+        var created=attempts.create(981001,985001,983001,984001,1,
+            attempts.dbNow().plusSeconds(90));
+        assertFalse(attempts.hasBlockedAttempt(981001,985001,984001));
+        assertEquals(0,attempts.focusLosses(981001,created.id()));
+        String uuid="00000000-0000-4000-8000-000000000001";
+        attempts.insertIntegrityEvent(981001,created.id(),uuid,"FOCUS_LOST","TAB_HIDDEN");
+        assertTrue(attempts.eventExists(981001,created.id(),uuid));
+        assertFalse(attempts.eventExists(981002,created.id(),uuid));
+        assertThrows(DataIntegrityViolationException.class,()->
+            attempts.insertIntegrityEvent(981001,created.id(),uuid,"FOCUS_LOST","TAB_HIDDEN"));
+        assertThrows(DataIntegrityViolationException.class,()->
+            attempts.insertIntegrityEvent(981002,created.id(),
+                "00000000-0000-4000-8000-000000000002","FOCUS_LOST","TAB_HIDDEN"));
+        assertThrows(DataIntegrityViolationException.class,()->
+            attempts.insertIntegrityEvent(981001,created.id(),
+                "00000000-0000-4000-8000-000000000003","FOCUS_LOST","COPY"));
+        assertEquals(1,attempts.eventCount(981001,created.id()));
+        assertTrue(attempts.incrementFocusLoss(981001,created.id()));
+        assertTrue(attempts.incrementFocusLoss(981001,created.id()));
+        assertFalse(attempts.blockAttempt(981001,created.id(),3));
+        assertTrue(attempts.incrementFocusLoss(981001,created.id()));
+        assertTrue(attempts.blockAttempt(981001,created.id(),3));
+        assertFalse(attempts.incrementFocusLoss(981001,created.id()));
+        assertEquals(3,attempts.focusLosses(981001,created.id()));
+        assertTrue(attempts.hasBlockedAttempt(981001,985001,984001));
+        assertTrue(attempts.availableExams(981001,985001,981001).get(0).blocked());
+        assertFalse(attempts.submit(981001,created.id(),"{\\"question\\":\\"a\\"}"));
+    }
+
     @Test void draftPolicySaveUsesOptimisticRevisionAndCannotWriteOtherCommunity() {
         // Published process must NOT be changeable by the administrative service.
         assertEquals("ACTIVE",attempts.lockDraft(981001,982001,984001).processStatus());
