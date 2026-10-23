@@ -448,7 +448,7 @@ class RecruitmentCandidateAttemptServiceTest {
         when(repository.saveDraft(eq(11),eq(100L),eq(501L),eq(800L),
             eq(0L),anyString())).thenReturn(true);
         when(repository.draft(11,100L,501L,800L)).thenReturn(
-            new DraftState(1L,"{\\"question\\":\\"b\\"}",NOW));
+            new DraftState(1L,"{\"question\":\"b\"}",NOW));
         var payload=Map.<String,com.fasterxml.jackson.databind.JsonNode>of(
             "question",new ObjectMapper().getNodeFactory().textNode("b"));
         var receipt=service.saveDraft(auth,11,100L,501L,800L,
@@ -456,13 +456,13 @@ class RecruitmentCandidateAttemptServiceTest {
         assertEquals(1,receipt.revision());
         assertEquals("b",receipt.answers().get("question").asText());
         verify(repository).saveDraft(11,100L,501L,800L,0L,
-            "{\\"question\\":\\"b\\"}");
+            "{\"question\":\"b\"}");
     }
 
     @Test void draftCanBeRecoveredAfterResumeWithoutAnswerKey() {
         runningDraft(policy(false,NOW.minusSeconds(5)));
         when(repository.draft(11,100L,501L,800L)).thenReturn(
-            new DraftState(2L,"{\\"question\\":\\"b\\"}",NOW));
+            new DraftState(2L,"{\"question\":\"b\"}",NOW));
         var receipt=service.draft(auth,11,100L,501L,800L);
         assertEquals(2,receipt.revision());
         assertFalse(receipt.toString().contains("correctAnswers"));
