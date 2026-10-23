@@ -38,6 +38,24 @@ class RecruitmentDecisionPolicyTest {
                 RecruitmentDecisionPolicy.ReviewMode.COLLECTIVE,
                 RecruitmentDecisionPolicy.DecisionMode.AUTOMATIC_VOTE,21)));
     }
+    @Test void votingRequiresExplicitQuorumAndTieStrategy() {
+        assertThrows(ResponseStatusException.class,()->RecruitmentDecisionPolicy.validate(
+            new RecruitmentDecisionPolicy(
+                RecruitmentDecisionPolicy.ReviewMode.COLLECTIVE,
+                RecruitmentDecisionPolicy.DecisionMode.AUTOMATIC_VOTE,2)));
+        var configured = RecruitmentDecisionPolicy.validate(new RecruitmentDecisionPolicy(
+            RecruitmentDecisionPolicy.ReviewMode.COLLECTIVE,
+            RecruitmentDecisionPolicy.DecisionMode.AUTOMATIC_VOTE,2,3,
+            RecruitmentDecisionPolicy.TiePolicy.MANAGER_OVERRIDE));
+        assertEquals(3,configured.minimumVotes());
+        assertEquals(RecruitmentDecisionPolicy.TiePolicy.MANAGER_OVERRIDE,configured.tiePolicy());
+        assertThrows(ResponseStatusException.class,()->RecruitmentDecisionPolicy.validate(
+            new RecruitmentDecisionPolicy(
+                RecruitmentDecisionPolicy.ReviewMode.COLLECTIVE,
+                RecruitmentDecisionPolicy.DecisionMode.AUTOMATIC_VOTE,2,21,
+                RecruitmentDecisionPolicy.TiePolicy.REJECT_ON_TIE)));
+    }
+
     @Test void corruptFrozenPolicyFailsClosed() {
         assertThrows(IllegalStateException.class,() ->
             RecruitmentDecisionPolicy.parse(json,"{\"reviewMode\":\"INVENTED\"}"));
