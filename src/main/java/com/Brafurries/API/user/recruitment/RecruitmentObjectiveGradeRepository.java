@@ -66,6 +66,16 @@ public class RecruitmentObjectiveGradeRepository {
     }
 
     public List<Grade> grades(Integer communityId,long applicationId,long stageId) {
+        return loadGrades(communityId,applicationId,stageId,false);
+    }
+
+    /** Current-read grades, not a repeatable-read snapshot from before the app lock. */
+    public List<Grade> gradesLocked(Integer communityId,long applicationId,long stageId) {
+        return loadGrades(communityId,applicationId,stageId,true);
+    }
+
+    private List<Grade> loadGrades(Integer communityId,long applicationId,long stageId,
+        boolean currentRead) {
         return jdbc.query(
             "SELECT g.attempt_id,g.earned_points,g.possible_points,"
                 + "g.correct_questions,g.total_questions,g.passing_percentage,"
@@ -75,7 +85,8 @@ public class RecruitmentObjectiveGradeRepository {
                 + "ON a.community_id=g.community_id AND a.id=g.attempt_id "
                 + "WHERE a.community_id=? AND a.application_id=? AND a.stage_id=? "
                 + "AND a.status='SUBMITTED' "
-                + "ORDER BY a.attempt_number",
+                + "ORDER BY a.attempt_number"
+                + (currentRead ? " FOR UPDATE" : ""),
             (rs,n)->new Grade(rs.getLong(1),rs.getInt(2),rs.getInt(3),
                 rs.getInt(4),rs.getInt(5),rs.getBigDecimal(6),
                 rs.getBoolean(7),rs.getObject(8,LocalDateTime.class).toInstant(ZoneOffset.UTC)),
