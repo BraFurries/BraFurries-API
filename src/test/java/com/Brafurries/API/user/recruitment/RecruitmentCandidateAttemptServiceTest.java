@@ -272,6 +272,8 @@ class RecruitmentCandidateAttemptServiceTest {
         assertEquals(new java.math.BigDecimal("70.00"),result.get(0).percentage());
         assertFalse(result.toString().contains("passed"));
         assertFalse(result.toString().contains("correctAnswers"));
+        verify(audits).save(org.mockito.ArgumentMatchers.argThat(
+            (CommunityAuditLog log)->"RECRUITMENT_CANDIDATE_GRADE_VIEWED".equals(log.getAction())));
     }
 
     @Test void policyRequiresDraftRevisionAndRejectsUnimplementedBrowserControls() {
