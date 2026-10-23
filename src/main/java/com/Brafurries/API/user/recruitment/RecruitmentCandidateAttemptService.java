@@ -177,6 +177,7 @@ public class RecruitmentCandidateAttemptService {
         // Same DB transaction: either submission + grade + audit all commit,
         // or neither is recorded. The candidate receives no grade or answer key.
         grades.insertGrade(communityId,attemptId,score,grading.passingPercentage());
+        audit(actor,"RECRUITMENT_OBJECTIVE_ATTEMPT_GRADED",attemptId);
         audit(actor,"RECRUITMENT_CANDIDATE_ATTEMPT_SUBMITTED",attemptId);
         return new Submission(attemptId,applicationId,stageId,"SUBMITTED",repository.dbNow());
     }
