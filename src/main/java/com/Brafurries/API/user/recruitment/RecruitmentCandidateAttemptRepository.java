@@ -284,6 +284,34 @@ public class RecruitmentCandidateAttemptRepository {
             .filter(a->a.id()==id).findFirst().orElseThrow();
     }
 
+    /** Draft storage is separate from immutable submitted answers. */
+    public record DraftState(long revision,String answersJson,Instant savedAt) {}
+
+    public DraftState draft(Integer communityId,long applicationId,long stageId,long attemptId) {
+        var rows=jdbc.query(
+            "SELECT draft_revision,draft_answers_json,draft_saved_at "
+                + "FROM recruitment_candidate_attempts "
+                + "WHERE community_id=? AND application_id=? AND stage_id=? AND id=?",
+            (rs,n)->new DraftState(rs.getLong(1),rs.getString(2),
+                utc(rs.getObject(3,LocalDateTime.class))),
+            communityId,applicationId,stageId,attemptId);
+        return rows.isEmpty()?null:rows.get(0);
+    }
+
+    /** CAS and lifecycle conditions still enforced by DB after application lock. */
+    public boolean saveDraft(Integer communityId,long applicationId,long stageId,
+        long attemptId,long expectedRevision,String answersJson) {
+        return jdbc.update(
+            "UPDATE recruitment_candidate_attempts SET "
+                + "draft_answers_json=?,draft_revision=draft_revision+1,"
+                + "draft_saved_at=UTC_TIMESTAMP(6) "
+                + "WHERE community_id=? AND application_id=? AND stage_id=? AND id=? "
+                + "AND status='STARTED' AND draft_revision=? "
+                + "AND expires_at>UTC_TIMESTAMP(6)",
+            answersJson,communityId,applicationId,stageId,attemptId,expectedRevision
+        )==1;
+    }
+
     public boolean expire(Integer communityId,long id) {
         return jdbc.update(
             "UPDATE recruitment_candidate_attempts SET status='EXPIRED' "
@@ -295,7 +323,7 @@ public class RecruitmentCandidateAttemptRepository {
     public boolean submit(Integer communityId,long id,String answerJson) {
         return jdbc.update(
             "UPDATE recruitment_candidate_attempts SET status='SUBMITTED',"
-                + "submitted_at=UTC_TIMESTAMP(6),answers_json=? "
+                + "submitted_at=UTC_TIMESTAMP(6),answers_json=?,draft_answers_json=NULL "
                 + "WHERE community_id=? AND id=? AND status='STARTED' "
                 + "AND expires_at>=UTC_TIMESTAMP(6)",
             answerJson,communityId,id
