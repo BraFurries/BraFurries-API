@@ -104,7 +104,13 @@ public class RecruitmentCandidateAttemptRepository {
                 + "AND ras.process_version_id=a.process_version_id "
                 + "JOIN recruitment_stages s ON s.community_id=ras.community_id "
                 + "AND s.process_version_id=ras.process_version_id AND s.id=ras.stage_id "
-                + "WHERE a.community_id=? AND a.id=? AND s.id=?",
+                + "JOIN recruitment_process_versions v "
+                + "ON v.community_id=a.community_id AND v.process_id=a.process_id "
+                + "AND v.id=a.process_version_id "
+                + "JOIN recruitment_processes p "
+                + "ON p.community_id=a.community_id AND p.id=a.process_id "
+                + "WHERE a.community_id=? AND a.id=? AND s.id=? "
+                + "AND v.status='PUBLISHED' AND p.status='ACTIVE'",
             (rs,n)->new Stage(rs.getLong(1),rs.getLong(2),rs.getInt(3),
                 rs.getString(4),rs.getString(5),rs.getString(6),
                 rs.getString(7),null),
