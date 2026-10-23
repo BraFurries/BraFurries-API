@@ -145,7 +145,7 @@ class RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest {
         assertEquals(3,attempts.focusLosses(981001,created.id()));
         assertTrue(attempts.hasBlockedAttempt(981001,985001,984001));
         assertTrue(attempts.availableExams(981001,985001,981001).get(0).blocked());
-        assertFalse(attempts.submit(981001,created.id(),"{\\"question\\":\\"a\\"}"));
+        assertFalse(attempts.submit(981001,created.id(),"{\"question\":\"a\"}"));
     }
 
     @Test void draftPolicySaveUsesOptimisticRevisionAndCannotWriteOtherCommunity() {
