@@ -31,6 +31,7 @@ class RecruitmentCandidateAttemptServiceTest {
     @Mock CommunityAuthorizationService authz;
     @Mock RecruitmentCandidateAttemptRepository repository;
     @Mock RecruitmentStageDecisionRepository decisions;
+    @Mock RecruitmentObjectiveGradeRepository grades;
     @Mock CommunityAuditLogRepository audits;
     @Mock Authentication auth;
     RecruitmentCandidateAttemptService service;
@@ -43,7 +44,7 @@ class RecruitmentCandidateAttemptServiceTest {
     @BeforeEach void setup() {
         service=new RecruitmentCandidateAttemptService(
             new RecruitmentFeatureGate(true,11),authz,repository,decisions,
-            new RecruitmentFormValidator(),new RecruitmentCandidateAnswerValidator(),
+            grades,new RecruitmentObjectiveScorer(),new RecruitmentFormValidator(),new RecruitmentCandidateAnswerValidator(),
             audits,new ObjectMapper());
     }
     void actor(int id, boolean active, boolean manager) {
@@ -167,12 +168,19 @@ class RecruitmentCandidateAttemptServiceTest {
             new Attempt(800,100,501,1,"STARTED",NOW,NOW.plusSeconds(60),null)));
         when(repository.dbNow()).thenReturn(NOW,NOW);
         when(repository.submit(eq(11),eq(800L),anyString())).thenReturn(true);
+        when(grades.policy(11,80L,501L)).thenReturn(
+            new RecruitmentObjectiveGradeRepository.GradePolicy(
+                new java.math.BigDecimal("70.00"),"BEST"));
         var answer=new ObjectMapper().readTree("\"b\"");
         var result=service.submit(auth,11,100L,501L,800L,
             new SubmitRequest(Map.of("question",answer)));
         assertEquals("SUBMITTED",result.status());
         verify(repository).submit(eq(11),eq(800L),
             org.mockito.ArgumentMatchers.argThat(json->json.contains("\"b\"")));
+        verify(grades).insertGrade(eq(11),eq(800L),
+            org.mockito.ArgumentMatchers.argThat((RecruitmentObjectiveScorer.Score grade)->
+                grade.earnedPoints()==0 && grade.possiblePoints()==10 && !grade.passed()),
+            eq(new java.math.BigDecimal("70.00")));
         verify(decisions,never()).advance(anyInt(),anyLong(),anyLong(),anyString());
         verify(decisions,never()).setApplicationStatus(anyInt(),anyLong(),anyString());
     }
