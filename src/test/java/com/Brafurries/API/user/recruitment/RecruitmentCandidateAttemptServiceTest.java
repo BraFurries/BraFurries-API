@@ -277,6 +277,97 @@ class RecruitmentCandidateAttemptServiceTest {
             (CommunityAuditLog log)->"RECRUITMENT_CANDIDATE_GRADE_VIEWED".equals(log.getAction())));
     }
 
+    private static final String EVENT="00000000-0000-4000-8000-000000000001";
+
+    @Test void focusEventCountsOnceAndReportsRemainingLimit() {
+        owner(new Policy(2,120,null,true,3,false));
+        when(repository.attemptsLocked(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"STARTED",NOW,NOW.plusSeconds(120),null)));
+        when(repository.dbNow()).thenReturn(NOW);
+        when(repository.incrementFocusLoss(11,800)).thenReturn(true);
+        var result=service.recordIntegrityEvent(auth,11,100L,501L,800L,
+            new IntegrityEventRequest(EVENT,"FOCUS_LOST","TAB_HIDDEN"));
+        assertEquals(1,result.focusLosses());
+        assertFalse(result.blocked());
+        verify(repository).insertIntegrityEvent(11,800,EVENT,"FOCUS_LOST","TAB_HIDDEN");
+        verify(repository,never()).blockAttempt(anyInt(),anyLong(),anyInt());
+    }
+
+    @Test void sameUuidCannotIncrementFocusTwice() {
+        owner(new Policy(2,120,null,true,3,false));
+        when(repository.attemptsLocked(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"STARTED",NOW,NOW.plusSeconds(120),null)));
+        when(repository.eventExists(11,800,EVENT)).thenReturn(true);
+        when(repository.focusLosses(11,800)).thenReturn(1);
+        var result=service.recordIntegrityEvent(auth,11,100L,501L,800L,
+            new IntegrityEventRequest(EVENT,"FOCUS_LOST","WINDOW_BLUR"));
+        assertEquals(1,result.focusLosses());
+        verify(repository,never()).incrementFocusLoss(anyInt(),anyLong());
+        verify(repository,never()).insertIntegrityEvent(anyInt(),anyLong(),anyString(),anyString(),anyString());
+        verifyNoInteractions(audits);
+    }
+
+    @Test void thirdFocusLossBlocksAttemptAndAuditsIt() {
+        owner(new Policy(2,120,null,true,3,false));
+        when(repository.attemptsLocked(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"STARTED",NOW,NOW.plusSeconds(120),null)));
+        when(repository.dbNow()).thenReturn(NOW);
+        when(repository.focusLosses(11,800)).thenReturn(2);
+        when(repository.incrementFocusLoss(11,800)).thenReturn(true);
+        when(repository.blockAttempt(11,800,3)).thenReturn(true);
+        var result=service.recordIntegrityEvent(auth,11,100L,501L,800L,
+            new IntegrityEventRequest(EVENT,"FOCUS_LOST","TAB_HIDDEN"));
+        assertTrue(result.blocked());
+        assertEquals("BLOCKED",result.status());
+        assertEquals(3,result.focusLosses());
+        verify(audits).save(org.mockito.ArgumentMatchers.argThat(
+            (CommunityAuditLog log)->"RECRUITMENT_EXAM_ATTEMPT_BLOCKED".equals(log.getAction())));
+    }
+
+    @Test void blockedStageCannotStartAnotherAttempt() {
+        owner(new Policy(5,120,null,true,3,false));
+        when(repository.attempts(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"BLOCKED",NOW,NOW.plusSeconds(120),null)));
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->service.start(auth,11,100L,501L)).getStatusCode());
+        verify(repository,never()).create(anyInt(),anyLong(),anyLong(),anyLong(),anyInt(),any());
+    }
+
+    @Test void copySignalIsInformativeAndDoesNotCountFocusLosses() {
+        owner(new Policy(2,120,null,true,3,true));
+        when(repository.attemptsLocked(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"STARTED",NOW,NOW.plusSeconds(120),null)));
+        when(repository.dbNow()).thenReturn(NOW);
+        var result=service.recordIntegrityEvent(auth,11,100L,501L,800L,
+            new IntegrityEventRequest(EVENT,"COPY_PREVENTED","COPY"));
+        assertFalse(result.blocked());
+        assertEquals(0,result.focusLosses());
+        verify(repository,never()).incrementFocusLoss(anyInt(),anyLong());
+        verify(repository).insertIntegrityEvent(11,800,EVENT,"COPY_PREVENTED","COPY");
+    }
+
+    @Test void cannotInjectEventsForDisabledControlsOrInvalidUuid() {
+        owner(new Policy(2,120,null,true,null,false));
+        when(repository.attemptsLocked(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"STARTED",NOW,NOW.plusSeconds(120),null)));
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->service.recordIntegrityEvent(auth,11,100L,501L,800L,
+                new IntegrityEventRequest(EVENT,"FOCUS_LOST","TAB_HIDDEN"))).getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
+            ()->service.recordIntegrityEvent(auth,11,100L,501L,800L,
+                new IntegrityEventRequest("not-a-uuid","FOCUS_LOST","TAB_HIDDEN"))).getStatusCode());
+        verify(repository,never()).insertIntegrityEvent(anyInt(),anyLong(),anyString(),anyString(),anyString());
+    }
+
+    @Test void unauthorizedCandidateCannotRegisterAnotherPersonsFocusLoss() {
+        actor(101,true,false);
+        when(decisions.lockApplication(11,100L)).thenReturn(new Application(100,80,99,"IN_PROGRESS"));
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
+            ()->service.recordIntegrityEvent(auth,11,100L,501L,800L,
+                new IntegrityEventRequest(EVENT,"FOCUS_LOST","TAB_HIDDEN"))).getStatusCode());
+        verifyNoInteractions(repository,audits);
+    }
+
     @Test void policyRequiresDraftRevisionAndRejectsUnimplementedBrowserControls() {
         actor(77,true,true);
         var config=new ConfigureRequest(4L,2,120,null,false,3,true);
