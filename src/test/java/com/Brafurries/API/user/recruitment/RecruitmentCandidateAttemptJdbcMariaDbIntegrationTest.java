@@ -192,7 +192,7 @@ class RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest {
         assertTrue(attempts.hasReinstatement(981001,985001,984001,before.id()));
         assertFalse(attempts.hasReinstatement(981002,985001,984001,before.id()));
         assertFalse(reviews.reopenBlocked(981001,985001,984001,before.id(),3,expiry));
-        assertThrows(DataIntegrityViolationException.class,()->
+        assertThrows(IllegalStateException.class,()->
             reviews.insertReinstatement(981001,985001,984001,before.id(),981002,
                 reason,3,expiry));
     }
@@ -210,11 +210,15 @@ class RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest {
     @Test void integrityAndManagerAuditTimestampsAreUtcAcrossSessionTimezones() {
         var created=attempts.create(981001,985001,983001,984001,1,
             attempts.dbNow().plusSeconds(90));
+        jdbc.update("UPDATE recruitment_stage_attempt_policies SET max_focus_losses=1 "
+            +"WHERE community_id=981001 AND stage_id=984001");
         try {
             // Session timezone is intentionally different from UTC.
             jdbc.execute("SET time_zone='+03:00'");
             attempts.insertIntegrityEvent(981001,created.id(),
                 "00000000-0000-4000-8000-000000000011","FOCUS_LOST","TAB_HIDDEN");
+            assertTrue(attempts.incrementFocusLoss(981001,created.id()));
+            assertTrue(attempts.blockAttempt(981001,created.id(),1));
             reviews.insertReinstatement(981001,985001,984001,created.id(),981002,
                 "Análise identificou interrupção involuntária do sistema",3,
                 attempts.dbNow().plusSeconds(1800));
