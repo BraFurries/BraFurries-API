@@ -43,6 +43,7 @@ Base:
 
 | Método | Rota | Permissão |
 | --- | --- | --- |
+| GET | `/availability` | Avaliador designado ativo: informa apenas se a etapa utiliza votação e se o próprio parecer/voto foi submetido, sem totais ou outros votantes |
 | GET | `/mine` | Avaliador designado e com capacidade de revisar; mostra apenas o próprio voto |
 | POST | `/mine` | Avaliador designado, ativo e com parecer já submetido; `{"choice":"APPROVE"}` ou `{"choice":"REJECT"}` |
 | GET | `/tally` | Gestor ativo; apenas totais, quórum e política de empate |
