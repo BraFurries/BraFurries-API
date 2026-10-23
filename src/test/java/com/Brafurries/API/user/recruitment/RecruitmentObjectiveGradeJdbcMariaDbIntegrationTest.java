@@ -113,7 +113,7 @@ class RecruitmentObjectiveGradeJdbcMariaDbIntegrationTest {
     @Test void decisionAttemptMustBelongToExactApplicationAndStage() {
         var attempt=attempts.create(981001,985001,983001,984001,1,
             attempts.dbNow().plusSeconds(90));
-        assertTrue(attempts.submit(981001,attempt.id(),"{\\"answer\\":\\"a\\"}"));
+        assertTrue(attempts.submit(981001,attempt.id(),"{\"answer\":\"a\"}"));
         grades.insertGrade(981001,attempt.id(),
             new RecruitmentObjectiveScorer.Score(8,10,1,2,true),
             new BigDecimal("70.00"));
