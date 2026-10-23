@@ -136,7 +136,7 @@ class RecruitmentObjectiveGradeJdbcMariaDbIntegrationTest {
             "SELECT decision_source FROM recruitment_stage_decisions "
                 +"WHERE community_id=981001 AND application_id=985001 AND stage_id=984001",
             String.class));
-        assertEquals(attempt.id(),jdbc.queryForObject(
+        assertEquals(Long.valueOf(attempt.id()),jdbc.queryForObject(
             "SELECT objective_attempt_id FROM recruitment_stage_decisions "
                 +"WHERE community_id=981001 AND application_id=985001 AND stage_id=984001",
             Long.class));
