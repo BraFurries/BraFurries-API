@@ -71,9 +71,9 @@ class RecruitmentCandidateAnswerValidatorTest {
 
     @Test void partialDraftAllowsMissingRequiredAndClearedAnswers() {
         var draft=validator.validatePartial(form(),Map.of(
-            "vote",node("\\"b\\""),
+            "vote",node("\"b\""),
             "skills",node("[]"),
-            "bio",node("\\"   \\"")));
+            "bio",node("\"   \"")));
         assertEquals(1,draft.size());
         assertEquals("b",draft.get("vote").asText());
         assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
@@ -82,7 +82,7 @@ class RecruitmentCandidateAnswerValidatorTest {
 
     @Test void partialDraftStillRejectsInvalidOrUnknownFields() {
         assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
-            ()->validator.validatePartial(form(),Map.of("vote",node("\\"other\\""))))
+            ()->validator.validatePartial(form(),Map.of("vote",node("\"other\""))))
             .getStatusCode());
         assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
             ()->validator.validatePartial(form(),Map.of("secret",node("null"))))
