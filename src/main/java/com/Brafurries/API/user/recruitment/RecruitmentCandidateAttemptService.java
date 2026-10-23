@@ -170,7 +170,8 @@ public class RecruitmentCandidateAttemptService {
         }
         // Hard deadline may have been reached while the candidate was answering.
         if(stage.policy().hardDeadline() && stage.policy().deadlineAt()!=null &&
-           !now.isBefore(stage.policy().deadlineAt())) {
+           !now.isBefore(stage.policy().deadlineAt()) &&
+           !repository.hasReinstatement(communityId,applicationId,stageId,attemptId)) {
             repository.expire(communityId,attempt.id());
             throw conflict("Prazo rígido da etapa encerrado");
         }
