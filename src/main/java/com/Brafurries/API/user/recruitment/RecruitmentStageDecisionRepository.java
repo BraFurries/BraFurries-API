@@ -125,6 +125,39 @@ public class RecruitmentStageDecisionRepository {
         return generated.getKey().longValue();
     }
 
+    /** Objective decisions are manager-accountable, but score-determined and traceable. */
+    public long insertObjectiveDecision(Integer communityId,long applicationId,long stageId,
+        int actorId,String outcome,String reason,Long selectedAttemptId) {
+        var keys=new GeneratedKeyHolder();
+        jdbc.update(conn->{
+            var s=conn.prepareStatement(
+                "INSERT INTO recruitment_stage_decisions "
+                    + "(community_id,application_id,stage_id,decided_by_user_id,"
+                    + "outcome,reason,decision_source,objective_attempt_id) "
+                    + "VALUES (?,?,?,?,?,?,'OBJECTIVE_GRADE',?)",
+                Statement.RETURN_GENERATED_KEYS);
+            s.setInt(1,communityId);s.setLong(2,applicationId);
+            s.setLong(3,stageId);s.setInt(4,actorId);
+            s.setString(5,outcome);s.setString(6,reason);
+            if(selectedAttemptId==null) s.setNull(7,java.sql.Types.BIGINT);
+            else s.setLong(7,selectedAttemptId);
+            return s;
+        },keys);
+        if(keys.getKey()==null) throw new IllegalStateException("Decisão objetiva sem ID");
+        return keys.getKey().longValue();
+    }
+
+    /** Objective exams end from their candidate-facing status, not human-review status. */
+    public boolean completeObjective(Integer communityId,long applicationId,long stageId) {
+        return jdbc.update(
+            "UPDATE recruitment_application_stages SET status='COMPLETED',"
+                + "completed_at=UTC_TIMESTAMP(6) "
+                + "WHERE community_id=? AND application_id=? AND stage_id=? "
+                + "AND status='AWAITING_CANDIDATE'",
+            communityId,applicationId,stageId
+        )==1;
+    }
+
     public boolean complete(Integer communityId, long applicationId, long stageId) {
         return jdbc.update(
             "UPDATE recruitment_application_stages SET status='COMPLETED',"
