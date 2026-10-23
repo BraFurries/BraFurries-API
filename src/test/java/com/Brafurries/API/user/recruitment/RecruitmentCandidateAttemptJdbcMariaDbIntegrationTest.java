@@ -28,7 +28,8 @@ import java.time.ZoneOffset;
     "spring.jpa.hibernate.ddl-auto=validate","spring.jpa.open-in-view=false"
 })
 @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
-@Import({RecruitmentCandidateAttemptRepository.class,RecruitmentExamReviewRepository.class})
+@Import({RecruitmentCandidateAttemptRepository.class,RecruitmentExamReviewRepository.class,
+    RecruitmentExamNoticeRepository.class})
 class RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest {
     @Container @ServiceConnection
     static MariaDBContainer<?> database=new MariaDBContainer<>("mariadb:10.6.28")
@@ -39,6 +40,7 @@ class RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest {
     @Autowired JdbcTemplate jdbc;
     @Autowired RecruitmentCandidateAttemptRepository attempts;
     @Autowired RecruitmentExamReviewRepository reviews;
+    @Autowired RecruitmentExamNoticeRepository notices;
 
     @BeforeEach void seed() {
         jdbc.update("INSERT INTO users (id,username) VALUES "
@@ -205,6 +207,33 @@ class RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest {
             +"(community_id,attempt_id,event_uuid,event_type,source) VALUES "
             +"(?,? ,?,'FOCUS_LOST','WINDOW_BLUR')",tenant,attemptId,
             String.format("00000000-0000-4000-8000-%012d",count));
+    }
+
+    @Test void incidentNoticesAreTenantScopedAndIndividuallyAcknowledged() {
+        var attempt=attempts.create(981001,985001,983001,984001,1,
+            attempts.dbNow().plusSeconds(90));
+        notices.record(981001,985001,984001,attempt.id(),"BLOCKED",null);
+        notices.record(981001,985001,984001,attempt.id(),"REINSTATED",
+            attempts.dbNow().plusSeconds(1800));
+        // A second block after administrative reinstatement is a distinct event.
+        notices.record(981001,985001,984001,attempt.id(),"BLOCKED",null);
+        var candidate=notices.candidate(981001,985001,981001);
+        assertEquals(3,candidate.size());
+        assertEquals("BLOCKED",candidate.get(0).eventType());
+        assertFalse(candidate.get(0).read());
+        assertTrue(notices.candidate(981002,985001,981001).isEmpty());
+        assertTrue(notices.candidate(981001,985001,981003).isEmpty());
+        assertEquals(3,notices.staff(981001,982001,981002).size());
+        assertTrue(notices.staff(981001,982002,981002).isEmpty());
+        assertTrue(notices.staff(981002,982001,981002).isEmpty());
+        assertFalse(notices.staffNoticeExists(981001,982002,candidate.get(0).id(),981002));
+        assertTrue(notices.candidateNoticeExists(981001,985001,candidate.get(0).id(),981001));
+        notices.markRead(981001,candidate.get(0).id(),981001);
+        notices.markRead(981001,candidate.get(0).id(),981001);
+        assertTrue(notices.candidate(981001,985001,981001).get(0).read());
+        assertFalse(notices.staff(981001,982001,981002).get(0).read());
+        assertThrows(DataIntegrityViolationException.class,
+            ()->notices.markRead(981002,candidate.get(0).id(),981003));
     }
 
     @Test void draftCasIsTenantSafeAndDoesNotChangeFinalSubmission() {
