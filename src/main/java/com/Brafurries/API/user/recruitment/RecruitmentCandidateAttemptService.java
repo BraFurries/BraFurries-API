@@ -63,6 +63,10 @@ public class RecruitmentCandidateAttemptService {
         Integer maxFocusLosses,boolean blockCopy,int focusLosses
     ) {}
     public record SubmitRequest(Map<String,JsonNode> answers) {}
+    public record DraftRequest(Long expectedRevision,Map<String,JsonNode> answers) {}
+    public record DraftResponse(long attemptId,long revision,Instant savedAt,
+        Map<String,JsonNode> answers) {}
+
     public record IntegrityEventRequest(String eventId,String eventType,String source) {}
     public record IntegrityEventReceipt(
         String eventId,String status,int focusLosses,Integer maxFocusLosses,boolean blocked
@@ -144,6 +148,71 @@ public class RecruitmentCandidateAttemptService {
             attempts.size()+1,expires);
         audit(actor,"RECRUITMENT_CANDIDATE_ATTEMPT_STARTED",created.id());
         return session(communityId,created,stage.formJson(),now,stage.policy());
+    }
+
+    /** Own-attempt draft only; never exposes the answer key or a score. */
+    @Transactional
+    public DraftResponse draft(Authentication auth,Integer communityId,
+        Long applicationId,Long stageId,Long attemptId) {
+        var ctx=editableDraft(auth,communityId,applicationId,stageId,attemptId);
+        return loadDraft(communityId,applicationId,stageId,ctx.attempt().id());
+    }
+
+    /** Revision-based CAS prevents stale tabs and slow requests from overwriting newer data. */
+    @Transactional
+    public DraftResponse saveDraft(Authentication auth,Integer communityId,
+        Long applicationId,Long stageId,Long attemptId,DraftRequest request) {
+        if(request==null || request.expectedRevision()==null ||
+           request.expectedRevision()<0 || request.answers()==null)
+            throw bad("Revisão e respostas do rascunho são obrigatórias");
+        var ctx=editableDraft(auth,communityId,applicationId,stageId,attemptId);
+        var validated=answerValidator.validatePartial(internalForm(ctx.stage().formJson()),
+            request.answers());
+        final String serialized;
+        try { serialized=json.writeValueAsString(validated); }
+        catch(JsonProcessingException ex) { throw bad("Rascunho inválido"); }
+        if(serialized.length()>100000) throw bad("Rascunho excede o limite");
+        if(!repository.saveDraft(communityId,applicationId,stageId,attemptId,
+            request.expectedRevision(),serialized))
+            throw conflict("Rascunho alterado em outra sessão ou tentativa encerrada");
+        return loadDraft(communityId,applicationId,stageId,attemptId);
+    }
+
+    private record DraftContext(Stage stage,Attempt attempt) {}
+    private DraftContext editableDraft(Authentication auth,Integer communityId,
+        Long applicationId,Long stageId,Long attemptId) {
+        var actor=candidate(auth,communityId);
+        validateIds(applicationId,stageId);
+        if(attemptId==null || attemptId<=0) throw bad("Tentativa inválida");
+        var locked=decisions.lockApplication(communityId,applicationId);
+        if(locked==null || locked.candidateId()!=actor.user().getId()) throw missing();
+        var st=stage(communityId,applicationId,stageId,locked.versionId());
+        var at=repository.attemptsLocked(communityId,applicationId,stageId)
+            .stream().filter(a->a.id()==attemptId).findFirst().orElse(null);
+        if(at==null) throw missing();
+        var now=repository.dbNow();
+        if(!"STARTED".equals(at.status()) || !now.isBefore(at.expiresAt()))
+            throw conflict("Tentativa bloqueada, encerrada ou expirada");
+        if(st.policy().hardDeadline() && st.policy().deadlineAt()!=null
+           && !now.isBefore(st.policy().deadlineAt())
+           && !repository.hasReinstatement(communityId,applicationId,stageId,attemptId))
+            throw conflict("Prazo rígido da etapa encerrado");
+        return new DraftContext(st,at);
+    }
+
+    private DraftResponse loadDraft(Integer communityId,long applicationId,
+        long stageId,long attemptId) {
+        var saved=repository.draft(communityId,applicationId,stageId,attemptId);
+        if(saved==null) throw missing();
+        final Map<String,JsonNode> answers;
+        try {
+            answers=saved.answersJson()==null ? Map.of() :
+                json.readValue(saved.answersJson(),
+                    new com.fasterxml.jackson.core.type.TypeReference<Map<String,JsonNode>>(){});
+        } catch(JsonProcessingException ex) {
+            throw conflict("Rascunho armazenado inválido");
+        }
+        return new DraftResponse(attemptId,saved.revision(),saved.savedAt(),answers);
     }
 
     @Transactional
