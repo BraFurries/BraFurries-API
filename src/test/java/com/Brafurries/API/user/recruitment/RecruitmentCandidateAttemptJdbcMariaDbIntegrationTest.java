@@ -207,6 +207,29 @@ class RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest {
             String.format("00000000-0000-4000-8000-%012d",count));
     }
 
+    @Test void draftCasIsTenantSafeAndDoesNotChangeFinalSubmission() {
+        var attempt=attempts.create(981001,985001,983001,984001,1,
+            attempts.dbNow().plusSeconds(180));
+        assertEquals(0,attempts.draft(981001,985001,984001,attempt.id()).revision());
+        assertFalse(attempts.saveDraft(981002,985001,984001,attempt.id(),0,
+            "{\\"question\\":\\"a\\"}"));
+        assertTrue(attempts.saveDraft(981001,985001,984001,attempt.id(),0,
+            "{\\"question\\":\\"a\\"}"));
+        assertFalse(attempts.saveDraft(981001,985001,984001,attempt.id(),0,
+            "{\\"question\\":\\"old\\"}"));
+        assertEquals(1,attempts.draft(981001,985001,984001,attempt.id()).revision());
+        assertEquals("{\\"question\\":\\"a\\"}",
+            attempts.draft(981001,985001,984001,attempt.id()).answersJson());
+        assertTrue(attempts.submit(981001,attempt.id(),"{\\"question\\":\\"b\\"}"));
+        assertFalse(attempts.saveDraft(981001,985001,984001,attempt.id(),1,
+            "{\\"question\\":\\"a\\"}"));
+        assertNull(attempts.draft(981001,985001,984001,attempt.id()).answersJson());
+        assertEquals("{\\"question\\":\\"b\\"}",jdbc.queryForObject(
+            "SELECT answers_json FROM recruitment_candidate_attempts "
+                +"WHERE community_id=981001 AND id=?",
+            String.class,attempt.id()));
+    }
+
     @Test void integrityAndManagerAuditTimestampsAreUtcAcrossSessionTimezones() {
         var created=attempts.create(981001,985001,983001,984001,1,
             attempts.dbNow().plusSeconds(90));
