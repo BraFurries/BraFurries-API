@@ -31,7 +31,11 @@ public class RecruitmentObjectiveGradeService {
     }
 
     public record ConfigureRequest(Long expectedRevision,BigDecimal passingPercentage,
-                                    String resultStrategy) {}
+                                    String resultStrategy,String scoreVisibility) {
+        public ConfigureRequest(Long revision,BigDecimal percentage,String strategy) {
+            this(revision,percentage,strategy,"PRIVATE");
+        }
+    }
     public record Configured(long processVersionId,long stageId,long revision,
                              GradePolicy policy) {}
     public record GradeSummary(long applicationId,long stageId,GradePolicy policy,
@@ -49,7 +53,9 @@ public class RecruitmentObjectiveGradeService {
            request.passingPercentage().compareTo(new BigDecimal("100"))>0 ||
            request.passingPercentage().scale()>2 ||
            !List.of("BEST","LAST").contains(
-               request.resultStrategy()==null?"":request.resultStrategy())) {
+               request.resultStrategy()==null?"":request.resultStrategy()) ||
+           !List.of("PRIVATE","AFTER_SUBMISSION").contains(
+               request.scoreVisibility()==null?"":request.scoreVisibility())) {
             throw bad("Nota de corte (1–100%) e estratégia BEST/LAST obrigatórias");
         }
         var locked=attempts.lockDraft(communityId,processId,stageId);
@@ -59,12 +65,27 @@ public class RecruitmentObjectiveGradeService {
            !"AUTO_EVALUATION".equals(locked.stageType()) ||
            locked.revision()!=request.expectedRevision())
             throw conflict("Etapa não editável ou revisão desatualizada");
-        var policy=new GradePolicy(request.passingPercentage(),request.resultStrategy());
+        var policy=new GradePolicy(request.passingPercentage(),request.resultStrategy(),
+            request.scoreVisibility());
         if(!grades.configure(communityId,processId,locked.versionId(),
             stageId,request.expectedRevision(),policy))
             throw conflict("Rascunho alterado");
         audit(actor,"RECRUITMENT_GRADE_POLICY_UPDATED",stageId);
         return new Configured(locked.versionId(),stageId,locked.revision()+1,policy);
+    }
+
+    /** Read frozen or draft policy for a manager; no candidate access. */
+    @Transactional
+    public Configured policy(Authentication auth,Integer communityId,
+        Long processId,Long stageId) {
+        manager(auth,communityId);
+        if(processId==null||processId<=0||stageId==null||stageId<=0)
+            throw bad("Processo e etapa obrigatórios");
+        var stage=attempts.lockDraft(communityId,processId,stageId);
+        if(stage==null || !"AUTO_EVALUATION".equals(stage.stageType())) throw missing();
+        var policy=grades.policy(communityId,stage.versionId(),stageId);
+        if(policy==null) throw missing();
+        return new Configured(stage.versionId(),stageId,stage.revision(),policy);
     }
 
     /** No results become final or candidate-visible during this delivery. */
