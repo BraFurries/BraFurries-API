@@ -156,6 +156,6 @@ class RecruitmentDraftJdbcMariaDbIntegrationTest {
             Integer.class
         );
         // Includes the stage-decision table from Database #16.
-        assertEquals(117, count);
+        assertEquals(119, count);
     }
 }
