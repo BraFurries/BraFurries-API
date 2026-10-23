@@ -125,6 +125,8 @@ class RecruitmentObjectiveGradeJdbcMariaDbIntegrationTest {
             981001,985001,984001,981002,
             "APPROVE","Nota de corte alcançada",attempt.id());
         assertTrue(decisionId>0);
+        assertTrue(grades.finalized(981001,985001,984001));
+        assertFalse(grades.finalized(981002,985001,984001));
         assertEquals("OBJECTIVE_GRADE",jdbc.queryForObject(
             "SELECT decision_source FROM recruitment_stage_decisions "
                 +"WHERE community_id=981001 AND application_id=985001 AND stage_id=984001",
