@@ -145,7 +145,7 @@ class RecruitmentPublicationServiceTest {
                 "{\"questions\":[{\"id\":\"why\",\"label\":\"Motivação\",\"type\":\"SHORT_TEXT\",\"required\":true}]}",
                 null),
             new RecruitmentPublicationRepository.DraftStage(81L,2,"DECISION",null,null,
-                "{\"reviewMode\":\"COLLECTIVE\",\"decisionMode\":\"AUTOMATIC_VOTE\",\"minimumAssessments\":2}")));
+                "{\"reviewMode\":\"COLLECTIVE\",\"decisionMode\":\"AUTOMATIC_VOTE\",\"minimumAssessments\":2,\"minimumVotes\":2,\"tiePolicy\":\"MANAGER_OVERRIDE\"}")));
         var check=service.preview(auth,tenant,processId);
         assertFalse(check.ready());
         assertTrue(check.blockers().stream().anyMatch(b->b.contains("votação automática")));
