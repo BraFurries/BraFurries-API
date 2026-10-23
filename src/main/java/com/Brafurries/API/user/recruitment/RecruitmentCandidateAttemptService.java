@@ -59,9 +59,14 @@ public class RecruitmentCandidateAttemptService {
     public record PolicyResponse(long stageId,long versionId,long draftRevision,Policy policy) {}
     public record AttemptSession(
         long attemptId,long applicationId,long stageId,int attemptNumber,
-        String status,Instant expiresAt,Instant serverNow,PublicForm form
+        String status,Instant expiresAt,Instant serverNow,PublicForm form,
+        Integer maxFocusLosses,boolean blockCopy,int focusLosses
     ) {}
     public record SubmitRequest(Map<String,JsonNode> answers) {}
+    public record IntegrityEventRequest(String eventId,String eventType,String source) {}
+    public record IntegrityEventReceipt(
+        String eventId,String status,int focusLosses,Integer maxFocusLosses,boolean blocked
+    ) {}
     /** Only numeric exam grade: NEVER pass/fail, gabarito or final selection outcome. */
     public record PublicScore(long attemptId,int earnedPoints,int possiblePoints,
         java.math.BigDecimal percentage) {}
@@ -83,9 +88,9 @@ public class RecruitmentCandidateAttemptService {
             request.timeLimitSeconds()==null || request.timeLimitSeconds()<60 ||
             request.timeLimitSeconds()>14400 || request.hardDeadline()==null)
             throw bad("Limites e revisão inválidos");
-        // Browser-only restrictions are a later increment; reject promises we cannot enforce.
-        if(request.maxFocusLosses()!=null || Boolean.TRUE.equals(request.blockCopy()))
-            throw bad("Controles de foco e cópia ainda não estão disponíveis nesta versão");
+        if(request.maxFocusLosses()!=null &&
+            (request.maxFocusLosses()<1 || request.maxFocusLosses()>10))
+            throw bad("Limite de saídas deve ser de 1 a 10");
         if(request.deadlineAt()!=null && request.deadlineAt().isBefore(Instant.now()))
             throw bad("O prazo final deve estar no futuro");
         var stage=repository.lockDraft(communityId,processId,stageId);
@@ -96,7 +101,8 @@ public class RecruitmentCandidateAttemptService {
            stage.revision()!=request.expectedRevision())
             throw conflict("Etapa não editável ou revisão desatualizada");
         var policy=new Policy(request.maxAttempts(),request.timeLimitSeconds(),
-            request.deadlineAt(),request.hardDeadline(),null,false);
+            request.deadlineAt(),request.hardDeadline(),
+            request.maxFocusLosses(),Boolean.TRUE.equals(request.blockCopy()));
         if(!repository.savePolicy(communityId,processId,stageId,stage.versionId(),
                 request.expectedRevision(),policy))
             throw conflict("Rascunho alterado");
@@ -117,9 +123,11 @@ public class RecruitmentCandidateAttemptService {
         var now=repository.dbNow();
         // Idempotent retry/resume of the exact current attempt, serialized by application.
         var attempts=repository.attempts(communityId,applicationId,stageId);
+        if(attempts.stream().anyMatch(a->"BLOCKED".equals(a.status())))
+            throw conflict("Prova bloqueada por limite de saídas da tela");
         for(var attempt:attempts) {
             if(!"STARTED".equals(attempt.status())) continue;
-            if(now.isBefore(attempt.expiresAt())) return session(attempt,stage.formJson(),now);
+            if(now.isBefore(attempt.expiresAt())) return session(communityId,attempt,stage.formJson(),now,stage.policy());
             repository.expire(communityId,attempt.id());
         }
         if(stage.policy().deadlineAt()!=null && !now.isBefore(stage.policy().deadlineAt()))
@@ -135,7 +143,7 @@ public class RecruitmentCandidateAttemptService {
         var created=repository.create(communityId,applicationId,stage.versionId(),stageId,
             attempts.size()+1,expires);
         audit(actor,"RECRUITMENT_CANDIDATE_ATTEMPT_STARTED",created.id());
-        return session(created,stage.formJson(),now);
+        return session(communityId,created,stage.formJson(),now,stage.policy());
     }
 
     @Transactional
@@ -236,6 +244,75 @@ public class RecruitmentCandidateAttemptService {
                 .divide(java.math.BigDecimal.valueOf(total),2,java.math.RoundingMode.HALF_UP));
     }
 
+    /**
+     * Browser-provided integrity events are advisory, not proof of cheating.
+     * The application's FOR UPDATE lock serializes start, submit, event and finalization.
+     */
+    @Transactional
+    public IntegrityEventReceipt recordIntegrityEvent(
+        Authentication auth,Integer communityId,Long applicationId,Long stageId,
+        Long attemptId,IntegrityEventRequest request
+    ) {
+        var actor=candidate(auth,communityId);
+        validateIds(applicationId,stageId);
+        if(attemptId==null || attemptId<=0 || request==null ||
+            request.eventId()==null || request.eventType()==null || request.source()==null)
+            throw bad("Identificador, tipo e origem do evento são obrigatórios");
+        final String uuid;
+        try { uuid=java.util.UUID.fromString(request.eventId()).toString(); }
+        catch(IllegalArgumentException ex) { throw bad("Identificador de evento inválido"); }
+        if(!uuid.equals(request.eventId()))
+            throw bad("Identificador de evento deve ser UUID canônico");
+        boolean focus="FOCUS_LOST".equals(request.eventType());
+        boolean copied="COPY_PREVENTED".equals(request.eventType());
+        if(!(focus && List.of("TAB_HIDDEN","WINDOW_BLUR").contains(request.source())) &&
+           !(copied && List.of("COPY","CUT","CONTEXT_MENU").contains(request.source())))
+            throw bad("Tipo ou origem de evento inválidos");
+
+        var locked=decisions.lockApplication(communityId,applicationId);
+        if(locked==null || locked.candidateId()!=actor.user().getId()) throw missing();
+        var stage=stage(communityId,applicationId,stageId,locked.versionId());
+        var attempt=repository.attemptsLocked(communityId,applicationId,stageId)
+            .stream().filter(a->a.id()==attemptId).findFirst().orElse(null);
+        if(attempt==null) throw missing();
+        var policy=stage.policy();
+        if((focus && policy.maxFocusLosses()==null) || (copied && !policy.blockCopy()))
+            throw conflict("Este monitoramento não está habilitado na etapa");
+
+        // Replaying the same UUID cannot increment focus_losses twice.
+        if(repository.eventExists(communityId,attemptId,uuid)) {
+            int current=repository.focusLosses(communityId,attemptId);
+            return new IntegrityEventReceipt(uuid,attempt.status(),current,
+                policy.maxFocusLosses(),"BLOCKED".equals(attempt.status()));
+        }
+        if(!"STARTED".equals(attempt.status()) ||
+           !repository.dbNow().isBefore(attempt.expiresAt()))
+            throw conflict("Tentativa encerrada ou expirada");
+        // Copying remains blocked in browser regardless of logging cap; bound
+        // voluntary event storage to prevent excessively large audit tables.
+        if(copied && repository.eventCount(communityId,attemptId)>=100)
+            throw conflict("Limite de eventos informativos atingido");
+        repository.insertIntegrityEvent(communityId,attemptId,uuid,
+            request.eventType(),request.source());
+        int count=repository.focusLosses(communityId,attemptId);
+        boolean blocked=false;
+        if(focus) {
+            if(!repository.incrementFocusLoss(communityId,attemptId))
+                throw conflict("Contagem de foco alterada durante a tentativa");
+            count++;
+            if(count>=policy.maxFocusLosses()) {
+                if(!repository.blockAttempt(communityId,attemptId,policy.maxFocusLosses()))
+                    throw conflict("Tentativa alterada durante o bloqueio");
+                blocked=true;
+            }
+        }
+        audit(actor,blocked?"RECRUITMENT_EXAM_ATTEMPT_BLOCKED":
+            focus?"RECRUITMENT_EXAM_FOCUS_LOST":"RECRUITMENT_EXAM_COPY_PREVENTED",
+            attemptId);
+        return new IntegrityEventReceipt(uuid,blocked?"BLOCKED":"STARTED",
+            count,policy.maxFocusLosses(),blocked);
+    }
+
     private Stage stage(Integer communityId,long applicationId,long stageId,long version) {
         var stage=repository.stage(communityId,applicationId,stageId);
         if(stage==null || stage.versionId()!=version || stage.policy()==null ||
@@ -246,7 +323,8 @@ public class RecruitmentCandidateAttemptService {
         return stage;
     }
 
-    private AttemptSession session(Attempt attempt,String formJson,Instant serverNow) {
+    private AttemptSession session(Integer communityId,Attempt attempt,String formJson,
+        Instant serverNow,Policy policy) {
         var form=internalForm(formJson);
         var fields=form.questions().stream().map(q->new PublicQuestion(
             q.id(),q.label(),q.type().name(),q.required(),
@@ -254,7 +332,9 @@ public class RecruitmentCandidateAttemptService {
                 .map(o->new PublicOption(o.id(),o.label())).toList(),
             q.minValue(),q.maxValue())).toList();
         return new AttemptSession(attempt.id(),attempt.applicationId(),attempt.stageId(),
-            attempt.number(),attempt.status(),attempt.expiresAt(),serverNow,new PublicForm(fields));
+            attempt.number(),attempt.status(),attempt.expiresAt(),serverNow,new PublicForm(fields),
+            policy.maxFocusLosses(),policy.blockCopy(),
+            repository.focusLosses(communityId,attempt.id()));
     }
 
     private RecruitmentFormDefinition internalForm(String source) {
