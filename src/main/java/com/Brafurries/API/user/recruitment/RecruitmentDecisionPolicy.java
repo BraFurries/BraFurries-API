@@ -27,7 +27,18 @@ public record RecruitmentDecisionPolicy(
     public static RecruitmentDecisionPolicy parse(ObjectMapper mapper,String stored) {
         if (stored==null || stored.isBlank()) return legacyDefault();
         try {
-            return validate(mapper.readValue(stored,RecruitmentDecisionPolicy.class));
+            var parsed=mapper.readValue(stored,RecruitmentDecisionPolicy.class);
+            // Previously saved draft AUTO_VOTE policies had only three fields.
+            // Keep them readable for staff configuration, but NEVER executable
+            // until quorum + tie rule are explicitly saved.
+            if (parsed!=null && parsed.decisionMode()==DecisionMode.AUTOMATIC_VOTE &&
+                parsed.reviewMode()==ReviewMode.COLLECTIVE &&
+                parsed.minimumAssessments()!=null &&
+                parsed.minimumAssessments()>=2 && parsed.minimumAssessments()<=20 &&
+                (parsed.minimumVotes()==null || parsed.tiePolicy()==null)) {
+                return parsed;
+            }
+            return validate(parsed);
         } catch (JsonProcessingException | ResponseStatusException malformed) {
             throw new IllegalStateException("Política de decisão persistida inválida",malformed);
         }
