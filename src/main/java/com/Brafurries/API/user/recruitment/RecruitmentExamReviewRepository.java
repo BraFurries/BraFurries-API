@@ -23,7 +23,7 @@ public class RecruitmentExamReviewRepository {
 
     public Incident incident(Integer communityId,long applicationId,long stageId,long attemptId) {
         var rows=jdbc.query(
-            "SELECT a.id,a.status,a.focus_losses,a.expires_at,"
+            "SELECT a.id,a.status,a.focus_losses,COALESCE(r.original_expires_at,a.expires_at),"
                 + "r.reinstated_at,r.expires_at,r.reviewed_by_user_id,r.reason "
                 + "FROM recruitment_candidate_attempts a "
                 + "LEFT JOIN recruitment_exam_reinstatements r "
@@ -41,7 +41,7 @@ public class RecruitmentExamReviewRepository {
 
     public List<Incident> incidents(Integer communityId,long applicationId,long stageId) {
         return jdbc.query(
-            "SELECT a.id,a.status,a.focus_losses,a.expires_at,"
+            "SELECT a.id,a.status,a.focus_losses,COALESCE(r.original_expires_at,a.expires_at),"
                 + "r.reinstated_at,r.expires_at,r.reviewed_by_user_id,r.reason "
                 + "FROM recruitment_candidate_attempts a "
                 + "LEFT JOIN recruitment_exam_reinstatements r "
@@ -95,11 +95,17 @@ public class RecruitmentExamReviewRepository {
         if(jdbc.update(
             "INSERT INTO recruitment_exam_reinstatements "
                 + "(community_id,application_id,stage_id,attempt_id,"
-                + "reviewed_by_user_id,reason,previous_focus_losses,reinstated_at,expires_at) "
-                + "VALUES (?,?,?,?,?,?,?,UTC_TIMESTAMP(6),?)",
-            communityId,applicationId,stageId,attemptId,actorId,reason,
-            previousFocusLosses,LocalDateTime.ofInstant(newExpiry,ZoneOffset.UTC)
-        )!=1) throw new IllegalStateException("Reinstatement was not recorded");
+                + "reviewed_by_user_id,reason,previous_focus_losses,"
+                + "original_started_at,original_expires_at,reinstated_at,expires_at) "
+                + "SELECT a.community_id,a.application_id,a.stage_id,a.id,?,?,?,"
+                + "a.started_at,a.expires_at,UTC_TIMESTAMP(6),? "
+                + "FROM recruitment_candidate_attempts a "
+                + "WHERE a.community_id=? AND a.application_id=? "
+                + "AND a.stage_id=? AND a.id=? AND a.status='BLOCKED'",
+            actorId,reason,previousFocusLosses,
+            LocalDateTime.ofInstant(newExpiry,ZoneOffset.UTC),
+            communityId,applicationId,stageId,attemptId
+        )!=1) throw new IllegalStateException("Bloqueio original não encontrado para auditoria");
     }
 
     /** Reactivate the SAME attempt, with full fresh time. Historical events remain. */
