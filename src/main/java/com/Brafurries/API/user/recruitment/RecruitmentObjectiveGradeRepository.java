@@ -14,7 +14,12 @@ public class RecruitmentObjectiveGradeRepository {
     private final JdbcTemplate jdbc;
     public RecruitmentObjectiveGradeRepository(JdbcTemplate jdbc) {this.jdbc=jdbc;}
 
-    public record GradePolicy(BigDecimal passingPercentage,String resultStrategy) {}
+    public record GradePolicy(BigDecimal passingPercentage,String resultStrategy,
+                              String scoreVisibility) {
+        public GradePolicy(BigDecimal percentage,String strategy) {
+            this(percentage,strategy,"PRIVATE");
+        }
+    }
     public record Grade(long attemptId,int earnedPoints,int possiblePoints,
         int correctQuestions,int totalQuestions,BigDecimal passingPercentage,
         boolean passed,Instant gradedAt) {}
@@ -23,11 +28,11 @@ public class RecruitmentObjectiveGradeRepository {
     /** Null means grading is not yet configured for this frozen stage. */
     public GradePolicy policy(Integer communityId,long versionId,long stageId) {
         var rows=jdbc.query(
-            "SELECT passing_percentage,result_strategy "
+            "SELECT passing_percentage,result_strategy,score_visibility "
                 + "FROM recruitment_stage_attempt_policies "
                 + "WHERE community_id=? AND process_version_id=? AND stage_id=? "
                 + "AND passing_percentage IS NOT NULL AND result_strategy IS NOT NULL",
-            (rs,n)->new GradePolicy(rs.getBigDecimal(1),rs.getString(2)),
+            (rs,n)->new GradePolicy(rs.getBigDecimal(1),rs.getString(2),rs.getString(3)),
             communityId,versionId,stageId
         );
         return rows.isEmpty()?null:rows.get(0);
@@ -43,9 +48,9 @@ public class RecruitmentObjectiveGradeRepository {
         )!=1) return false;
         if(jdbc.update(
             "UPDATE recruitment_stage_attempt_policies "
-                + "SET passing_percentage=?,result_strategy=? "
+                + "SET passing_percentage=?,result_strategy=?,score_visibility=? "
                 + "WHERE community_id=? AND process_version_id=? AND stage_id=?",
-            policy.passingPercentage(),policy.resultStrategy(),
+            policy.passingPercentage(),policy.resultStrategy(),policy.scoreVisibility(),
             communityId,versionId,stageId
         )!=1) {
             throw new IllegalStateException("Política de tentativas não existe nesta versão");
