@@ -31,6 +31,20 @@ public class RecruitmentCandidateAttemptController {
         @PathVariable Long attemptId,@RequestBody IntegrityEventRequest request
     ) { return service.recordIntegrityEvent(auth,communityId,applicationId,stageId,attemptId,request); }
 
+    @GetMapping("/{attemptId}/draft")
+    public DraftResponse draft(Authentication auth,@PathVariable Integer communityId,
+        @PathVariable Long applicationId,@PathVariable Long stageId,
+        @PathVariable Long attemptId) {
+        return service.draft(auth,communityId,applicationId,stageId,attemptId);
+    }
+
+    @PutMapping("/{attemptId}/draft")
+    public DraftResponse saveDraft(Authentication auth,@PathVariable Integer communityId,
+        @PathVariable Long applicationId,@PathVariable Long stageId,
+        @PathVariable Long attemptId,@RequestBody DraftRequest request) {
+        return service.saveDraft(auth,communityId,applicationId,stageId,attemptId,request);
+    }
+
     @PostMapping("/{attemptId}/submit")
     public Submission submit(
         Authentication auth,@PathVariable Integer communityId,
