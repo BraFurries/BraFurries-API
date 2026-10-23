@@ -54,8 +54,8 @@ public class RecruitmentObjectiveGradeService {
            request.passingPercentage().scale()>2 ||
            !List.of("BEST","LAST").contains(
                request.resultStrategy()==null?"":request.resultStrategy()) ||
-           !List.of("PRIVATE","AFTER_SUBMISSION").contains(
-               request.scoreVisibility()==null?"":request.scoreVisibility())) {
+           (request.scoreVisibility()!=null &&
+             !List.of("PRIVATE","AFTER_SUBMISSION").contains(request.scoreVisibility()))) {
             throw bad("Nota de corte (1–100%) e estratégia BEST/LAST obrigatórias");
         }
         var locked=attempts.lockDraft(communityId,processId,stageId);
@@ -65,8 +65,12 @@ public class RecruitmentObjectiveGradeService {
            !"AUTO_EVALUATION".equals(locked.stageType()) ||
            locked.revision()!=request.expectedRevision())
             throw conflict("Etapa não editável ou revisão desatualizada");
-        var policy=new GradePolicy(request.passingPercentage(),request.resultStrategy(),
-            request.scoreVisibility());
+        // Older API clients omit scoreVisibility. Preserve the frozen draft
+        // preference rather than silently resetting an existing opt-in.
+        var current=grades.policy(communityId,locked.versionId(),stageId);
+        String visibility=request.scoreVisibility()!=null ? request.scoreVisibility()
+            : current!=null ? current.scoreVisibility() : "PRIVATE";
+        var policy=new GradePolicy(request.passingPercentage(),request.resultStrategy(),visibility);
         if(!grades.configure(communityId,processId,locked.versionId(),
             stageId,request.expectedRevision(),policy))
             throw conflict("Rascunho alterado");
