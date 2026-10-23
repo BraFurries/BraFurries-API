@@ -62,7 +62,7 @@ public class RecruitmentObjectiveStageFinalizationService {
                 "Não pode decidir sua própria candidatura");
         if(!"IN_PROGRESS".equals(application.status()))
             throw conflict("Candidatura não está mais em avaliação");
-        var stages=decisions.stages(communityId,applicationId,application.versionId());
+        var stages=decisions.stagesLocked(communityId,applicationId,application.versionId());
         int currentIndex=-1;
         for(int i=0;i<stages.size();i++)
             if(stages.get(i).id()==stageId) { currentIndex=i;break; }
@@ -86,7 +86,7 @@ public class RecruitmentObjectiveStageFinalizationService {
             throw conflict("Política congelada incompleta");
         var now=attempts.dbNow();
         if(now==null) throw new IllegalStateException("Relógio do banco indisponível");
-        var history=attempts.attempts(communityId,applicationId,stageId);
+        var history=attempts.attemptsLocked(communityId,applicationId,stageId);
         int submitted=0;
         for(var attempt:history) {
             if("SUBMITTED".equals(attempt.status())) submitted++;
@@ -105,7 +105,7 @@ public class RecruitmentObjectiveStageFinalizationService {
         if(!deadlineReached && !attemptsExhausted)
             throw conflict("Ainda é possível iniciar novas tentativas");
 
-        List<Grade> scores=grades.grades(communityId,applicationId,stageId);
+        List<Grade> scores=grades.gradesLocked(communityId,applicationId,stageId);
         // Submitted-but-ungraded rows are a data consistency blocker, never a zero.
         if(scores.size()!=submitted)
             throw conflict("Há tentativas enviadas sem correção concluída");
