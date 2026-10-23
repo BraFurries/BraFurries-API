@@ -104,6 +104,27 @@ public class RecruitmentStageDecisionRepository {
         return keys.getKey().longValue();
     }
 
+    /** Provenance is persisted separately; these decisions still belong to an accountable manager. */
+    public long insertVoteDecision(
+        Integer communityId,long applicationId,long stageId,
+        int actorId,String outcome,String reason,String source
+    ) {
+        var generated=new GeneratedKeyHolder();
+        jdbc.update(conn->{
+            var s=conn.prepareStatement(
+                "INSERT INTO recruitment_stage_decisions "
+                    + "(community_id,application_id,stage_id,decided_by_user_id,"
+                    + "outcome,reason,decision_source) VALUES (?,?,?,?,?,?,?)",
+                Statement.RETURN_GENERATED_KEYS);
+            s.setInt(1,communityId);s.setLong(2,applicationId);s.setLong(3,stageId);
+            s.setInt(4,actorId);s.setString(5,outcome);s.setString(6,reason);
+            s.setString(7,source);
+            return s;
+        },generated);
+        if(generated.getKey()==null) throw new IllegalStateException("Decisão sem ID");
+        return generated.getKey().longValue();
+    }
+
     public boolean complete(Integer communityId, long applicationId, long stageId) {
         return jdbc.update(
             "UPDATE recruitment_application_stages SET status='COMPLETED',"
