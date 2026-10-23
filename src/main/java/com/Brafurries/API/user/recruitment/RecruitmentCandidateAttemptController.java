@@ -32,17 +32,23 @@ public class RecruitmentCandidateAttemptController {
     ) { return service.recordIntegrityEvent(auth,communityId,applicationId,stageId,attemptId,request); }
 
     @GetMapping("/{attemptId}/draft")
-    public DraftResponse draft(Authentication auth,@PathVariable Integer communityId,
+    public org.springframework.http.ResponseEntity<DraftResponse> draft(
+        Authentication auth,@PathVariable Integer communityId,
         @PathVariable Long applicationId,@PathVariable Long stageId,
         @PathVariable Long attemptId) {
-        return service.draft(auth,communityId,applicationId,stageId,attemptId);
+        return org.springframework.http.ResponseEntity.ok()
+            .cacheControl(org.springframework.http.CacheControl.noStore())
+            .body(service.draft(auth,communityId,applicationId,stageId,attemptId));
     }
 
     @PutMapping("/{attemptId}/draft")
-    public DraftResponse saveDraft(Authentication auth,@PathVariable Integer communityId,
+    public org.springframework.http.ResponseEntity<DraftResponse> saveDraft(
+        Authentication auth,@PathVariable Integer communityId,
         @PathVariable Long applicationId,@PathVariable Long stageId,
         @PathVariable Long attemptId,@RequestBody DraftRequest request) {
-        return service.saveDraft(auth,communityId,applicationId,stageId,attemptId,request);
+        return org.springframework.http.ResponseEntity.ok()
+            .cacheControl(org.springframework.http.CacheControl.noStore())
+            .body(service.saveDraft(auth,communityId,applicationId,stageId,attemptId,request));
     }
 
     @PostMapping("/{attemptId}/submit")
