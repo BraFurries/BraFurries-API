@@ -84,6 +84,19 @@ class RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest {
         assertNull(attempts.policy(981001,983002,984001));
     }
 
+    @Test void onlyOwnCurrentExamIsDiscoverableInTheCorrectTenant() {
+        var own=attempts.availableExams(981001,985001,981001);
+        assertEquals(1,own.size());
+        assertEquals(984001,own.get(0).stageId());
+        assertEquals("Prova",own.get(0).publicName());
+        assertTrue(attempts.availableExams(981001,985001,981002).isEmpty());
+        assertTrue(attempts.availableExams(981002,985001,981001).isEmpty());
+        assertTrue(attempts.availableExams(981001,985002,981003).isEmpty());
+        jdbc.update("UPDATE recruitment_application_stages SET status='COMPLETED' "
+            +"WHERE community_id=981001 AND application_id=985001 AND stage_id=984001");
+        assertTrue(attempts.availableExams(981001,985001,981001).isEmpty());
+    }
+
     @Test void attemptUniquenessAndSubmitAreEnforcedByMariaDb() {
         Instant expiration=attempts.dbNow().plusSeconds(90);
         var created=attempts.create(981001,985001,983001,984001,1,expiration);
