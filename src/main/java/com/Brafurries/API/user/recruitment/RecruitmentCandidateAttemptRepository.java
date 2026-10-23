@@ -182,6 +182,17 @@ public class RecruitmentCandidateAttemptRepository {
     }
 
     /** A blocked attempt blocks the whole current objective stage, not merely a retry. */
+    /** Explicit administrative exception to the ORIGINAL hard deadline, not attempt expiry. */
+    public boolean hasReinstatement(Integer communityId,long applicationId,
+        long stageId,long attemptId) {
+        Integer count=jdbc.queryForObject(
+            "SELECT COUNT(*) FROM recruitment_exam_reinstatements "
+                + "WHERE community_id=? AND application_id=? AND stage_id=? AND attempt_id=?",
+            Integer.class,communityId,applicationId,stageId,attemptId
+        );
+        return count!=null && count>0;
+    }
+
     public boolean hasBlockedAttempt(Integer communityId,long applicationId,long stageId) {
         Integer found=jdbc.queryForObject(
             "SELECT COUNT(*) FROM recruitment_candidate_attempts "
