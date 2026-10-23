@@ -1,0 +1,223 @@
+package com.Brafurries.API.user.recruitment;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+import com.Brafurries.API.entity.community.Community;
+import com.Brafurries.API.entity.community.CommunityAuditLog;
+import com.Brafurries.API.entity.user.User;
+import com.Brafurries.API.repository.community.CommunityAuditLogRepository;
+import com.Brafurries.API.user.CommunityAuthorizationService;
+import com.Brafurries.API.user.CommunityCapability;
+import com.Brafurries.API.user.recruitment.RecruitmentCandidateAttemptRepository.*;
+import com.Brafurries.API.user.recruitment.RecruitmentCandidateAttemptService.*;
+import com.Brafurries.API.user.recruitment.RecruitmentStageDecisionRepository.Application;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.server.ResponseStatusException;
+
+@ExtendWith(MockitoExtension.class)
+class RecruitmentCandidateAttemptServiceTest {
+    @Mock CommunityAuthorizationService authz;
+    @Mock RecruitmentCandidateAttemptRepository repository;
+    @Mock RecruitmentStageDecisionRepository decisions;
+    @Mock CommunityAuditLogRepository audits;
+    @Mock Authentication auth;
+    RecruitmentCandidateAttemptService service;
+    static final Instant NOW=Instant.parse("2026-10-23T13:00:00Z");
+    static final String FORM="{\"questions\":[{"
+        + "\"id\":\"question\",\"label\":\"Uma resposta\",\"type\":\"SINGLE_CHOICE\","
+        + "\"required\":true,\"options\":[{\"id\":\"a\",\"label\":\"A\"},"
+        + "{\"id\":\"b\",\"label\":\"B\"}],\"points\":10,\"correctAnswers\":[\"a\"]}]}";
+
+    @BeforeEach void setup() {
+        service=new RecruitmentCandidateAttemptService(
+            new RecruitmentFeatureGate(true,11),authz,repository,decisions,
+            new RecruitmentFormValidator(),new RecruitmentCandidateAnswerValidator(),
+            audits,new ObjectMapper());
+    }
+    void actor(int id, boolean active, boolean manager) {
+        var community=new Community();community.setId(11);
+        var user=new User();user.setId(id);
+        var context=new CommunityAuthorizationService.CommunityAccessContext(
+            community,user,false,false,active,
+            manager?Set.of(CommunityCapability.RECRUITMENT_MANAGE_PROCESSES):Set.of(),
+            List.of(),Map.of(),Set.of());
+        if(manager)
+            when(authz.requireCapability(auth,11,
+                CommunityCapability.RECRUITMENT_MANAGE_PROCESSES)).thenReturn(context);
+        else when(authz.resolve(auth,11)).thenReturn(context);
+    }
+    Stage stage(Policy policy) {
+        return new Stage(100L,80L,99,"IN_PROGRESS","AWAITING_CANDIDATE",
+            "AUTO_EVALUATION",FORM,policy);
+    }
+    void owner(Policy policy) {
+        actor(99,true,false);
+        when(decisions.lockApplication(11,100L))
+            .thenReturn(new Application(100,80,99,"IN_PROGRESS"));
+        when(repository.stage(11,100,501)).thenReturn(stage(policy));
+    }
+    Policy policy(boolean hard, Instant deadline) {
+        return new Policy(2,120,deadline,hard,null,false);
+    }
+
+    @Test void gateDeniesOtherCommunityWithoutLookingUpCandidate() {
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
+            ()->service.start(auth,12,100L,501L)).getStatusCode());
+        verifyNoInteractions(authz,repository,decisions);
+    }
+    @Test void foreignCandidateCannotStartOthersAttempt() {
+        actor(101,true,false);
+        when(decisions.lockApplication(11,100L))
+            .thenReturn(new Application(100,80,99,"IN_PROGRESS"));
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
+            ()->service.start(auth,11,100L,501L)).getStatusCode());
+        verifyNoInteractions(repository,audits);
+    }
+    @Test void inactiveCandidateCannotTakeExam() {
+        actor(99,false,false);
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
+            ()->service.start(auth,11,100L,501L)).getStatusCode());
+        verifyNoInteractions(repository,decisions);
+    }
+
+    @Test void hardDeadlineClampsAttemptAndRemovesAnswerKey() {
+        owner(policy(true,NOW.plusSeconds(45)));
+        when(repository.dbNow()).thenReturn(NOW);
+        when(repository.create(11,100,80,501,1,NOW.plusSeconds(45)))
+            .thenReturn(new Attempt(800,100,501,1,"STARTED",NOW,
+                NOW.plusSeconds(45),null));
+        var session=service.start(auth,11,100L,501L);
+        assertEquals(NOW.plusSeconds(45),session.expiresAt());
+        assertEquals(1,session.form().questions().size());
+        var question=session.form().questions().get(0);
+        assertEquals("question",question.id());
+        assertEquals("SINGLE_CHOICE",question.type());
+        assertEquals("a",question.options().get(0).id());
+        assertFalse(question.toString().contains("correctAnswers"));
+        verify(audits).save(org.mockito.ArgumentMatchers.argThat(
+            (CommunityAuditLog event)->"RECRUITMENT_CANDIDATE_ATTEMPT_STARTED".equals(event.getAction())));
+    }
+
+    @Test void flexibleDeadlineLetsStartedAttemptFinishWithinOwnDuration() {
+        owner(policy(false,NOW.plusSeconds(45)));
+        when(repository.dbNow()).thenReturn(NOW);
+        when(repository.create(11,100,80,501,1,NOW.plusSeconds(120)))
+            .thenReturn(new Attempt(800,100,501,1,"STARTED",NOW,
+                NOW.plusSeconds(120),null));
+        assertEquals(NOW.plusSeconds(120),
+            service.start(auth,11,100L,501L).expiresAt());
+    }
+
+    @Test void repeatedStartReturnsSameAttemptWithoutConsumingNewAttempt() {
+        owner(policy(true,null));
+        when(repository.dbNow()).thenReturn(NOW);
+        when(repository.attempts(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"STARTED",NOW,NOW.plusSeconds(60),null)));
+        assertEquals(800,service.start(auth,11,100L,501L).attemptId());
+        verify(repository,never()).create(anyInt(),anyLong(),anyLong(),
+            anyLong(),anyInt(),any());
+        verifyNoInteractions(audits);
+    }
+
+    @Test void expiredPriorAttemptConsumesOneOfAllowedAttempts() {
+        owner(policy(true,null));
+        when(repository.dbNow()).thenReturn(NOW);
+        when(repository.attempts(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"STARTED",NOW.minusSeconds(180),
+                NOW.minusSeconds(60),null)));
+        when(repository.create(11,100,80,501,2,NOW.plusSeconds(120)))
+            .thenReturn(new Attempt(801,100,501,2,"STARTED",NOW,
+                NOW.plusSeconds(120),null));
+        assertEquals(2,service.start(auth,11,100L,501L).attemptNumber());
+        verify(repository).expire(11,800);
+    }
+
+    @Test void insufficientAttemptsAndExpiredDeadlineBlockCreation() {
+        owner(policy(true,NOW.minusSeconds(1)));
+        when(repository.dbNow()).thenReturn(NOW);
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->service.start(auth,11,100L,501L)).getStatusCode());
+        verify(repository,never()).create(anyInt(),anyLong(),anyLong(),
+            anyLong(),anyInt(),any());
+    }
+
+    @Test void submissionRejectsWrongAttemptAndNoContentIsSaved() {
+        owner(policy(true,null));
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
+            ()->service.submit(auth,11,100L,501L,999L,new SubmitRequest(Map.of())))
+            .getStatusCode());
+        verify(repository,never()).submit(anyInt(),anyLong(),anyString());
+    }
+
+    @Test void successfulSubmissionIsValidatedAndDoesNotGradeOrAdvance() throws Exception {
+        owner(policy(true,null));
+        when(repository.attempts(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"STARTED",NOW,NOW.plusSeconds(60),null)));
+        when(repository.dbNow()).thenReturn(NOW,NOW);
+        when(repository.submit(eq(11),eq(800L),anyString())).thenReturn(true);
+        var answer=new ObjectMapper().readTree("\"b\"");
+        var result=service.submit(auth,11,100L,501L,800L,
+            new SubmitRequest(Map.of("question",answer)));
+        assertEquals("SUBMITTED",result.status());
+        verify(repository).submit(eq(11),eq(800L),
+            org.mockito.ArgumentMatchers.argThat(json->json.contains("\"b\"")));
+        verify(decisions,never()).advance(anyInt(),anyLong(),anyLong(),anyString());
+        verify(decisions,never()).setApplicationStatus(anyInt(),anyLong(),anyString());
+    }
+
+    @Test void submittingAfterTimeLimitIsRejected() throws Exception {
+        owner(policy(true,null));
+        when(repository.attempts(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"STARTED",NOW.minusSeconds(180),
+                NOW.minusSeconds(60),null)));
+        when(repository.dbNow()).thenReturn(NOW);
+        var answer=new ObjectMapper().readTree("\"a\"");
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->service.submit(auth,11,100L,501L,800L,
+                new SubmitRequest(Map.of("question",answer)))).getStatusCode());
+        verify(repository,never()).submit(anyInt(),anyLong(),anyString());
+    }
+
+    @Test void policyRequiresDraftRevisionAndRejectsUnimplementedBrowserControls() {
+        actor(77,true,true);
+        var config=new ConfigureRequest(4L,2,120,null,false,3,true);
+        assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
+            ()->service.configure(auth,11,70L,501L,config)).getStatusCode());
+        verifyNoInteractions(repository);
+    }
+
+    @Test void policyIsStoredOnlyOnCorrectRevisionOfDraftStage() {
+        actor(77,true,true);
+        when(repository.lockDraft(11,70,501)).thenReturn(
+            new DraftStage(80,"DRAFT","DRAFT","AUTO_EVALUATION",4));
+        var config=new ConfigureRequest(4L,2,120,null,false,null,false);
+        var saved=service.configure(auth,11,70L,501L,config);
+        assertEquals(5,saved.draftRevision());
+        verify(repository).savePolicy(eq(11),eq(70L),eq(501L),eq(80L),
+            eq(4L),any(Policy.class));
+        verify(audits).save(any(CommunityAuditLog.class));
+    }
+
+    @Test void policyCannotChangeAfterPublication() {
+        actor(77,true,true);
+        when(repository.lockDraft(11,70,501)).thenReturn(
+            new DraftStage(80,"ACTIVE","PUBLISHED","AUTO_EVALUATION",4));
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->service.configure(auth,11,70L,501L,
+                new ConfigureRequest(4L,2,120,null,true,null,false))).getStatusCode());
+        verify(repository,never()).savePolicy(anyInt(),anyLong(),anyLong(),
+            anyLong(),anyLong(),any(Policy.class));
+    }
+}
