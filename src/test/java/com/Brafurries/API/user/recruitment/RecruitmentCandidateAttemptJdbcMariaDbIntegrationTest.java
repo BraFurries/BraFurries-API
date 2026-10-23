@@ -26,7 +26,7 @@ import java.time.Instant;
     "spring.jpa.hibernate.ddl-auto=validate","spring.jpa.open-in-view=false"
 })
 @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
-@Import(RecruitmentCandidateAttemptRepository.class)
+@Import({RecruitmentCandidateAttemptRepository.class,RecruitmentExamReviewRepository.class})
 class RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest {
     @Container @ServiceConnection
     static MariaDBContainer<?> database=new MariaDBContainer<>("mariadb:10.6.28")
@@ -36,6 +36,7 @@ class RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest {
         .withInitScript("recruitment_schema.sql");
     @Autowired JdbcTemplate jdbc;
     @Autowired RecruitmentCandidateAttemptRepository attempts;
+    @Autowired RecruitmentExamReviewRepository reviews;
 
     @BeforeEach void seed() {
         jdbc.update("INSERT INTO users (id,username) VALUES "
@@ -146,6 +147,48 @@ class RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest {
         assertTrue(attempts.hasBlockedAttempt(981001,985001,984001));
         assertTrue(attempts.availableExams(981001,985001,981001).get(0).blocked());
         assertFalse(attempts.submit(981001,created.id(),"{\"question\":\"a\"}"));
+    }
+
+    @Test void reinstatementRetainsEvidenceAndOriginalAttemptWithFullRenewedTime() {
+        jdbc.update("UPDATE recruitment_stage_attempt_policies "
+            +"SET max_focus_losses=3 WHERE community_id=981001 AND stage_id=984001");
+        var before=attempts.create(981001,985001,983001,984001,1,
+            attempts.dbNow().plusSeconds(90));
+        for(int i=1;i<=3;i++) {
+            reviewsFocusEvent(before.id(),i);
+            assertTrue(attempts.incrementFocusLoss(981001,before.id()));
+        }
+        assertTrue(attempts.blockAttempt(981001,before.id(),3));
+        assertEquals(3,reviews.focusSignals(981001,before.id()));
+        var now=attempts.dbNow();
+        var expiry=now.plusSeconds(1800);
+        String reason="Tela perdeu foco devido a uma notificação do sistema";
+        reviews.insertReinstatement(981001,985001,984001,before.id(),
+            981002,reason,3,expiry);
+        assertTrue(reviews.reinstated(981001,before.id()));
+        assertFalse(reviews.reinstated(981002,before.id()));
+        assertTrue(reviews.reopenBlocked(981001,985001,984001,before.id(),3,expiry));
+        assertFalse(attempts.hasBlockedAttempt(981001,985001,984001));
+        assertEquals(0,attempts.focusLosses(981001,before.id()));
+        assertEquals(3,reviews.focusSignals(981001,before.id()));
+        assertEquals("STARTED",reviews.incident(981001,985001,984001,before.id()).status());
+        assertEquals(reason,reviews.incident(981001,985001,984001,before.id()).reviewReason());
+        assertTrue(attempts.hasReinstatement(981001,985001,984001,before.id()));
+        assertFalse(attempts.hasReinstatement(981002,985001,984001,before.id()));
+        assertFalse(reviews.reopenBlocked(981001,985001,984001,before.id(),3,expiry));
+        assertThrows(DataIntegrityViolationException.class,()->
+            reviews.insertReinstatement(981001,985001,984001,before.id(),981002,
+                reason,3,expiry));
+    }
+
+    private void reviewsFocusEvent(long attemptId,int count) {
+        reviewsInsertSignal(981001,attemptId,count);
+    }
+    private void reviewsInsertSignal(int tenant,long attemptId,int count) {
+        jdbc.update("INSERT INTO recruitment_exam_integrity_events "
+            +"(community_id,attempt_id,event_uuid,event_type,source) VALUES "
+            +"(?,? ,?,'FOCUS_LOST','WINDOW_BLUR')",tenant,attemptId,
+            String.format("00000000-0000-4000-8000-%012d",count));
     }
 
     @Test void draftPolicySaveUsesOptimisticRevisionAndCannotWriteOtherCommunity() {
