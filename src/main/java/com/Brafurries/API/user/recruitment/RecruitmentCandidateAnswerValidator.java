@@ -19,6 +19,17 @@ import org.springframework.web.server.ResponseStatusException;
 @Component
 public class RecruitmentCandidateAnswerValidator {
     public Map<String, JsonNode> validate(RecruitmentFormDefinition form, Map<String, JsonNode> answers) {
+        return validate(form,answers,true);
+    }
+
+    /** Autosave accepts unanswered required questions but validates every supplied answer. */
+    public Map<String, JsonNode> validatePartial(RecruitmentFormDefinition form,
+        Map<String, JsonNode> answers) {
+        return validate(form,answers,false);
+    }
+
+    private Map<String, JsonNode> validate(RecruitmentFormDefinition form,
+        Map<String, JsonNode> answers,boolean requireAll) {
         if (form == null || form.questions() == null || form.questions().isEmpty()) {
             throw invalid("Inscrição sem formulário configurado");
         }
@@ -28,12 +39,15 @@ public class RecruitmentCandidateAnswerValidator {
         if (!questions.keySet().containsAll(answers.keySet())) {
             throw invalid("O formulário contém respostas para perguntas desconhecidas");
         }
+        var normalized = new HashMap<String, JsonNode>();
         for (Question q : form.questions()) {
             JsonNode value = answers.get(q.id());
             if (value == null || value.isNull() || (value.isTextual() && value.textValue().isBlank())) {
-                if (q.required()) throw invalid("Resposta obrigatória ausente: " + q.id());
+                if (requireAll && q.required()) throw invalid("Resposta obrigatória ausente: " + q.id());
                 continue;
             }
+            if (!requireAll && q.type() == QuestionType.MULTIPLE_CHOICE
+                && value.isArray() && value.size() == 0) continue;
             switch (q.type()) {
                 case SHORT_TEXT, LONG_TEXT -> {
                     if (!value.isTextual() || value.textValue().length() > (q.type() == QuestionType.SHORT_TEXT ? 500 : 10000)) {
@@ -90,8 +104,9 @@ public class RecruitmentCandidateAnswerValidator {
                     }
                 }
             }
+            normalized.put(q.id(),value);
         }
-        return Map.copyOf(answers);
+        return Map.copyOf(normalized);
     }
 
     private Set<String> optionIds(Question question) {
