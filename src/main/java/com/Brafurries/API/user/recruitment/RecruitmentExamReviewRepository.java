@@ -39,6 +39,25 @@ public class RecruitmentExamReviewRepository {
         return rows.isEmpty()?null:rows.get(0);
     }
 
+    public List<Incident> incidents(Integer communityId,long applicationId,long stageId) {
+        return jdbc.query(
+            "SELECT a.id,a.status,a.focus_losses,a.expires_at,"
+                + "r.reinstated_at,r.expires_at,r.reviewed_by_user_id,r.reason "
+                + "FROM recruitment_candidate_attempts a "
+                + "LEFT JOIN recruitment_exam_reinstatements r "
+                + "ON r.community_id=a.community_id AND r.attempt_id=a.id "
+                + "WHERE a.community_id=? AND a.application_id=? AND a.stage_id=? "
+                + "AND (a.status='BLOCKED' OR r.attempt_id IS NOT NULL) "
+                + "ORDER BY a.attempt_number DESC LIMIT 5",
+            (rs,n)->new Incident(rs.getLong(1),rs.getString(2),rs.getInt(3),
+                utc(rs.getObject(4,LocalDateTime.class)),
+                utc(rs.getObject(5,LocalDateTime.class)),
+                utc(rs.getObject(6,LocalDateTime.class)),
+                (Integer)rs.getObject(7),rs.getString(8)),
+            communityId,applicationId,stageId
+        );
+    }
+
     /** Always bounded, latest-first; no clipboard data or user-entered content. */
     public List<Signal> signals(Integer communityId,long attemptId) {
         return jdbc.query(
