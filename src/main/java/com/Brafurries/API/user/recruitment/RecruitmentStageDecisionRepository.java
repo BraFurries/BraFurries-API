@@ -42,13 +42,24 @@ public class RecruitmentStageDecisionRepository {
     }
 
     public List<Stage> stages(Integer communityId, long applicationId, long versionId) {
+        return loadStages(communityId,applicationId,versionId,false);
+    }
+
+    /** Current read under the already-held application lock. */
+    public List<Stage> stagesLocked(Integer communityId,long applicationId,long versionId) {
+        return loadStages(communityId,applicationId,versionId,true);
+    }
+
+    private List<Stage> loadStages(Integer communityId,long applicationId,long versionId,
+        boolean currentRead) {
         return jdbc.query(
             "SELECT s.id,s.position,s.stage_type,ras.status,s.candidate_form_json "
                 + "FROM recruitment_application_stages ras JOIN recruitment_stages s "
                 + "ON s.community_id=ras.community_id "
                 + "AND s.process_version_id=ras.process_version_id AND s.id=ras.stage_id "
                 + "WHERE ras.community_id=? AND ras.application_id=? "
-                + "AND ras.process_version_id=? ORDER BY s.position,s.id",
+                + "AND ras.process_version_id=? ORDER BY s.position,s.id"
+                + (currentRead ? " FOR UPDATE" : ""),
             (rs,n) -> new Stage(rs.getLong(1),rs.getInt(2),rs.getString(3),
                 rs.getString(4),rs.getString(5)),
             communityId,applicationId,versionId
