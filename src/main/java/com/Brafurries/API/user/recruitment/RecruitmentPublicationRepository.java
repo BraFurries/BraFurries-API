@@ -24,11 +24,17 @@ public class RecruitmentPublicationRepository {
     }
     public record DraftStage(
         Long id, int position, String stageType,
-        String candidateFormJson, String staffFormJson, String evaluationConfigJson
+        String candidateFormJson, String staffFormJson,
+        String evaluationConfigJson, boolean hasAttemptPolicy
     ) {
         public DraftStage(Long id, int position, String stageType,
                           String candidateFormJson, String staffFormJson) {
-            this(id,position,stageType,candidateFormJson,staffFormJson,null);
+            this(id,position,stageType,candidateFormJson,staffFormJson,null,false);
+        }
+        public DraftStage(Long id, int position, String stageType,
+                          String candidateFormJson, String staffFormJson,
+                          String evaluationConfigJson) {
+            this(id,position,stageType,candidateFormJson,staffFormJson,evaluationConfigJson,false);
         }
     }
 
@@ -67,13 +73,18 @@ public class RecruitmentPublicationRepository {
 
     public List<DraftStage> stages(Integer communityId, Long processId, Long versionId) {
         return jdbc.query(
-            "SELECT id,position,stage_type,candidate_form_json,staff_form_json,evaluation_config_json "
-                + "FROM recruitment_stages WHERE community_id=? AND process_id=? "
-                + "AND process_version_id=? ORDER BY position,id",
+            "SELECT s.id,s.position,s.stage_type,s.candidate_form_json,s.staff_form_json,"
+                + "s.evaluation_config_json,(policy.stage_id IS NOT NULL) AS has_attempt_policy "
+                + "FROM recruitment_stages s "
+                + "LEFT JOIN recruitment_stage_attempt_policies policy "
+                + "ON policy.community_id=s.community_id "
+                + "AND policy.process_version_id=s.process_version_id AND policy.stage_id=s.id "
+                + "WHERE s.community_id=? AND s.process_id=? "
+                + "AND s.process_version_id=? ORDER BY s.position,s.id",
             (rs, row) -> new DraftStage(
                 rs.getLong("id"), rs.getInt("position"), rs.getString("stage_type"),
                 rs.getString("candidate_form_json"), rs.getString("staff_form_json"),
-                rs.getString("evaluation_config_json")
+                rs.getString("evaluation_config_json"),rs.getBoolean("has_attempt_policy")
             ), communityId, processId, versionId
         );
     }
