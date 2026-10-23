@@ -57,25 +57,25 @@ class RecruitmentObjectiveStageFinalizationServiceTest {
     void ready(int maxAttempts,Instant deadline,boolean hard,
         List<Attempt> history,List<Grade> submittedGrades,boolean withNext) {
         manager(77,true);
-        when(decisions.lockApplication(11,APPLICATION))
+        lenient().when(decisions.lockApplication(11,APPLICATION))
             .thenReturn(new Application(APPLICATION,80,99,"IN_PROGRESS"));
         var stages=withNext
             ?List.of(
                 new Stage(STAGE,1,"AUTO_EVALUATION","AWAITING_CANDIDATE",null),
                 new Stage(502,2,"HUMAN_EVALUATION","PENDING",null))
             :List.of(new Stage(STAGE,1,"AUTO_EVALUATION","AWAITING_CANDIDATE",null));
-        when(decisions.stages(11,APPLICATION,80)).thenReturn(stages);
-        when(attempts.policy(11,80,STAGE))
+        lenient().when(decisions.stages(11,APPLICATION,80)).thenReturn(stages);
+        lenient().when(attempts.policy(11,80,STAGE))
             .thenReturn(new Policy(maxAttempts,120,deadline,hard,null,false));
-        when(grades.policy(11,80,STAGE))
+        lenient().when(grades.policy(11,80,STAGE))
             .thenReturn(new GradePolicy(new BigDecimal("70.00"),"BEST"));
-        when(attempts.dbNow()).thenReturn(NOW);
-        when(attempts.attempts(11,APPLICATION,STAGE)).thenReturn(history);
-        when(grades.grades(11,APPLICATION,STAGE)).thenReturn(submittedGrades);
-        when(decisions.completeObjective(11,APPLICATION,STAGE)).thenReturn(true);
-        when(decisions.setApplicationStatus(11,APPLICATION,"AWAITING_PUBLICATION"))
+        lenient().when(attempts.dbNow()).thenReturn(NOW);
+        lenient().when(attempts.attempts(11,APPLICATION,STAGE)).thenReturn(history);
+        lenient().when(grades.grades(11,APPLICATION,STAGE)).thenReturn(submittedGrades);
+        lenient().when(decisions.completeObjective(11,APPLICATION,STAGE)).thenReturn(true);
+        lenient().when(decisions.setApplicationStatus(11,APPLICATION,"AWAITING_PUBLICATION"))
             .thenReturn(true);
-        when(decisions.advance(11,APPLICATION,502,"AWAITING_REVIEW")).thenReturn(true);
+        lenient().when(decisions.advance(11,APPLICATION,502,"AWAITING_REVIEW")).thenReturn(true);
     }
     Attempt submission(int id,int index) {
         return new Attempt(id,APPLICATION,STAGE,index,"SUBMITTED",
