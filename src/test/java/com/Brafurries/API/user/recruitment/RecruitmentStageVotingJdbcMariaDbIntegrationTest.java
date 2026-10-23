@@ -97,6 +97,7 @@ class RecruitmentStageVotingJdbcMariaDbIntegrationTest {
         ballots.cast(981001,985001,984001,981002,"APPROVE");
         ballots.cast(981001,985001,984001,981003,"REJECT");
         assertTrue(ballots.tally(981001,985001,984001).tied());
+        assertEquals(2,ballots.lockedTally(981001,985001,984001).count());
         assertEquals(2,ballots.tally(981001,985001,984001).count());
         decisions.insertVoteDecision(981001,985001,984001,981002,
             "REJECT","Empate pela política configurada","VOTE_TIE_REJECT");
