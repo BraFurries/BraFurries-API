@@ -197,6 +197,34 @@ class RecruitmentObjectiveStageFinalizationServiceTest {
         verify(decisions).completeObjective(11,APPLICATION,STAGE);
     }
 
+    @Test void blockedExamCanBeFinalizedByManagerBeforeDeadlineWithoutSecondAttempt() {
+        ready(5,null,true,List.of(
+            new Attempt(800,APPLICATION,STAGE,1,"BLOCKED",
+                NOW.minusSeconds(30),NOW.plusSeconds(60),null)
+        ),List.of(),true);
+        var result=service.finalizeStage(auth,11,APPLICATION,STAGE);
+        assertFalse(result.passed());
+        assertNull(result.selectedAttemptId());
+        assertEquals("AWAITING_PUBLICATION",result.applicationStatus());
+        verify(decisions).insertObjectiveDecision(eq(11),eq(APPLICATION),eq(STAGE),
+            eq(77),eq("REJECT"),contains("limite configurado de saídas"),isNull());
+        verify(decisions).blockRemaining(11,APPLICATION);
+        verify(decisions,never()).advance(anyInt(),anyLong(),anyLong(),anyString());
+    }
+
+    @Test void blockedAttemptOverridesPriorPassingScoreByExplicitPolicy() {
+        ready(5,null,true,List.of(
+            submission(800,1),
+            new Attempt(801,APPLICATION,STAGE,2,"BLOCKED",
+                NOW.minusSeconds(30),NOW.plusSeconds(60),null)
+        ),List.of(grade(800,90,100,true)),false);
+        var result=service.finalizeStage(auth,11,APPLICATION,STAGE);
+        assertFalse(result.passed());
+        assertNull(result.selectedAttemptId());
+        verify(decisions).insertObjectiveDecision(eq(11),eq(APPLICATION),eq(STAGE),
+            eq(77),eq("REJECT"),contains("saídas da tela"),isNull());
+    }
+
     @Test void futureStageCannotBypassSequentialOrder() {
         manager(77,true);
         when(decisions.lockApplication(11,APPLICATION))
