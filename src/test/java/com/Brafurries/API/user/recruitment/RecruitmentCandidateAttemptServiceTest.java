@@ -198,6 +198,62 @@ class RecruitmentCandidateAttemptServiceTest {
         verify(repository,never()).submit(anyInt(),anyLong(),anyString());
     }
 
+    @Test void immediateGradeShowsOnlyNumericPointsNotPassingOrKey() throws Exception {
+        owner(policy(true,null));
+        when(repository.attempts(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"STARTED",NOW,NOW.plusSeconds(60),null)));
+        when(repository.dbNow()).thenReturn(NOW,NOW);
+        when(repository.submit(eq(11),eq(800L),anyString())).thenReturn(true);
+        when(grades.policy(11,80,501)).thenReturn(
+            new RecruitmentObjectiveGradeRepository.GradePolicy(
+                new java.math.BigDecimal("70.00"),"BEST","AFTER_SUBMISSION"));
+        var answer=new ObjectMapper().readTree("\"a\"");
+        var receipt=service.submit(auth,11,100L,501L,800L,
+            new SubmitRequest(Map.of("question",answer)));
+        assertNotNull(receipt.score());
+        assertEquals(10,receipt.score().earnedPoints());
+        assertEquals(new java.math.BigDecimal("100.00"),receipt.score().percentage());
+        assertFalse(receipt.toString().contains("correctAnswers"));
+        assertFalse(receipt.toString().contains("passed"));
+    }
+
+    @Test void privatePolicyDoesNotReturnExamScoreAfterSubmission() throws Exception {
+        owner(policy(true,null));
+        when(repository.attempts(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"STARTED",NOW,NOW.plusSeconds(60),null)));
+        when(repository.dbNow()).thenReturn(NOW,NOW);
+        when(repository.submit(eq(11),eq(800L),anyString())).thenReturn(true);
+        when(grades.policy(11,80,501)).thenReturn(
+            new RecruitmentObjectiveGradeRepository.GradePolicy(
+                new java.math.BigDecimal("70.00"),"BEST","PRIVATE"));
+        var answer=new ObjectMapper().readTree("\"a\"");
+        assertNull(service.submit(auth,11,100L,501L,800L,
+            new SubmitRequest(Map.of("question",answer))).score());
+    }
+
+    @Test void foreignUserCannotDiscoverCurrentExamOrNumericScores() {
+        actor(101,true,false);
+        when(decisions.candidateId(11,100L)).thenReturn(99);
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
+            ()->service.availableExams(auth,11,100L)).getStatusCode());
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
+            ()->service.ownScores(auth,11,100L,501L)).getStatusCode());
+        verifyNoInteractions(repository,grades);
+    }
+
+    @Test void privateScoreHistoryIsDeniedEvenToItsCandidate() {
+        actor(99,true,false);
+        when(decisions.candidateId(11,100L)).thenReturn(99);
+        when(grades.stage(11,100L,501L)).thenReturn(
+            new RecruitmentObjectiveGradeRepository.StageRef(80,99,"AUTO_EVALUATION"));
+        when(grades.policy(11,80,501)).thenReturn(
+            new RecruitmentObjectiveGradeRepository.GradePolicy(
+                new java.math.BigDecimal("70.00"),"BEST","PRIVATE"));
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
+            ()->service.ownScores(auth,11,100L,501L)).getStatusCode());
+        verify(grades,never()).grades(anyInt(),anyLong(),anyLong());
+    }
+
     @Test void policyRequiresDraftRevisionAndRejectsUnimplementedBrowserControls() {
         actor(77,true,true);
         var config=new ConfigureRequest(4L,2,120,null,false,3,true);
