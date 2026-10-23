@@ -33,6 +33,7 @@ class RecruitmentCandidateAttemptServiceTest {
     @Mock RecruitmentStageDecisionRepository decisions;
     @Mock RecruitmentObjectiveGradeRepository grades;
     @Mock CommunityAuditLogRepository audits;
+    @Mock RecruitmentExamNoticeRepository notices;
     @Mock Authentication auth;
     RecruitmentCandidateAttemptService service;
     static final Instant NOW=Instant.parse("2026-10-23T13:00:00Z");
@@ -45,7 +46,7 @@ class RecruitmentCandidateAttemptServiceTest {
         service=new RecruitmentCandidateAttemptService(
             new RecruitmentFeatureGate(true,11),authz,repository,decisions,
             grades,new RecruitmentObjectiveScorer(),new RecruitmentFormValidator(),new RecruitmentCandidateAnswerValidator(),
-            audits,new ObjectMapper());
+            audits,new ObjectMapper(),notices);
     }
     void actor(int id, boolean active, boolean manager) {
         var community=new Community();community.setId(11);
@@ -348,6 +349,7 @@ class RecruitmentCandidateAttemptServiceTest {
         var result=service.recordIntegrityEvent(auth,11,100L,501L,800L,
             new IntegrityEventRequest(EVENT,"FOCUS_LOST","TAB_HIDDEN"));
         assertTrue(result.blocked());
+        verify(notices).record(11,100,501,800,"BLOCKED",null);
         assertEquals("BLOCKED",result.status());
         assertEquals(3,result.focusLosses());
         verify(audits).save(org.mockito.ArgumentMatchers.argThat(
