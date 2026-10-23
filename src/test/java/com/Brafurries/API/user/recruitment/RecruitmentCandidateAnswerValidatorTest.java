@@ -69,6 +69,26 @@ class RecruitmentCandidateAnswerValidatorTest {
         invalid(wrong);
     }
 
+    @Test void partialDraftAllowsMissingRequiredAndClearedAnswers() {
+        var draft=validator.validatePartial(form(),Map.of(
+            "vote",node("\\"b\\""),
+            "skills",node("[]"),
+            "bio",node("\\"   \\"")));
+        assertEquals(1,draft.size());
+        assertEquals("b",draft.get("vote").asText());
+        assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
+            ()->validator.validate(form(),draft)).getStatusCode());
+    }
+
+    @Test void partialDraftStillRejectsInvalidOrUnknownFields() {
+        assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
+            ()->validator.validatePartial(form(),Map.of("vote",node("\\"other\\""))))
+            .getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
+            ()->validator.validatePartial(form(),Map.of("secret",node("null"))))
+            .getStatusCode());
+    }
+
     @Test void rejectsTypeMismatchAndExcessiveText() {
         var wrong = new java.util.HashMap<>(valid());
         wrong.put("bio",node("123"));
