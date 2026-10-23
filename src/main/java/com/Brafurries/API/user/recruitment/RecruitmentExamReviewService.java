@@ -126,9 +126,16 @@ public class RecruitmentExamReviewService {
             throw conflict("Esta etapa não permite reabertura de prova");
         if(stages.decision(communityId,applicationId,stageId)!=null)
             throw conflict("A decisão da etapa já foi registrada");
-        var policy=attempts.policy(communityId,app.versionId(),stageId);
-        if(policy==null) throw missing();
-        return new Context(policy);
+        // Match the candidate runner's ACTIVE/PUBLISHED checks: a manager must
+        // not issue an unusable reinstatement for a closed selection.
+        var candidateStage=attempts.stage(communityId,applicationId,stageId);
+        if(candidateStage==null || candidateStage.versionId()!=app.versionId() ||
+           candidateStage.policy()==null ||
+           !"IN_PROGRESS".equals(candidateStage.applicationStatus()) ||
+           !"AWAITING_CANDIDATE".equals(candidateStage.stageStatus()) ||
+           !"AUTO_EVALUATION".equals(candidateStage.stageType()))
+            throw conflict("A prova não está disponível para a pessoa candidata");
+        return new Context(candidateStage.policy());
     }
 
     private CommunityAuthorizationService.CommunityAccessContext manager(
