@@ -101,6 +101,7 @@ class RecruitmentCandidateAttemptServiceTest {
                 NOW.plusSeconds(45),null));
         var session=service.start(auth,11,100L,501L);
         assertEquals(NOW.plusSeconds(45),session.expiresAt());
+        assertEquals(NOW,session.serverNow());
         assertEquals(1,session.form().questions().size());
         var question=session.form().questions().get(0);
         assertEquals("question",question.id());
