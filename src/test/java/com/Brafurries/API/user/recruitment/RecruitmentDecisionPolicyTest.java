@@ -57,9 +57,9 @@ class RecruitmentDecisionPolicyTest {
     }
 
     @Test void oldIncompleteAutomaticDraftRemainsReadableButCannotBeSavedUnconfigured() {
-        String old = "{\\"reviewMode\\":\\"COLLECTIVE\\","
-            + "\\"decisionMode\\":\\"AUTOMATIC_VOTE\\","
-            + "\\"minimumAssessments\\":2}";
+        String old = "{\"reviewMode\":\"COLLECTIVE\","
+            + "\"decisionMode\":\"AUTOMATIC_VOTE\","
+            + "\"minimumAssessments\":2}";
         var parsed = RecruitmentDecisionPolicy.parse(json,old);
         assertNull(parsed.minimumVotes());
         assertNull(parsed.tiePolicy());
