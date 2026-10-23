@@ -25,14 +25,17 @@ public class RecruitmentExamReviewService {
     private final RecruitmentStageDecisionRepository stages;
     private final RecruitmentCandidateAttemptRepository attempts;
     private final RecruitmentExamReviewRepository reviews;
+    private final RecruitmentExamNoticeRepository notices;
     private final CommunityAuditLogRepository audits;
 
     public RecruitmentExamReviewService(RecruitmentFeatureGate gate,
         CommunityAuthorizationService authorization,RecruitmentStageDecisionRepository stages,
         RecruitmentCandidateAttemptRepository attempts,
-        RecruitmentExamReviewRepository reviews,CommunityAuditLogRepository audits) {
+        RecruitmentExamReviewRepository reviews,CommunityAuditLogRepository audits,
+        RecruitmentExamNoticeRepository notices) {
         this.gate=gate;this.authorization=authorization;this.stages=stages;
         this.attempts=attempts;this.reviews=reviews;this.audits=audits;
+        this.notices=notices;
     }
 
     public record ReasonRequest(String reason) {}
@@ -98,6 +101,8 @@ public class RecruitmentExamReviewService {
         if(!reviews.reopenBlocked(communityId,applicationId,stageId,
             attemptId,incident.focusLosses(),expiry))
             throw conflict("A tentativa mudou durante a revisão");
+        notices.record(communityId,applicationId,stageId,attemptId,
+            "REINSTATED",expiry);
         audit(actor,"RECRUITMENT_EXAM_ATTEMPT_REINSTATED",
             applicationId+":"+stageId+":"+attemptId);
         return new Reinstatement(applicationId,stageId,attemptId,expiry,
