@@ -142,9 +142,9 @@ class RecruitmentObjectiveStageFinalizationServiceTest {
             List.of(grade(800,80,100,true),grade(801,50,100,false)),true);
         var result=service.finalizeStage(auth,11,APPLICATION,STAGE);
         assertTrue(result.passed());
-        assertEquals(800L,result.selectedAttemptId());
+        assertEquals(Long.valueOf(800L),result.selectedAttemptId());
         assertEquals("IN_PROGRESS",result.applicationStatus());
-        assertEquals(502L,result.nextStageId());
+        assertEquals(Long.valueOf(502L),result.nextStageId());
         assertEquals("AWAITING_REVIEW",result.nextStageStatus());
         verify(decisions).insertObjectiveDecision(eq(11),eq(APPLICATION),eq(STAGE),
             eq(77),eq("APPROVE"),anyString(),eq(800L));
@@ -162,7 +162,7 @@ class RecruitmentObjectiveStageFinalizationServiceTest {
             .thenReturn(new GradePolicy(new BigDecimal("70.00"),"LAST"));
         var result=service.finalizeStage(auth,11,APPLICATION,STAGE);
         assertFalse(result.passed());
-        assertEquals(801L,result.selectedAttemptId());
+        assertEquals(Long.valueOf(801L),result.selectedAttemptId());
         assertEquals("AWAITING_PUBLICATION",result.applicationStatus());
         verify(decisions).blockRemaining(11,APPLICATION);
         verify(decisions).setApplicationStatus(11,APPLICATION,"AWAITING_PUBLICATION");
