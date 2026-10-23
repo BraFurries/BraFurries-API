@@ -48,6 +48,35 @@ public class RecruitmentStageVotingService {
     ) {}
     public record VotingDecision(DecisionReceipt receipt,VoteSummary tally) {}
 
+    public record VotingAvailability(boolean enabled,boolean hasAssessment,boolean alreadyVoted) {}
+
+    /**
+     * Safe reviewer-only discovery, without tally or information about other voters.
+     * This only controls UI display; cast() always revalidates under the application lock.
+     */
+    @Transactional(readOnly=true)
+    public VotingAvailability availability(
+        Authentication auth,Integer communityId,Long applicationId,Long stageId
+    ) {
+        var actor=reviewer(auth,communityId);
+        var target=requireTarget(communityId,applicationId,stageId,actor.user().getId());
+        if (!assessments.assignedToStage(
+            communityId,stageId,target.processVersionId(),actor.user().getId()))
+            throw missing();
+        if (!"AWAITING_REVIEW".equals(target.stageStatus()) ||
+            "AUTO_EVALUATION".equals(target.stageType())) {
+            return new VotingAvailability(false,false,false);
+        }
+        var policy=policy(communityId,stageId,target.processVersionId());
+        if (policy.decisionMode()!=RecruitmentDecisionPolicy.DecisionMode.AUTOMATIC_VOTE)
+            return new VotingAvailability(false,false,false);
+        boolean assessed=assessments.ownAssessment(
+            communityId,applicationId,stageId,actor.user().getId())!=null;
+        boolean voted=votes.own(
+            communityId,applicationId,stageId,actor.user().getId())!=null;
+        return new VotingAvailability(true,assessed,voted);
+    }
+
     @Transactional(readOnly=true)
     public Ballot mine(
         Authentication auth,Integer communityId,Long applicationId,Long stageId
