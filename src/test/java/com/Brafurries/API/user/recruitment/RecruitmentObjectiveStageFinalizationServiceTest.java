@@ -65,14 +65,14 @@ class RecruitmentObjectiveStageFinalizationServiceTest {
                 new Stage(STAGE,1,"AUTO_EVALUATION","AWAITING_CANDIDATE",null),
                 new Stage(502,2,"HUMAN_EVALUATION","PENDING",null))
             :List.of(new Stage(STAGE,1,"AUTO_EVALUATION","AWAITING_CANDIDATE",null));
-        lenient().when(decisions.stages(11,APPLICATION,80)).thenReturn(stages);
+        lenient().when(decisions.stagesLocked(11,APPLICATION,80)).thenReturn(stages);
         lenient().when(attempts.policy(11,80,STAGE))
             .thenReturn(new Policy(maxAttempts,120,deadline,hard,null,false));
         lenient().when(grades.policy(11,80,STAGE))
             .thenReturn(new GradePolicy(new BigDecimal("70.00"),"BEST"));
         lenient().when(attempts.dbNow()).thenReturn(NOW);
-        lenient().when(attempts.attempts(11,APPLICATION,STAGE)).thenReturn(history);
-        lenient().when(grades.grades(11,APPLICATION,STAGE)).thenReturn(submittedGrades);
+        lenient().when(attempts.attemptsLocked(11,APPLICATION,STAGE)).thenReturn(history);
+        lenient().when(grades.gradesLocked(11,APPLICATION,STAGE)).thenReturn(submittedGrades);
         lenient().when(decisions.completeObjective(11,APPLICATION,STAGE)).thenReturn(true);
         lenient().when(decisions.setApplicationStatus(11,APPLICATION,"AWAITING_PUBLICATION"))
             .thenReturn(true);
@@ -201,7 +201,7 @@ class RecruitmentObjectiveStageFinalizationServiceTest {
         manager(77,true);
         when(decisions.lockApplication(11,APPLICATION))
             .thenReturn(new Application(APPLICATION,80,99,"IN_PROGRESS"));
-        when(decisions.stages(11,APPLICATION,80)).thenReturn(List.of(
+        when(decisions.stagesLocked(11,APPLICATION,80)).thenReturn(List.of(
             new Stage(500,1,"HUMAN_EVALUATION","AWAITING_REVIEW",null),
             new Stage(STAGE,2,"AUTO_EVALUATION","AWAITING_CANDIDATE",null)));
         assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
@@ -213,7 +213,7 @@ class RecruitmentObjectiveStageFinalizationServiceTest {
         manager(77,true);
         when(decisions.lockApplication(11,APPLICATION))
             .thenReturn(new Application(APPLICATION,80,99,"IN_PROGRESS"));
-        when(decisions.stages(11,APPLICATION,80)).thenReturn(
+        when(decisions.stagesLocked(11,APPLICATION,80)).thenReturn(
             List.of(new Stage(STAGE,1,"AUTO_EVALUATION","AWAITING_CANDIDATE",null)));
         when(decisions.decision(11,APPLICATION,STAGE)).thenReturn(
             new Decision(700,APPLICATION,STAGE,77,"REJECT",
