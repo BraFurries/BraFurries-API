@@ -18,6 +18,8 @@ import org.testcontainers.containers.MariaDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 @EnabledIfEnvironmentVariable(named="BRF_RECRUITMENT_JDBC_INTEGRATION",matches="true")
 @Testcontainers
@@ -173,6 +175,20 @@ class RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest {
         assertEquals(3,reviews.focusSignals(981001,before.id()));
         assertEquals("STARTED",reviews.incident(981001,985001,984001,before.id()).status());
         assertEquals(reason,reviews.incident(981001,985001,984001,before.id()).reviewReason());
+        assertEquals(before.expiresAt(),
+            reviews.incident(981001,985001,984001,before.id()).originalExpiresAt());
+        var originalWindow=jdbc.query(
+            "SELECT original_started_at,original_expires_at "
+                +"FROM recruitment_exam_reinstatements "
+                +"WHERE community_id=? AND attempt_id=?",
+            (rs,n)->java.util.List.of(
+                rs.getObject(1,LocalDateTime.class),
+                rs.getObject(2,LocalDateTime.class)),
+            981001,before.id()).get(0);
+        assertEquals(LocalDateTime.ofInstant(before.startedAt(),ZoneOffset.UTC),
+            originalWindow.get(0));
+        assertEquals(LocalDateTime.ofInstant(before.expiresAt(),ZoneOffset.UTC),
+            originalWindow.get(1));
         assertTrue(attempts.hasReinstatement(981001,985001,984001,before.id()));
         assertFalse(attempts.hasReinstatement(981002,985001,984001,before.id()));
         assertFalse(reviews.reopenBlocked(981001,985001,984001,before.id(),3,expiry));
