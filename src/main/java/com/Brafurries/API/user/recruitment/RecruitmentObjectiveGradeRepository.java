@@ -83,6 +83,17 @@ public class RecruitmentObjectiveGradeRepository {
         );
     }
 
+    /** Admin display status only, never candidate disclosure. */
+    public boolean finalized(Integer communityId,long applicationId,long stageId) {
+        Integer count=jdbc.queryForObject(
+            "SELECT COUNT(*) FROM recruitment_stage_decisions "
+                + "WHERE community_id=? AND application_id=? AND stage_id=? "
+                + "AND decision_source='OBJECTIVE_GRADE'",
+            Integer.class,communityId,applicationId,stageId
+        );
+        return count!=null && count>0;
+    }
+
     /** Tenant- and process-version-scoped management lookup. */
     public StageRef stage(Integer communityId,long applicationId,long stageId) {
         var rows=jdbc.query(
