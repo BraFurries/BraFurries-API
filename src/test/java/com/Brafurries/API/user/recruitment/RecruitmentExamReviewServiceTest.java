@@ -59,8 +59,11 @@ class RecruitmentExamReviewServiceTest {
         lenient().when(stages.stagesLocked(11,100L,80L))
             .thenReturn(List.of(new Stage(501,1,"AUTO_EVALUATION",
                 "AWAITING_CANDIDATE",null)));
-        lenient().when(attempts.policy(11,80L,501L))
-            .thenReturn(new Policy(2,1800,now.minusSeconds(100),true,3,false));
+        lenient().when(attempts.stage(11,100L,501L))
+            .thenReturn(new RecruitmentCandidateAttemptRepository.Stage(
+                100,80,99,"IN_PROGRESS","AWAITING_CANDIDATE",
+                "AUTO_EVALUATION","{\\\"questions\\\":[]}",
+                new Policy(2,1800,now.minusSeconds(100),true,3,false)));
     }
     Incident blocked() {
         return new Incident(800L,"BLOCKED",3,now.minusSeconds(10),
