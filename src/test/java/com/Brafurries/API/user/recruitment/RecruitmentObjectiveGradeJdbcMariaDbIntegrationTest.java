@@ -26,7 +26,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
     "spring.jpa.hibernate.ddl-auto=validate","spring.jpa.open-in-view=false"
 })
 @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
-@Import({RecruitmentObjectiveGradeRepository.class,RecruitmentCandidateAttemptRepository.class})
+@Import({RecruitmentObjectiveGradeRepository.class,RecruitmentCandidateAttemptRepository.class,
+    RecruitmentStageDecisionRepository.class})
 class RecruitmentObjectiveGradeJdbcMariaDbIntegrationTest {
     @Container @ServiceConnection
     static MariaDBContainer<?> database=new MariaDBContainer<>("mariadb:10.6.28")
@@ -37,6 +38,7 @@ class RecruitmentObjectiveGradeJdbcMariaDbIntegrationTest {
     @Autowired JdbcTemplate jdbc;
     @Autowired RecruitmentCandidateAttemptRepository attempts;
     @Autowired RecruitmentObjectiveGradeRepository grades;
+    @Autowired RecruitmentStageDecisionRepository decisions;
 
     @BeforeEach void seed() {
         jdbc.update("INSERT INTO users (id,username) VALUES "
@@ -108,4 +110,33 @@ class RecruitmentObjectiveGradeJdbcMariaDbIntegrationTest {
             new GradePolicy(new BigDecimal("70.00"),"LAST")));
         assertEquals("BEST",grades.policy(981001,983001,984001).resultStrategy());
     }
+    @Test void decisionAttemptMustBelongToExactApplicationAndStage() {
+        var attempt=attempts.create(981001,985001,983001,984001,1,
+            attempts.dbNow().plusSeconds(90));
+        assertTrue(attempts.submit(981001,attempt.id(),"{\\"answer\\":\\"a\\"}"));
+        grades.insertGrade(981001,attempt.id(),
+            new RecruitmentObjectiveScorer.Score(8,10,1,2,true),
+            new BigDecimal("70.00"));
+
+        assertThrows(DataIntegrityViolationException.class,()->
+            decisions.insertObjectiveDecision(981001,985001,984001,981002,
+                "APPROVE","Nota de corte alcançada",987654321L));
+        long decisionId=decisions.insertObjectiveDecision(
+            981001,985001,984001,981002,
+            "APPROVE","Nota de corte alcançada",attempt.id());
+        assertTrue(decisionId>0);
+        assertEquals("OBJECTIVE_GRADE",jdbc.queryForObject(
+            "SELECT decision_source FROM recruitment_stage_decisions "
+                +"WHERE community_id=981001 AND application_id=985001 AND stage_id=984001",
+            String.class));
+        assertEquals(attempt.id(),jdbc.queryForObject(
+            "SELECT objective_attempt_id FROM recruitment_stage_decisions "
+                +"WHERE community_id=981001 AND application_id=985001 AND stage_id=984001",
+            Long.class));
+        assertThrows(DataIntegrityViolationException.class,()->
+            decisions.insertObjectiveDecision(981001,985001,984001,981002,
+                "APPROVE","Tentativa duplicada",attempt.id()));
+        assertNull(decisions.decision(981002,985001,984001));
+    }
+
 }
