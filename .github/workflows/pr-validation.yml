@@ -124,5 +124,54 @@ jobs:
           python3 -c "import ast, pathlib; ast.parse(pathlib.Path('src/test/resources/coddy_live_http_contract.py').read_text())"
           ./mvnw -B -Dtest=BaselineCoddyLiveHttpIntegrationTest test
 
+      # Recruitment is disabled by default; opt-in JDBC integration uses
+      # the exact unmerged Database PR #12 migration on disposable MariaDB.
+      - name: Checkout pinned recruitment schema migration (read only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: BraFurries/BraFurries-Database
+          ref: 41ed919b5db295ece00f8a6afbfa50fc8f6ab110
+          path: .ci/recruitment-database
+          persist-credentials: false
+
+      - name: Verify recruitment drafts JDBC with canonical baseline plus additive migration
+        env:
+          BRF_RECRUITMENT_JDBC_INTEGRATION: "true"
+        run: |
+          set -euo pipefail
+          test "$(git -C .ci/recruitment-database rev-parse HEAD)" = "41ed919b5db295ece00f8a6afbfa50fc8f6ab110"
+          baseline=".ci/database-baseline/flyway/sql/baseline/B20261020_001__adopt_production_schema.sql"
+          migration=".ci/recruitment-database/flyway/sql/versioned/V20261021_001__create_recruitment_foundation.sql"
+          revision=".ci/recruitment-database/flyway/sql/versioned/V20261022_001__add_recruitment_draft_revision.sql"
+          test "$(grep -c '^CREATE TABLE ' "$baseline")" -eq 107
+          test "$(grep -c '^CREATE TABLE ' "$migration")" -eq 5
+          test "$(grep -c '^ALTER TABLE ' "$revision")" -eq 1
+          submission=".ci/recruitment-database/flyway/sql/versioned/V20261022_002__create_recruitment_application_submissions.sql"
+          test "$(grep -c '^CREATE TABLE ' "$submission")" -eq 1
+          review=".ci/recruitment-database/flyway/sql/versioned/V20261022_003__create_recruitment_human_review.sql"
+          test -s "$review"
+          decisions=".ci/recruitment-database/flyway/sql/versioned/V20261022_004__create_recruitment_stage_decisions.sql"
+          test -s "$decisions"
+          ballots=".ci/recruitment-database/flyway/sql/versioned/V20261023_001__create_recruitment_stage_votes.sql"
+          test -s "$ballots"
+          attempts=".ci/recruitment-database/flyway/sql/versioned/V20261023_002__create_recruitment_candidate_attempts.sql"
+          test -s "$attempts"
+          objective=".ci/recruitment-database/flyway/sql/versioned/V20261023_003__create_recruitment_objective_grades.sql"
+          test -s "$objective"
+          finalization=".ci/recruitment-database/flyway/sql/versioned/V20261023_004__extend_recruitment_objective_decisions.sql"
+          test -s "$finalization"
+          visibility=".ci/recruitment-database/flyway/sql/versioned/V20261023_005__add_recruitment_exam_score_visibility.sql"
+          test -s "$visibility"
+          integrity=".ci/recruitment-database/flyway/sql/versioned/V20261023_006__create_recruitment_exam_integrity_events.sql"
+          test -s "$integrity"
+          reinstatement=".ci/recruitment-database/flyway/sql/versioned/V20261023_007__create_recruitment_exam_reinstatements.sql"
+          test -s "$reinstatement"
+          autosave=".ci/recruitment-database/flyway/sql/versioned/V20261023_008__add_recruitment_exam_draft_autosave.sql"
+          test -s "$autosave"
+          notices=".ci/recruitment-database/flyway/sql/versioned/V20261023_009__create_recruitment_exam_incident_notices.sql"
+          test -s "$notices"
+          cat "$baseline" "$migration" "$revision" "$submission" "$review" "$decisions" "$ballots" "$attempts" "$objective" "$finalization" "$visibility" "$integrity" "$reinstatement" "$autosave" "$notices" > src/test/resources/recruitment_schema.sql
+          ./mvnw -B -Dtest=RecruitmentDraftJdbcMariaDbIntegrationTest,RecruitmentStageEditorJdbcMariaDbIntegrationTest,RecruitmentPublicationJdbcMariaDbIntegrationTest,RecruitmentCandidateJdbcMariaDbIntegrationTest,RecruitmentTrackingJdbcMariaDbIntegrationTest,RecruitmentHumanReviewJdbcMariaDbIntegrationTest,RecruitmentStageDecisionJdbcMariaDbIntegrationTest,RecruitmentDecisionPolicyJdbcMariaDbIntegrationTest,RecruitmentDecisionDeskJdbcMariaDbIntegrationTest,RecruitmentStageVotingJdbcMariaDbIntegrationTest,RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest,RecruitmentObjectiveGradeJdbcMariaDbIntegrationTest test
+
       - name: Package without rerunning tests
         run: ./mvnw -DskipTests package
