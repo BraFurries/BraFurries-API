@@ -139,6 +139,15 @@ class RecruitmentExamReviewServiceTest {
                 new RecruitmentExamReviewService.ReasonRequest(reason))).getStatusCode());
         verifyNoInteractions(reviews,attempts);
     }
+    @Test void processClosedToCandidatesCannotBeAdministrativelyReinstated() {
+        stageReady();
+        when(attempts.stage(11,100L,501L)).thenReturn(null);
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->service.reinstate(auth,11,100L,501L,800L,
+                new RecruitmentExamReviewService.ReasonRequest(reason))).getStatusCode());
+        verifyNoInteractions(reviews);
+    }
+
     @Test void previousRestorationIsNeverRestoredTwice() {
         stageReady();
         when(reviews.incident(11,100,501,800)).thenReturn(new Incident(
