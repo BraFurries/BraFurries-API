@@ -175,6 +175,69 @@ public class RecruitmentCandidateAttemptRepository {
         );
     }
 
+    /** A blocked attempt blocks the whole current objective stage, not merely a retry. */
+    public boolean hasBlockedAttempt(Integer communityId,long applicationId,long stageId) {
+        Integer found=jdbc.queryForObject(
+            "SELECT COUNT(*) FROM recruitment_candidate_attempts "
+                + "WHERE community_id=? AND application_id=? AND stage_id=? "
+                + "AND status='BLOCKED'",
+            Integer.class,communityId,applicationId,stageId
+        );
+        return found!=null && found>0;
+    }
+
+    public int focusLosses(Integer communityId,long attemptId) {
+        Integer n=jdbc.queryForObject(
+            "SELECT focus_losses FROM recruitment_candidate_attempts "
+                + "WHERE community_id=? AND id=?",Integer.class,communityId,attemptId
+        );
+        return n==null?0:n;
+    }
+
+    public boolean eventExists(Integer communityId,long attemptId,String uuid) {
+        Integer found=jdbc.queryForObject(
+            "SELECT COUNT(*) FROM recruitment_exam_integrity_events "
+                + "WHERE community_id=? AND attempt_id=? AND event_uuid=?",
+            Integer.class,communityId,attemptId,uuid
+        );
+        return found!=null && found>0;
+    }
+
+    public int eventCount(Integer communityId,long attemptId) {
+        Integer found=jdbc.queryForObject(
+            "SELECT COUNT(*) FROM recruitment_exam_integrity_events "
+                + "WHERE community_id=? AND attempt_id=?",
+            Integer.class,communityId,attemptId
+        );
+        return found==null?0:found;
+    }
+
+    public void insertIntegrityEvent(Integer communityId,long attemptId,String uuid,
+        String type,String source) {
+        if(jdbc.update(
+            "INSERT INTO recruitment_exam_integrity_events "
+                + "(community_id,attempt_id,event_uuid,event_type,source) "
+                + "VALUES (?,?,?,?,?)",communityId,attemptId,uuid,type,source
+        )!=1) throw new IllegalStateException("Evento não gravado");
+    }
+
+    public boolean incrementFocusLoss(Integer communityId,long attemptId) {
+        return jdbc.update(
+            "UPDATE recruitment_candidate_attempts "
+                + "SET focus_losses=focus_losses+1 "
+                + "WHERE community_id=? AND id=? AND status='STARTED' "
+                + "AND focus_losses<10",communityId,attemptId
+        )==1;
+    }
+
+    public boolean blockAttempt(Integer communityId,long attemptId,int threshold) {
+        return jdbc.update(
+            "UPDATE recruitment_candidate_attempts SET status='BLOCKED' "
+                + "WHERE community_id=? AND id=? AND status='STARTED' "
+                + "AND focus_losses>=?",communityId,attemptId,threshold
+        )==1;
+    }
+
     public Instant dbNow() {
         return jdbc.queryForObject(
             "SELECT UTC_TIMESTAMP(6)",
