@@ -88,6 +88,44 @@ class RecruitmentStageVotingServiceTest {
         verifyNoInteractions(votes,assessments,decisions);
     }
 
+    @Test void availabilityDoesNotRevealTotalsInManualStage() {
+        actor(88,CommunityCapability.RECRUITMENT_REVIEW_APPLICATIONS);
+        when(assessments.assessmentTarget(11,APP,STAGE,false)).thenReturn(TARGET);
+        when(assessments.assignedToStage(11,STAGE,VERSION,88)).thenReturn(true);
+        when(decisions.policyJson(11,STAGE,VERSION)).thenReturn(null);
+        var response=service.availability(auth,11,APP,STAGE);
+        assertFalse(response.enabled());
+        assertFalse(response.alreadyVoted());
+        verifyNoInteractions(votes);
+    }
+
+    @Test void availabilityReportsOnlyOwnAssessedAndVotedState() {
+        actor(88,CommunityCapability.RECRUITMENT_REVIEW_APPLICATIONS);
+        when(assessments.assessmentTarget(11,APP,STAGE,false)).thenReturn(TARGET);
+        when(assessments.assignedToStage(11,STAGE,VERSION,88)).thenReturn(true);
+        when(decisions.policyJson(11,STAGE,VERSION)).thenReturn(POLICY);
+        when(assessments.ownAssessment(11,APP,STAGE,88)).thenReturn(
+            new RecruitmentHumanReviewRepository.Assessment(
+                9,APP,STAGE,88,null,"Parecer",null,Instant.parse("2026-10-23T12:00:00Z")));
+        when(votes.own(11,APP,STAGE,88)).thenReturn(
+            new Ballot(20,APP,STAGE,88,"APPROVE",Instant.parse("2026-10-23T12:01:00Z")));
+        var response=service.availability(auth,11,APP,STAGE);
+        assertTrue(response.enabled());
+        assertTrue(response.hasAssessment());
+        assertTrue(response.alreadyVoted());
+        verify(votes).own(11,APP,STAGE,88);
+        verify(votes,never()).tally(anyInt(),anyLong(),anyLong());
+        verify(votes,never()).lockedTally(anyInt(),anyLong(),anyLong());
+    }
+
+    @Test void unassignedReviewerCannotDiscoverVotingPolicy() {
+        actor(88,CommunityCapability.RECRUITMENT_REVIEW_APPLICATIONS);
+        when(assessments.assessmentTarget(11,APP,STAGE,false)).thenReturn(TARGET);
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
+            ()->service.availability(auth,11,APP,STAGE)).getStatusCode());
+        verifyNoInteractions(votes,decisions);
+    }
+
     @Test void reviewerMustBeAssignedAndHaveSubmittedAssessmentToVote() {
         actor(88,CommunityCapability.RECRUITMENT_REVIEW_APPLICATIONS);
         when(decisions.lockApplication(11,APP)).thenReturn(
