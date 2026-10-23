@@ -22,8 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Candidate-attempt lifecycle only. No grading, result publication or stage advancement
- * until the objective scoring/threshold policy is implemented and separately tested.
+ * Candidate-attempt lifecycle with private server-side grading.
+ * No candidate score disclosure, result publication or automatic stage advancement.
  */
 @Service
 public class RecruitmentCandidateAttemptService {
@@ -31,6 +31,8 @@ public class RecruitmentCandidateAttemptService {
     private final CommunityAuthorizationService authz;
     private final RecruitmentCandidateAttemptRepository repository;
     private final RecruitmentStageDecisionRepository decisions;
+    private final RecruitmentObjectiveGradeRepository grades;
+    private final RecruitmentObjectiveScorer scorer;
     private final RecruitmentFormValidator formValidator;
     private final RecruitmentCandidateAnswerValidator answerValidator;
     private final CommunityAuditLogRepository audits;
@@ -39,11 +41,14 @@ public class RecruitmentCandidateAttemptService {
     public RecruitmentCandidateAttemptService(
         RecruitmentFeatureGate gate,CommunityAuthorizationService authz,
         RecruitmentCandidateAttemptRepository repository,
-        RecruitmentStageDecisionRepository decisions,RecruitmentFormValidator formValidator,
+        RecruitmentStageDecisionRepository decisions,
+        RecruitmentObjectiveGradeRepository grades,RecruitmentObjectiveScorer scorer,
+        RecruitmentFormValidator formValidator,
         RecruitmentCandidateAnswerValidator answerValidator,
         CommunityAuditLogRepository audits,ObjectMapper json
     ) {
         this.gate=gate;this.authz=authz;this.repository=repository;this.decisions=decisions;
+        this.grades=grades;this.scorer=scorer;
         this.formValidator=formValidator;this.answerValidator=answerValidator;
         this.audits=audits;this.json=json;
     }
@@ -157,13 +162,21 @@ public class RecruitmentCandidateAttemptService {
             repository.expire(communityId,attempt.id());
             throw conflict("Prazo rígido da etapa encerrado");
         }
-        var validated=answerValidator.validate(internalForm(stage.formJson()),request.answers());
+        var form=internalForm(stage.formJson());
+        var validated=answerValidator.validate(form,request.answers());
+        var grading=grades.policy(communityId,stage.versionId(),stageId);
+        if(grading==null)
+            throw conflict("Prova sem política de correção configurada");
+        var score=scorer.score(form,validated,grading.passingPercentage());
         final String serialized;
         try { serialized=json.writeValueAsString(validated); }
         catch(JsonProcessingException ex) { throw bad("Respostas inválidas"); }
         if(serialized.length()>100000) throw bad("Respostas excedem o limite");
         if(!repository.submit(communityId,attemptId,serialized))
             throw conflict("A tentativa terminou durante o envio");
+        // Same DB transaction: either submission + grade + audit all commit,
+        // or neither is recorded. The candidate receives no grade or answer key.
+        grades.insertGrade(communityId,attemptId,score,grading.passingPercentage());
         audit(actor,"RECRUITMENT_CANDIDATE_ATTEMPT_SUBMITTED",attemptId);
         return new Submission(attemptId,applicationId,stageId,"SUBMITTED",repository.dbNow());
     }
