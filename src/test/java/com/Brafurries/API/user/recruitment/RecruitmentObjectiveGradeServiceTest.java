@@ -101,6 +101,22 @@ class RecruitmentObjectiveGradeServiceTest {
             (CommunityAuditLog e)->"RECRUITMENT_GRADE_POLICY_UPDATED".equals(e.getAction())));
     }
 
+    @Test void omittedVisibilityInLegacyRequestPreservesExistingOptIn() {
+        manager(77,true);
+        when(attempts.lockDraft(11,70L,501L)).thenReturn(
+            new DraftStage(80,"DRAFT","DRAFT","AUTO_EVALUATION",4));
+        when(grades.policy(11,80,501)).thenReturn(
+            new GradePolicy(new BigDecimal("70.00"),"BEST","AFTER_SUBMISSION"));
+        when(grades.configure(eq(11),eq(70L),eq(80L),eq(501L),
+            eq(4L),any(GradePolicy.class))).thenReturn(true);
+        var saved=service.configure(auth,11,70L,501L,
+            new ConfigureRequest(4L,new BigDecimal("80.00"),"LAST",null));
+        assertEquals("AFTER_SUBMISSION",saved.policy().scoreVisibility());
+        verify(grades).configure(eq(11),eq(70L),eq(80L),eq(501L),eq(4L),
+            org.mockito.ArgumentMatchers.argThat(
+                (GradePolicy policy)->"AFTER_SUBMISSION".equals(policy.scoreVisibility())));
+    }
+
     @Test void publishedVersionCannotMutatePolicy() {
         manager(77,true);
         when(attempts.lockDraft(11,70L,501L)).thenReturn(
