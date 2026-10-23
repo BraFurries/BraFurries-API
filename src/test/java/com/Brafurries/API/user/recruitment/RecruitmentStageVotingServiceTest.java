@@ -71,7 +71,7 @@ class RecruitmentStageVotingServiceTest {
         when(decisions.lockApplication(11,APP)).thenReturn(
             new RecruitmentStageDecisionRepository.Application(APP,VERSION,99,"IN_PROGRESS"));
         when(decisions.assessmentCount(11,APP,STAGE)).thenReturn(3);
-        when(votes.tally(11,APP,STAGE)).thenReturn(new Tally(approves,rejects));
+        when(votes.lockedTally(11,APP,STAGE)).thenReturn(new Tally(approves,rejects));
     }
 
     @Test void featureGateBlocksAnotherCommunityBeforeAnyRead() {
