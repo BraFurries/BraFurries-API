@@ -24,6 +24,13 @@ public class RecruitmentCandidateAttemptController {
         @PathVariable Long applicationId,@PathVariable Long stageId
     ) { return service.start(auth,communityId,applicationId,stageId); }
 
+    @PostMapping("/{attemptId}/integrity-events")
+    public IntegrityEventReceipt integrity(
+        Authentication auth,@PathVariable Integer communityId,
+        @PathVariable Long applicationId,@PathVariable Long stageId,
+        @PathVariable Long attemptId,@RequestBody IntegrityEventRequest request
+    ) { return service.recordIntegrityEvent(auth,communityId,applicationId,stageId,attemptId,request); }
+
     @PostMapping("/{attemptId}/submit")
     public Submission submit(
         Authentication auth,@PathVariable Integer communityId,
