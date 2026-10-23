@@ -95,8 +95,8 @@ public class RecruitmentExamReviewRepository {
         if(jdbc.update(
             "INSERT INTO recruitment_exam_reinstatements "
                 + "(community_id,application_id,stage_id,attempt_id,"
-                + "reviewed_by_user_id,reason,previous_focus_losses,expires_at) "
-                + "VALUES (?,?,?,?,?,?,?,?)",
+                + "reviewed_by_user_id,reason,previous_focus_losses,reinstated_at,expires_at) "
+                + "VALUES (?,?,?,?,?,?,?,UTC_TIMESTAMP(6),?)",
             communityId,applicationId,stageId,attemptId,actorId,reason,
             previousFocusLosses,LocalDateTime.ofInstant(newExpiry,ZoneOffset.UTC)
         )!=1) throw new IllegalStateException("Reinstatement was not recorded");
