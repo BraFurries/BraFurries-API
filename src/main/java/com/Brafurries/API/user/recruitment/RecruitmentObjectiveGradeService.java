@@ -89,7 +89,8 @@ public class RecruitmentObjectiveGradeService {
                 selected=rows.get(rows.size()-1);
             } else if("BEST".equals(policy.resultStrategy())) {
                 selected=rows.stream()
-                    .max(Comparator.comparingInt((Grade g)->g.earnedPoints()*1000000/g.possiblePoints())
+                    .max(Comparator.comparing((Grade g)->BigDecimal.valueOf(g.earnedPoints())
+                        .divide(BigDecimal.valueOf(g.possiblePoints()),12,java.math.RoundingMode.HALF_UP))
                         .thenComparingLong(g->-g.attemptId()))
                     .orElseThrow();
             } else throw new IllegalStateException("Política de seleção inválida");
