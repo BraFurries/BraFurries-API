@@ -84,7 +84,8 @@ public class RecruitmentObjectiveGradeService {
         var rows=grades.grades(communityId,applicationId,stageId);
         Grade selected=RecruitmentObjectiveGradeSelector.select(rows,policy.resultStrategy());
         audit(actor,"RECRUITMENT_GRADE_SUMMARY_VIEWED",applicationId);
-        return new GradeSummary(applicationId,stageId,policy,List.copyOf(rows),selected,true);
+        return new GradeSummary(applicationId,stageId,policy,List.copyOf(rows),selected,
+            !grades.finalized(communityId,applicationId,stageId));
     }
 
     private CommunityAuthorizationService.CommunityAccessContext manager(
