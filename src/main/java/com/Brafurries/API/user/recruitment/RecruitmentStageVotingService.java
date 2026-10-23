@@ -139,7 +139,7 @@ public class RecruitmentStageVotingService {
         if (decisions.assessmentCount(communityId,applicationId,stageId)
             < policy.minimumAssessments())
             throw conflict("Pareceres mínimos ainda não registrados");
-        var tally=votes.tally(communityId,applicationId,stageId);
+        var tally=votes.lockedTally(communityId,applicationId,stageId);
         var summary=summary(applicationId,stageId,tally,policy);
         if (!summary.quorumReached())
             throw conflict("Quórum de votos ainda não atingido");
