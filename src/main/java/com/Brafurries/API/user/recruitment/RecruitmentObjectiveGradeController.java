@@ -13,6 +13,12 @@ public class RecruitmentObjectiveGradeController {
         this.service=service;
     }
 
+    @GetMapping("/processes/{processId}/stages/{stageId}/grade-policy")
+    public Configured policy(Authentication auth,@PathVariable Integer communityId,
+        @PathVariable Long processId,@PathVariable Long stageId) {
+        return service.policy(auth,communityId,processId,stageId);
+    }
+
     @PutMapping("/processes/{processId}/stages/{stageId}/grade-policy")
     public Configured configure(Authentication auth,@PathVariable Integer communityId,
         @PathVariable Long processId,@PathVariable Long stageId,
