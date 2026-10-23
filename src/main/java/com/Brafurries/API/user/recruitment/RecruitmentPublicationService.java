@@ -226,6 +226,10 @@ public class RecruitmentPublicationService {
                 blockers.add("A ordenação das etapas não é consecutiva");
                 break;
             }
+            if ("AUTO_EVALUATION".equals(stage.stageType()) && !stage.hasAttemptPolicy()) {
+                blockers.add("A etapa " + stage.position()
+                    + " precisa de política de tentativas antes da publicação");
+            }
             if (!"AUTO_EVALUATION".equals(stage.stageType())) {
                 try {
                     var decisionPolicy = RecruitmentDecisionPolicy.parse(
