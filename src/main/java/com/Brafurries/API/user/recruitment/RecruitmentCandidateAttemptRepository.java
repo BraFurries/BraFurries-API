@@ -149,12 +149,17 @@ public class RecruitmentCandidateAttemptRepository {
         );
     }
 
-    public record AvailableExam(long applicationId,long stageId,String publicName) {}
+    public record AvailableExam(long applicationId,long stageId,String publicName,
+        boolean blocked) {}
 
     /** Candidate-safe: do not disclose future stage order, internal decisions or grades. */
     public List<AvailableExam> availableExams(Integer communityId,long applicationId,int userId) {
         return jdbc.query(
-            "SELECT a.id,s.id,s.public_name "
+            "SELECT a.id,s.id,s.public_name,"
+                + "EXISTS(SELECT 1 FROM recruitment_candidate_attempts blocked "
+                + "WHERE blocked.community_id=a.community_id "
+                + "AND blocked.application_id=a.id AND blocked.stage_id=s.id "
+                + "AND blocked.status='BLOCKED') AS is_blocked "
                 + "FROM recruitment_applications a "
                 + "JOIN recruitment_application_stages ras "
                 + "ON ras.community_id=a.community_id AND ras.application_id=a.id "
@@ -170,7 +175,8 @@ public class RecruitmentCandidateAttemptRepository {
                 + "AND s.stage_type='AUTO_EVALUATION' "
                 + "AND v.status='PUBLISHED' AND p.status='ACTIVE' "
                 + "ORDER BY s.position,s.id LIMIT 1",
-            (rs,n)->new AvailableExam(rs.getLong(1),rs.getLong(2),rs.getString(3)),
+            (rs,n)->new AvailableExam(rs.getLong(1),rs.getLong(2),rs.getString(3),
+                rs.getBoolean(4)),
             communityId,applicationId,userId
         );
     }
