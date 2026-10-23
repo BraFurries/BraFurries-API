@@ -149,6 +149,32 @@ public class RecruitmentCandidateAttemptRepository {
         );
     }
 
+    public record AvailableExam(long applicationId,long stageId,String publicName) {}
+
+    /** Candidate-safe: do not disclose future stage order, internal decisions or grades. */
+    public List<AvailableExam> availableExams(Integer communityId,long applicationId,int userId) {
+        return jdbc.query(
+            "SELECT a.id,s.id,s.public_name "
+                + "FROM recruitment_applications a "
+                + "JOIN recruitment_application_stages ras "
+                + "ON ras.community_id=a.community_id AND ras.application_id=a.id "
+                + "AND ras.process_version_id=a.process_version_id "
+                + "JOIN recruitment_stages s ON s.community_id=ras.community_id "
+                + "AND s.process_version_id=ras.process_version_id AND s.id=ras.stage_id "
+                + "JOIN recruitment_process_versions v "
+                + "ON v.community_id=a.community_id AND v.id=a.process_version_id "
+                + "JOIN recruitment_processes p "
+                + "ON p.community_id=a.community_id AND p.id=a.process_id "
+                + "WHERE a.community_id=? AND a.id=? AND a.candidate_user_id=? "
+                + "AND a.status='IN_PROGRESS' AND ras.status='AWAITING_CANDIDATE' "
+                + "AND s.stage_type='AUTO_EVALUATION' "
+                + "AND v.status='PUBLISHED' AND p.status='ACTIVE' "
+                + "ORDER BY s.position,s.id LIMIT 1",
+            (rs,n)->new AvailableExam(rs.getLong(1),rs.getLong(2),rs.getString(3)),
+            communityId,applicationId,userId
+        );
+    }
+
     public Instant dbNow() {
         return jdbc.queryForObject(
             "SELECT UTC_TIMESTAMP(6)",
