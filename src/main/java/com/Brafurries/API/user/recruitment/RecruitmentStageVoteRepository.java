@@ -52,6 +52,27 @@ public class RecruitmentStageVoteRepository {
         return generated.getKey().longValue();
     }
 
+    /**
+     * Current-read rows under FOR UPDATE. InnoDB REPEATABLE READ's earlier
+     * authorization SELECT may have established an old transaction snapshot:
+     * a plain aggregate could miss committed ballots even after the
+     * application serialization lock has been acquired.
+     */
+    public Tally lockedTally(Integer communityId,long applicationId,long stageId) {
+        var choices=jdbc.query(
+            "SELECT choice FROM recruitment_stage_votes "
+                + "WHERE community_id=? AND application_id=? AND stage_id=? FOR UPDATE",
+            (rs,n)->rs.getString(1),communityId,applicationId,stageId
+        );
+        int yes=0,no=0;
+        for (String choice:choices) {
+            if ("APPROVE".equals(choice)) yes++;
+            else if ("REJECT".equals(choice)) no++;
+            else throw new IllegalStateException("Voto persistido inválido");
+        }
+        return new Tally(yes,no);
+    }
+
     public Tally tally(Integer communityId,long applicationId,long stageId) {
         return jdbc.queryForObject(
             "SELECT COALESCE(SUM(CASE WHEN choice='APPROVE' THEN 1 ELSE 0 END),0), "
