@@ -63,6 +63,23 @@ public class RecruitmentStageDecisionService {
         Authentication auth, Integer communityId, Long applicationId,
         Long stageId, DecisionRequest request
     ) {
+        return decideInternal(auth,communityId,applicationId,stageId,request,"MANUAL");
+    }
+
+    /** Called ONLY by the voting service after tallying under the same application lock. */
+    DecisionReceipt decideFromVotes(
+        Authentication auth,Integer communityId,Long applicationId,Long stageId,
+        DecisionRequest request,String source
+    ) {
+        if (!List.of("VOTE_MAJORITY","VOTE_TIE_REJECT","VOTE_TIE_OVERRIDE").contains(source))
+            throw new IllegalArgumentException("Origem de votação inválida");
+        return decideInternal(auth,communityId,applicationId,stageId,request,source);
+    }
+
+    private DecisionReceipt decideInternal(
+        Authentication auth,Integer communityId,Long applicationId,Long stageId,
+        DecisionRequest request,String source
+    ) {
         var actor = manager(auth,communityId);
         requireIds(applicationId,stageId);
         if (request == null || request.outcome() == null ||
@@ -108,8 +125,10 @@ public class RecruitmentStageDecisionService {
         }
         var policy = RecruitmentDecisionPolicy.parse(json,
             repository.policyJson(communityId,stageId,application.versionId()));
-        if (policy.decisionMode() != RecruitmentDecisionPolicy.DecisionMode.MANUAL) {
-            throw conflict("Esta etapa exige votação automática, ainda não liberada");
+        boolean fromVotes = !"MANUAL".equals(source);
+        if (fromVotes != (policy.decisionMode() ==
+            RecruitmentDecisionPolicy.DecisionMode.AUTOMATIC_VOTE)) {
+            throw conflict("O modo de decisão da etapa não corresponde ao solicitado");
         }
         if (repository.assessmentCount(communityId,applicationId,stageId)
             < policy.minimumAssessments()) {
@@ -120,8 +139,13 @@ public class RecruitmentStageDecisionService {
         }
 
         try {
-            repository.insertDecision(communityId,applicationId,stageId,actor.user().getId(),
-                request.outcome(),reason);
+            if (fromVotes) {
+                repository.insertVoteDecision(communityId,applicationId,stageId,
+                    actor.user().getId(),request.outcome(),reason,source);
+            } else {
+                repository.insertDecision(communityId,applicationId,stageId,
+                    actor.user().getId(),request.outcome(),reason);
+            }
         } catch (DataIntegrityViolationException duplicate) {
             throw conflict("Esta etapa já possui uma decisão");
         }
@@ -157,7 +181,8 @@ public class RecruitmentStageDecisionService {
         var log = new CommunityAuditLog();
         log.setCommunity(actor.community());
         log.setActorUser(actor.user());
-        log.setAction("RECRUITMENT_STAGE_DECIDED");
+        log.setAction(fromVotes ? "RECRUITMENT_VOTE_DECISION_FINALIZED" :
+            "RECRUITMENT_STAGE_DECIDED");
         log.setTargetType("RECRUITMENT_APPLICATION_STAGE");
         log.setTargetId(applicationId + ":" + stageId);
         audits.save(log);
