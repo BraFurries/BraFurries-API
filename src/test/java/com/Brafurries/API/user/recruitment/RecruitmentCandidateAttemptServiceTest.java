@@ -254,6 +254,26 @@ class RecruitmentCandidateAttemptServiceTest {
         verify(grades,never()).grades(anyInt(),anyLong(),anyLong());
     }
 
+    @Test void authorizedCandidateReadsOnlyTheirNumericScoresWhenEnabled() {
+        actor(99,true,false);
+        when(decisions.candidateId(11,100L)).thenReturn(99);
+        when(grades.stage(11,100L,501L)).thenReturn(
+            new RecruitmentObjectiveGradeRepository.StageRef(80,99,"AUTO_EVALUATION"));
+        when(grades.policy(11,80,501)).thenReturn(
+            new RecruitmentObjectiveGradeRepository.GradePolicy(
+                new java.math.BigDecimal("70.00"),"BEST","AFTER_SUBMISSION"));
+        when(grades.grades(11,100L,501L)).thenReturn(List.of(
+            new RecruitmentObjectiveGradeRepository.Grade(
+                800,7,10,1,2,new java.math.BigDecimal("70.00"),true,NOW)));
+        var result=service.ownScores(auth,11,100L,501L);
+        assertEquals(1,result.size());
+        assertEquals(800L,result.get(0).attemptId());
+        assertEquals(7,result.get(0).earnedPoints());
+        assertEquals(new java.math.BigDecimal("70.00"),result.get(0).percentage());
+        assertFalse(result.toString().contains("passed"));
+        assertFalse(result.toString().contains("correctAnswers"));
+    }
+
     @Test void policyRequiresDraftRevisionAndRejectsUnimplementedBrowserControls() {
         actor(77,true,true);
         var config=new ConfigureRequest(4L,2,120,null,false,3,true);
