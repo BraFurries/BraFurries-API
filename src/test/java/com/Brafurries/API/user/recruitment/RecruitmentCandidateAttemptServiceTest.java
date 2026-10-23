@@ -435,6 +435,70 @@ class RecruitmentCandidateAttemptServiceTest {
         verify(audits).save(any(CommunityAuditLog.class));
     }
 
+    private void runningDraft(Policy activePolicy) {
+        owner(activePolicy);
+        when(repository.attemptsLocked(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"STARTED",NOW.minusSeconds(5),
+                NOW.plusSeconds(120),null)));
+        when(repository.dbNow()).thenReturn(NOW);
+    }
+
+    @Test void autosaveAcceptsPartialAnswersAndReturnsServerRevision() throws Exception {
+        runningDraft(policy(true,null));
+        when(repository.saveDraft(eq(11),eq(100L),eq(501L),eq(800L),
+            eq(0L),anyString())).thenReturn(true);
+        when(repository.draft(11,100L,501L,800L)).thenReturn(
+            new DraftState(1L,"{\\"question\\":\\"b\\"}",NOW));
+        var payload=Map.<String,com.fasterxml.jackson.databind.JsonNode>of(
+            "question",new ObjectMapper().getNodeFactory().textNode("b"));
+        var receipt=service.saveDraft(auth,11,100L,501L,800L,
+            new DraftRequest(0L,payload));
+        assertEquals(1,receipt.revision());
+        assertEquals("b",receipt.answers().get("question").asText());
+        verify(repository).saveDraft(11,100L,501L,800L,0L,
+            "{\\"question\\":\\"b\\"}");
+    }
+
+    @Test void draftCanBeRecoveredAfterResumeWithoutAnswerKey() {
+        runningDraft(policy(false,NOW.minusSeconds(5)));
+        when(repository.draft(11,100L,501L,800L)).thenReturn(
+            new DraftState(2L,"{\\"question\\":\\"b\\"}",NOW));
+        var receipt=service.draft(auth,11,100L,501L,800L);
+        assertEquals(2,receipt.revision());
+        assertFalse(receipt.toString().contains("correctAnswers"));
+    }
+
+    @Test void staleDraftRevisionConflictsWithoutUpdatingFinalAnswers() {
+        runningDraft(policy(true,null));
+        var request=new DraftRequest(1L,Map.of());
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->service.saveDraft(auth,11,100L,501L,800L,request)).getStatusCode());
+        verify(repository).saveDraft(11,100L,501L,800L,1L,"{}");
+        verify(repository,never()).submit(anyInt(),anyLong(),anyString());
+    }
+
+    @Test void blockedAndHardExpiredAttemptsRejectAutosave() {
+        owner(policy(true,NOW.minusSeconds(10)));
+        when(repository.attemptsLocked(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"BLOCKED",NOW.minusSeconds(30),
+                NOW.plusSeconds(60),null)));
+        when(repository.dbNow()).thenReturn(NOW);
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->service.saveDraft(auth,11,100L,501L,800L,
+                new DraftRequest(0L,Map.of()))).getStatusCode());
+        verify(repository,never()).saveDraft(anyInt(),anyLong(),anyLong(),
+            anyLong(),anyLong(),anyString());
+    }
+
+    @Test void otherCandidateCannotReadDraft() {
+        actor(101,true,false);
+        when(decisions.lockApplication(11,100L))
+            .thenReturn(new Application(100,80,99,"IN_PROGRESS"));
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
+            ()->service.draft(auth,11,100L,501L,800L)).getStatusCode());
+        verify(repository,never()).draft(anyInt(),anyLong(),anyLong(),anyLong());
+    }
+
     @Test void policyCannotChangeAfterPublication() {
         actor(77,true,true);
         when(repository.lockDraft(11,70,501)).thenReturn(
