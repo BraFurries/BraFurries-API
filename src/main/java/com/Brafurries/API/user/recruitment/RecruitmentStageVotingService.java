@@ -101,7 +101,7 @@ public class RecruitmentStageVotingService {
         return votes.own(communityId,applicationId,stageId,actor.user().getId());
     }
 
-    @Transactional(readOnly=true)
+    @Transactional
     public VoteSummary tally(
         Authentication auth,Integer communityId,Long applicationId,Long stageId
     ) {
@@ -112,6 +112,7 @@ public class RecruitmentStageVotingService {
         if (policy.decisionMode()!=RecruitmentDecisionPolicy.DecisionMode.AUTOMATIC_VOTE)
             throw conflict("Etapa não usa votação");
         var count=votes.tally(communityId,applicationId,stageId);
+        audit(actor,"RECRUITMENT_VOTE_TALLY_VIEWED",applicationId+":"+stageId);
         return summary(applicationId,stageId,count,policy);
     }
 
