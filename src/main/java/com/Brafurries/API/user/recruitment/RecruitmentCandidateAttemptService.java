@@ -59,7 +59,7 @@ public class RecruitmentCandidateAttemptService {
     public record PolicyResponse(long stageId,long versionId,long draftRevision,Policy policy) {}
     public record AttemptSession(
         long attemptId,long applicationId,long stageId,int attemptNumber,
-        String status,Instant expiresAt,PublicForm form
+        String status,Instant expiresAt,Instant serverNow,PublicForm form
     ) {}
     public record SubmitRequest(Map<String,JsonNode> answers) {}
     /** Only numeric exam grade: NEVER pass/fail, gabarito or final selection outcome. */
@@ -119,7 +119,7 @@ public class RecruitmentCandidateAttemptService {
         var attempts=repository.attempts(communityId,applicationId,stageId);
         for(var attempt:attempts) {
             if(!"STARTED".equals(attempt.status())) continue;
-            if(now.isBefore(attempt.expiresAt())) return session(attempt,stage.formJson());
+            if(now.isBefore(attempt.expiresAt())) return session(attempt,stage.formJson(),now);
             repository.expire(communityId,attempt.id());
         }
         if(stage.policy().deadlineAt()!=null && !now.isBefore(stage.policy().deadlineAt()))
@@ -135,7 +135,7 @@ public class RecruitmentCandidateAttemptService {
         var created=repository.create(communityId,applicationId,stage.versionId(),stageId,
             attempts.size()+1,expires);
         audit(actor,"RECRUITMENT_CANDIDATE_ATTEMPT_STARTED",created.id());
-        return session(created,stage.formJson());
+        return session(created,stage.formJson(),now);
     }
 
     @Transactional
@@ -246,7 +246,7 @@ public class RecruitmentCandidateAttemptService {
         return stage;
     }
 
-    private AttemptSession session(Attempt attempt,String formJson) {
+    private AttemptSession session(Attempt attempt,String formJson,Instant serverNow) {
         var form=internalForm(formJson);
         var fields=form.questions().stream().map(q->new PublicQuestion(
             q.id(),q.label(),q.type().name(),q.required(),
@@ -254,7 +254,7 @@ public class RecruitmentCandidateAttemptService {
                 .map(o->new PublicOption(o.id(),o.label())).toList(),
             q.minValue(),q.maxValue())).toList();
         return new AttemptSession(attempt.id(),attempt.applicationId(),attempt.stageId(),
-            attempt.number(),attempt.status(),attempt.expiresAt(),new PublicForm(fields));
+            attempt.number(),attempt.status(),attempt.expiresAt(),serverNow,new PublicForm(fields));
     }
 
     private RecruitmentFormDefinition internalForm(String source) {
