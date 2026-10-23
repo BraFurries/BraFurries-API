@@ -31,6 +31,7 @@ public class RecruitmentCandidateAttemptService {
     private final CommunityAuthorizationService authz;
     private final RecruitmentCandidateAttemptRepository repository;
     private final RecruitmentStageDecisionRepository decisions;
+    private final RecruitmentExamNoticeRepository notices;
     private final RecruitmentObjectiveGradeRepository grades;
     private final RecruitmentObjectiveScorer scorer;
     private final RecruitmentFormValidator formValidator;
@@ -45,10 +46,11 @@ public class RecruitmentCandidateAttemptService {
         RecruitmentObjectiveGradeRepository grades,RecruitmentObjectiveScorer scorer,
         RecruitmentFormValidator formValidator,
         RecruitmentCandidateAnswerValidator answerValidator,
-        CommunityAuditLogRepository audits,ObjectMapper json
+        CommunityAuditLogRepository audits,ObjectMapper json,
+        RecruitmentExamNoticeRepository notices
     ) {
         this.gate=gate;this.authz=authz;this.repository=repository;this.decisions=decisions;
-        this.grades=grades;this.scorer=scorer;
+        this.notices=notices;this.grades=grades;this.scorer=scorer;
         this.formValidator=formValidator;this.answerValidator=answerValidator;
         this.audits=audits;this.json=json;
     }
@@ -374,6 +376,8 @@ public class RecruitmentCandidateAttemptService {
                 if(!repository.blockAttempt(communityId,attemptId,policy.maxFocusLosses()))
                     throw conflict("Tentativa alterada durante o bloqueio");
                 blocked=true;
+                notices.record(communityId,applicationId,stageId,attemptId,
+                    "BLOCKED",null);
             }
         }
         audit(actor,blocked?"RECRUITMENT_EXAM_ATTEMPT_BLOCKED":
