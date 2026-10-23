@@ -117,6 +117,11 @@ class RecruitmentObjectiveGradeJdbcMariaDbIntegrationTest {
         grades.insertGrade(981001,attempt.id(),
             new RecruitmentObjectiveScorer.Score(8,10,1,2,true),
             new BigDecimal("70.00"));
+        // Actual MariaDB locking reads, not mock-only simulation.
+        assertEquals(1,attempts.attemptsLocked(981001,985001,984001).size());
+        assertEquals(1,grades.gradesLocked(981001,985001,984001).size());
+        assertEquals("AWAITING_CANDIDATE",
+            decisions.stagesLocked(981001,985001,983001).get(0).status());
 
         assertThrows(DataIntegrityViolationException.class,()->
             decisions.insertObjectiveDecision(981001,985001,984001,981002,
