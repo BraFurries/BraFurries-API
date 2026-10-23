@@ -130,7 +130,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: BraFurries/BraFurries-Database
-          ref: a7d4d0da1cb7ca12826abb34f7655ad715df5a78
+          ref: 1878ddbc49bbeb582994d52fa865474a9aeeff40
           path: .ci/recruitment-database
           persist-credentials: false
 
@@ -139,7 +139,7 @@ jobs:
           BRF_RECRUITMENT_JDBC_INTEGRATION: "true"
         run: |
           set -euo pipefail
-          test "$(git -C .ci/recruitment-database rev-parse HEAD)" = "a7d4d0da1cb7ca12826abb34f7655ad715df5a78"
+          test "$(git -C .ci/recruitment-database rev-parse HEAD)" = "1878ddbc49bbeb582994d52fa865474a9aeeff40"
           baseline=".ci/database-baseline/flyway/sql/baseline/B20261020_001__adopt_production_schema.sql"
           migration=".ci/recruitment-database/flyway/sql/versioned/V20261021_001__create_recruitment_foundation.sql"
           revision=".ci/recruitment-database/flyway/sql/versioned/V20261022_001__add_recruitment_draft_revision.sql"
@@ -152,8 +152,10 @@ jobs:
           test -s "$review"
           decisions=".ci/recruitment-database/flyway/sql/versioned/V20261022_004__create_recruitment_stage_decisions.sql"
           test -s "$decisions"
-          cat "$baseline" "$migration" "$revision" "$submission" "$review" "$decisions" > src/test/resources/recruitment_schema.sql
-          ./mvnw -B -Dtest=RecruitmentDraftJdbcMariaDbIntegrationTest,RecruitmentStageEditorJdbcMariaDbIntegrationTest,RecruitmentPublicationJdbcMariaDbIntegrationTest,RecruitmentCandidateJdbcMariaDbIntegrationTest,RecruitmentTrackingJdbcMariaDbIntegrationTest,RecruitmentHumanReviewJdbcMariaDbIntegrationTest,RecruitmentStageDecisionJdbcMariaDbIntegrationTest,RecruitmentDecisionPolicyJdbcMariaDbIntegrationTest,RecruitmentDecisionDeskJdbcMariaDbIntegrationTest test
+          ballots=".ci/recruitment-database/flyway/sql/versioned/V20261023_001__create_recruitment_stage_votes.sql"
+          test -s "$ballots"
+          cat "$baseline" "$migration" "$revision" "$submission" "$review" "$decisions" "$ballots" > src/test/resources/recruitment_schema.sql
+          ./mvnw -B -Dtest=RecruitmentDraftJdbcMariaDbIntegrationTest,RecruitmentStageEditorJdbcMariaDbIntegrationTest,RecruitmentPublicationJdbcMariaDbIntegrationTest,RecruitmentCandidateJdbcMariaDbIntegrationTest,RecruitmentTrackingJdbcMariaDbIntegrationTest,RecruitmentHumanReviewJdbcMariaDbIntegrationTest,RecruitmentStageDecisionJdbcMariaDbIntegrationTest,RecruitmentDecisionPolicyJdbcMariaDbIntegrationTest,RecruitmentDecisionDeskJdbcMariaDbIntegrationTest,RecruitmentStageVotingJdbcMariaDbIntegrationTest test
 
       - name: Package without rerunning tests
         run: ./mvnw -DskipTests package
