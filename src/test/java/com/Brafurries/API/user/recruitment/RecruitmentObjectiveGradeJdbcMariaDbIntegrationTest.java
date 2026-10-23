@@ -103,9 +103,9 @@ class RecruitmentObjectiveGradeJdbcMariaDbIntegrationTest {
             grades.insertGrade(981002,attempt.id(),score,new BigDecimal("70.00")));
     }
 
-    @Test void policyCannotBeConfiguredOnMissingStagePolicy() {
-        assertThrows(IllegalStateException.class,()->
-            grades.configure(981001,982001,983001,984002,0,
-                new GradePolicy(new BigDecimal("70.00"),"BEST")));
+    @Test void publishedProcessCannotBeChangedByPolicyUpdate() {
+        assertFalse(grades.configure(981001,982001,983001,984001,0,
+            new GradePolicy(new BigDecimal("70.00"),"LAST")));
+        assertEquals("BEST",grades.policy(981001,983001,984001).resultStrategy());
     }
 }
