@@ -15,6 +15,12 @@ public class RecruitmentStageVotingController {
         this.voting=voting;
     }
 
+    @GetMapping("/availability")
+    public VotingAvailability availability(
+        Authentication auth,@PathVariable Integer communityId,
+        @PathVariable Long applicationId,@PathVariable Long stageId
+    ) { return voting.availability(auth,communityId,applicationId,stageId); }
+
     @GetMapping("/mine")
     public Ballot mine(
         Authentication auth,@PathVariable Integer communityId,
