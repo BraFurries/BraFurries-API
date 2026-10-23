@@ -198,7 +198,7 @@ public class RecruitmentCandidateAttemptService {
         return repository.availableExams(communityId,applicationId,actor.user().getId());
     }
 
-    @Transactional(readOnly=true)
+    @Transactional
     public List<PublicScore> ownScores(Authentication auth,Integer communityId,
         Long applicationId,Long stageId) {
         var actor=candidate(auth,communityId);
@@ -210,9 +210,11 @@ public class RecruitmentCandidateAttemptService {
         var grading=grades.policy(communityId,stage.versionId(),stageId);
         if(grading==null || !"AFTER_SUBMISSION".equals(grading.scoreVisibility()))
             throw missing();
-        return grades.grades(communityId,applicationId,stageId).stream()
+        var scores=grades.grades(communityId,applicationId,stageId).stream()
             .map(g->publicScore(g.attemptId(),g.earnedPoints(),g.possiblePoints()))
             .toList();
+        audit(actor,"RECRUITMENT_CANDIDATE_GRADE_VIEWED",stageId);
+        return scores;
     }
 
     @Transactional
