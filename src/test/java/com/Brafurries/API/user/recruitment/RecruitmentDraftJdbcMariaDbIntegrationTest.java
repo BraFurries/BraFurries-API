@@ -155,7 +155,7 @@ class RecruitmentDraftJdbcMariaDbIntegrationTest {
                 + "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='BASE TABLE'",
             Integer.class
         );
-        // Includes the stage-decision table from Database #16.
-        assertEquals(122, count);
+        // Canonical pinned schema includes the two incident-notice tables (Database #25).
+        assertEquals(124, count);
     }
 }
