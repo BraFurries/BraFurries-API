@@ -25,16 +25,23 @@ public class RecruitmentPublicationRepository {
     public record DraftStage(
         Long id, int position, String stageType,
         String candidateFormJson, String staffFormJson,
-        String evaluationConfigJson, boolean hasAttemptPolicy
+        String evaluationConfigJson, boolean hasAttemptPolicy,
+        boolean hasGradingPolicy
     ) {
         public DraftStage(Long id, int position, String stageType,
                           String candidateFormJson, String staffFormJson) {
-            this(id,position,stageType,candidateFormJson,staffFormJson,null,false);
+            this(id,position,stageType,candidateFormJson,staffFormJson,null,false,false);
         }
         public DraftStage(Long id, int position, String stageType,
                           String candidateFormJson, String staffFormJson,
                           String evaluationConfigJson) {
-            this(id,position,stageType,candidateFormJson,staffFormJson,evaluationConfigJson,false);
+            this(id,position,stageType,candidateFormJson,staffFormJson,evaluationConfigJson,false,false);
+        }
+        public DraftStage(Long id, int position, String stageType,
+                          String candidateFormJson, String staffFormJson,
+                          String evaluationConfigJson,boolean hasAttemptPolicy) {
+            this(id,position,stageType,candidateFormJson,staffFormJson,
+                evaluationConfigJson,hasAttemptPolicy,false);
         }
     }
 
@@ -74,7 +81,9 @@ public class RecruitmentPublicationRepository {
     public List<DraftStage> stages(Integer communityId, Long processId, Long versionId) {
         return jdbc.query(
             "SELECT s.id,s.position,s.stage_type,s.candidate_form_json,s.staff_form_json,"
-                + "s.evaluation_config_json,(policy.stage_id IS NOT NULL) AS has_attempt_policy "
+                + "s.evaluation_config_json,(policy.stage_id IS NOT NULL) AS has_attempt_policy,"
+                + "(policy.passing_percentage IS NOT NULL "
+                + "AND policy.result_strategy IS NOT NULL) AS has_grading_policy "
                 + "FROM recruitment_stages s "
                 + "LEFT JOIN recruitment_stage_attempt_policies policy "
                 + "ON policy.community_id=s.community_id "
@@ -84,7 +93,8 @@ public class RecruitmentPublicationRepository {
             (rs, row) -> new DraftStage(
                 rs.getLong("id"), rs.getInt("position"), rs.getString("stage_type"),
                 rs.getString("candidate_form_json"), rs.getString("staff_form_json"),
-                rs.getString("evaluation_config_json"),rs.getBoolean("has_attempt_policy")
+                rs.getString("evaluation_config_json"),rs.getBoolean("has_attempt_policy"),
+                rs.getBoolean("has_grading_policy")
             ), communityId, processId, versionId
         );
     }
