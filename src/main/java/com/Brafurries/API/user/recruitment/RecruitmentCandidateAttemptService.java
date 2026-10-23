@@ -62,8 +62,12 @@ public class RecruitmentCandidateAttemptService {
         String status,Instant expiresAt,PublicForm form
     ) {}
     public record SubmitRequest(Map<String,JsonNode> answers) {}
+    /** Only numeric exam grade: NEVER pass/fail, gabarito or final selection outcome. */
+    public record PublicScore(long attemptId,int earnedPoints,int possiblePoints,
+        java.math.BigDecimal percentage) {}
     public record Submission(
-        long attemptId,long applicationId,long stageId,String status,Instant submittedAt
+        long attemptId,long applicationId,long stageId,String status,Instant submittedAt,
+        PublicScore score
     ) {}
 
     @Transactional
@@ -179,7 +183,55 @@ public class RecruitmentCandidateAttemptService {
         grades.insertGrade(communityId,attemptId,score,grading.passingPercentage());
         audit(actor,"RECRUITMENT_OBJECTIVE_ATTEMPT_GRADED",attemptId);
         audit(actor,"RECRUITMENT_CANDIDATE_ATTEMPT_SUBMITTED",attemptId);
-        return new Submission(attemptId,applicationId,stageId,"SUBMITTED",repository.dbNow());
+        PublicScore feedback="AFTER_SUBMISSION".equals(grading.scoreVisibility())
+            ? publicScore(attemptId,score.earnedPoints(),score.possiblePoints()):null;
+        return new Submission(attemptId,applicationId,stageId,"SUBMITTED",repository.dbNow(),feedback);
+    }
+
+    @Transactional(readOnly=true)
+    public List<AvailableExam> availableExams(Authentication auth,Integer communityId,
+        Long applicationId) {
+        var actor=candidate(auth,communityId);
+        if(applicationId==null||applicationId<=0) throw bad("Candidatura inválida");
+        Integer owner=decisions.candidateId(communityId,applicationId);
+        if(owner==null || owner!=actor.user().getId()) throw missing();
+        return repository.availableExams(communityId,applicationId,actor.user().getId());
+    }
+
+    @Transactional(readOnly=true)
+    public List<PublicScore> ownScores(Authentication auth,Integer communityId,
+        Long applicationId,Long stageId) {
+        var actor=candidate(auth,communityId);
+        validateIds(applicationId,stageId);
+        Integer owner=decisions.candidateId(communityId,applicationId);
+        if(owner==null || owner!=actor.user().getId()) throw missing();
+        var stage=grades.stage(communityId,applicationId,stageId);
+        if(stage==null || !"AUTO_EVALUATION".equals(stage.type())) throw missing();
+        var grading=grades.policy(communityId,stage.versionId(),stageId);
+        if(grading==null || !"AFTER_SUBMISSION".equals(grading.scoreVisibility()))
+            throw missing();
+        return grades.grades(communityId,applicationId,stageId).stream()
+            .map(g->publicScore(g.attemptId(),g.earnedPoints(),g.possiblePoints()))
+            .toList();
+    }
+
+    @Transactional
+    public PolicyResponse policy(Authentication auth,Integer communityId,
+        Long processId,Long stageId) {
+        manager(auth,communityId);
+        if(processId==null || processId<=0 || stageId==null || stageId<=0)
+            throw bad("Etapa inválida");
+        var stage=repository.lockDraft(communityId,processId,stageId);
+        if(stage==null || !"AUTO_EVALUATION".equals(stage.stageType())) throw missing();
+        var policy=repository.policy(communityId,stage.versionId(),stageId);
+        if(policy==null) throw missing();
+        return new PolicyResponse(stageId,stage.versionId(),stage.revision(),policy);
+    }
+
+    private PublicScore publicScore(long id,int earned,int total) {
+        return new PublicScore(id,earned,total,
+            java.math.BigDecimal.valueOf(earned).multiply(java.math.BigDecimal.valueOf(100))
+                .divide(java.math.BigDecimal.valueOf(total),2,java.math.RoundingMode.HALF_UP));
     }
 
     private Stage stage(Integer communityId,long applicationId,long stageId,long version) {
