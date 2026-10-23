@@ -33,6 +33,7 @@ class RecruitmentExamReviewServiceTest {
     @Mock RecruitmentCandidateAttemptRepository attempts;
     @Mock RecruitmentExamReviewRepository reviews;
     @Mock CommunityAuditLogRepository audits;
+    @Mock RecruitmentExamNoticeRepository notices;
     @Mock Authentication auth;
     RecruitmentExamReviewService service;
     final Instant now=Instant.parse("2026-10-23T15:00:00Z");
@@ -40,7 +41,7 @@ class RecruitmentExamReviewServiceTest {
 
     @BeforeEach void setup() {
         service=new RecruitmentExamReviewService(new RecruitmentFeatureGate(true,11),
-            authz,stages,attempts,reviews,audits);
+            authz,stages,attempts,reviews,audits,notices);
     }
     void manager(int userId,boolean active) {
         var community=new Community();community.setId(11);
@@ -116,6 +117,7 @@ class RecruitmentExamReviewServiceTest {
         var result=service.reinstate(auth,11,100L,501L,800L,
             new RecruitmentExamReviewService.ReasonRequest(reason));
         assertTrue(result.restored());
+        verify(notices).record(11,100,501,800,"REINSTATED",now.plusSeconds(1800));
         assertEquals(800,result.attemptId());
         assertEquals(now.plusSeconds(1800),result.expiresAt());
         verify(reviews).insertReinstatement(11,100,501,800,77,reason,3,
