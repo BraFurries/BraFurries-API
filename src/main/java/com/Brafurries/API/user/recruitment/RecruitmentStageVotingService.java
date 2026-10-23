@@ -188,8 +188,13 @@ public class RecruitmentStageVotingService {
     }
 
     private RecruitmentDecisionPolicy policy(Integer communityId,long stageId,long version) {
-        return RecruitmentDecisionPolicy.parse(json,
+        var policy=RecruitmentDecisionPolicy.parse(json,
             decisions.policyJson(communityId,stageId,version));
+        if (policy.decisionMode()==RecruitmentDecisionPolicy.DecisionMode.AUTOMATIC_VOTE &&
+            (policy.minimumVotes()==null || policy.tiePolicy()==null)) {
+            throw conflict("Configure quórum e desempate antes de utilizar esta votação");
+        }
+        return policy;
     }
 
     private RecruitmentHumanReviewRepository.AssessmentTarget requireTarget(
