@@ -9,7 +9,7 @@ import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.repository.community.CommunityAuditLogRepository;
 import com.Brafurries.API.user.CommunityAuthorizationService;
 import com.Brafurries.API.user.CommunityCapability;
-import com.Brafurries.API.user.recruitment.RecruitmentCandidateAttemptRepository.*;
+import com.Brafurries.API.user.recruitment.RecruitmentCandidateAttemptRepository.Policy;
 import com.Brafurries.API.user.recruitment.RecruitmentExamReviewRepository.*;
 import com.Brafurries.API.user.recruitment.RecruitmentStageDecisionRepository.*;
 import java.time.Instant;
