@@ -233,8 +233,8 @@ public class RecruitmentCandidateAttemptRepository {
         String type,String source) {
         if(jdbc.update(
             "INSERT INTO recruitment_exam_integrity_events "
-                + "(community_id,attempt_id,event_uuid,event_type,source) "
-                + "VALUES (?,?,?,?,?)",communityId,attemptId,uuid,type,source
+                + "(community_id,attempt_id,event_uuid,event_type,source,occurred_at) "
+                + "VALUES (?,?,?,?,?,UTC_TIMESTAMP(6))",communityId,attemptId,uuid,type,source
         )!=1) throw new IllegalStateException("Evento não gravado");
     }
 
