@@ -12,6 +12,12 @@ public class RecruitmentCandidateAttemptController {
     public RecruitmentCandidateAttemptController(RecruitmentCandidateAttemptService service) {
         this.service=service;
     }
+    @GetMapping("/scores")
+    public java.util.List<PublicScore> scores(
+        Authentication auth,@PathVariable Integer communityId,
+        @PathVariable Long applicationId,@PathVariable Long stageId
+    ) { return service.ownScores(auth,communityId,applicationId,stageId); }
+
     @PostMapping("/start")
     public AttemptSession start(
         Authentication auth,@PathVariable Integer communityId,
@@ -27,12 +33,31 @@ public class RecruitmentCandidateAttemptController {
 }
 
 @RestController
+@RequestMapping("/user/me/communities/{communityId}/recruitment/applications/{applicationId}/exams")
+class RecruitmentCandidateAvailableExamController {
+    private final RecruitmentCandidateAttemptService service;
+    RecruitmentCandidateAvailableExamController(RecruitmentCandidateAttemptService service) {
+        this.service=service;
+    }
+    @GetMapping
+    public java.util.List<RecruitmentCandidateAttemptRepository.AvailableExam> available(
+        Authentication auth,@PathVariable Integer communityId,@PathVariable Long applicationId
+    ) { return service.availableExams(auth,communityId,applicationId); }
+}
+
+@RestController
 @RequestMapping("/user/me/communities/{communityId}/recruitment/processes/{processId}/stages/{stageId}/attempt-policy")
 class RecruitmentCandidateAttemptPolicyController {
     private final RecruitmentCandidateAttemptService service;
     RecruitmentCandidateAttemptPolicyController(RecruitmentCandidateAttemptService service) {
         this.service=service;
     }
+    @GetMapping
+    public PolicyResponse policy(
+        Authentication auth,@PathVariable Integer communityId,
+        @PathVariable Long processId,@PathVariable Long stageId
+    ) { return service.policy(auth,communityId,processId,stageId); }
+
     @PutMapping
     public PolicyResponse configure(
         Authentication auth,@PathVariable Integer communityId,
