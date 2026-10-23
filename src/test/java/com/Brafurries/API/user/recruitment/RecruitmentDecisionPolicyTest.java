@@ -56,6 +56,17 @@ class RecruitmentDecisionPolicyTest {
                 RecruitmentDecisionPolicy.TiePolicy.REJECT_ON_TIE)));
     }
 
+    @Test void oldIncompleteAutomaticDraftRemainsReadableButCannotBeSavedUnconfigured() {
+        String old = "{\\"reviewMode\\":\\"COLLECTIVE\\","
+            + "\\"decisionMode\\":\\"AUTOMATIC_VOTE\\","
+            + "\\"minimumAssessments\\":2}";
+        var parsed = RecruitmentDecisionPolicy.parse(json,old);
+        assertNull(parsed.minimumVotes());
+        assertNull(parsed.tiePolicy());
+        assertThrows(ResponseStatusException.class,
+            ()->RecruitmentDecisionPolicy.validate(parsed));
+    }
+
     @Test void corruptFrozenPolicyFailsClosed() {
         assertThrows(IllegalStateException.class,() ->
             RecruitmentDecisionPolicy.parse(json,"{\"reviewMode\":\"INVENTED\"}"));
