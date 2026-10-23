@@ -203,6 +203,8 @@ class RecruitmentCandidateAttemptServiceTest {
         when(repository.lockDraft(11,70,501)).thenReturn(
             new DraftStage(80,"DRAFT","DRAFT","AUTO_EVALUATION",4));
         var config=new ConfigureRequest(4L,2,120,null,false,null,false);
+        when(repository.savePolicy(eq(11),eq(70L),eq(501L),eq(80L),
+            eq(4L),any(Policy.class))).thenReturn(true);
         var saved=service.configure(auth,11,70L,501L,config);
         assertEquals(5,saved.draftRevision());
         verify(repository).savePolicy(eq(11),eq(70L),eq(501L),eq(80L),
