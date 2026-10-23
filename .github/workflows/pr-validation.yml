@@ -130,7 +130,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: BraFurries/BraFurries-Database
-          ref: 68cb49931e129fb1831f27719fb7b6bc8c7c05ce
+          ref: 41ed919b5db295ece00f8a6afbfa50fc8f6ab110
           path: .ci/recruitment-database
           persist-credentials: false
 
@@ -139,7 +139,7 @@ jobs:
           BRF_RECRUITMENT_JDBC_INTEGRATION: "true"
         run: |
           set -euo pipefail
-          test "$(git -C .ci/recruitment-database rev-parse HEAD)" = "68cb49931e129fb1831f27719fb7b6bc8c7c05ce"
+          test "$(git -C .ci/recruitment-database rev-parse HEAD)" = "41ed919b5db295ece00f8a6afbfa50fc8f6ab110"
           baseline=".ci/database-baseline/flyway/sql/baseline/B20261020_001__adopt_production_schema.sql"
           migration=".ci/recruitment-database/flyway/sql/versioned/V20261021_001__create_recruitment_foundation.sql"
           revision=".ci/recruitment-database/flyway/sql/versioned/V20261022_001__add_recruitment_draft_revision.sql"
@@ -168,7 +168,9 @@ jobs:
           test -s "$reinstatement"
           autosave=".ci/recruitment-database/flyway/sql/versioned/V20261023_008__add_recruitment_exam_draft_autosave.sql"
           test -s "$autosave"
-          cat "$baseline" "$migration" "$revision" "$submission" "$review" "$decisions" "$ballots" "$attempts" "$objective" "$finalization" "$visibility" "$integrity" "$reinstatement" "$autosave" > src/test/resources/recruitment_schema.sql
+          notices=".ci/recruitment-database/flyway/sql/versioned/V20261023_009__create_recruitment_exam_incident_notices.sql"
+          test -s "$notices"
+          cat "$baseline" "$migration" "$revision" "$submission" "$review" "$decisions" "$ballots" "$attempts" "$objective" "$finalization" "$visibility" "$integrity" "$reinstatement" "$autosave" "$notices" > src/test/resources/recruitment_schema.sql
           ./mvnw -B -Dtest=RecruitmentDraftJdbcMariaDbIntegrationTest,RecruitmentStageEditorJdbcMariaDbIntegrationTest,RecruitmentPublicationJdbcMariaDbIntegrationTest,RecruitmentCandidateJdbcMariaDbIntegrationTest,RecruitmentTrackingJdbcMariaDbIntegrationTest,RecruitmentHumanReviewJdbcMariaDbIntegrationTest,RecruitmentStageDecisionJdbcMariaDbIntegrationTest,RecruitmentDecisionPolicyJdbcMariaDbIntegrationTest,RecruitmentDecisionDeskJdbcMariaDbIntegrationTest,RecruitmentStageVotingJdbcMariaDbIntegrationTest,RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest,RecruitmentObjectiveGradeJdbcMariaDbIntegrationTest test
 
       - name: Package without rerunning tests
