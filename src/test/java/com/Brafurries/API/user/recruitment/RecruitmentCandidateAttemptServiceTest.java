@@ -199,6 +199,36 @@ class RecruitmentCandidateAttemptServiceTest {
         verify(repository,never()).submit(anyInt(),anyLong(),anyString());
     }
 
+    @Test void authorizedReinstatementCanSubmitDespiteOriginalHardDeadline() throws Exception {
+        owner(policy(true,NOW.minusSeconds(20)));
+        when(repository.attempts(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"STARTED",NOW.minusSeconds(120),
+                NOW.plusSeconds(1800),null)));
+        when(repository.dbNow()).thenReturn(NOW,NOW);
+        when(repository.hasReinstatement(11,100,501,800)).thenReturn(true);
+        when(repository.submit(eq(11),eq(800L),anyString())).thenReturn(true);
+        when(grades.policy(11,80,501)).thenReturn(
+            new RecruitmentObjectiveGradeRepository.GradePolicy(
+                new java.math.BigDecimal("70.00"),"BEST"));
+        var receipt=service.submit(auth,11,100L,501L,800L,
+            new SubmitRequest(Map.of("question",
+                new ObjectMapper().readTree("\"a\""))));
+        assertEquals("SUBMITTED",receipt.status());
+        verify(repository).hasReinstatement(11,100,501,800);
+    }
+
+    @Test void normalAttemptIsDeniedAfterHardDeadlineWithoutReinstatement() {
+        owner(policy(true,NOW.minusSeconds(20)));
+        when(repository.attempts(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"STARTED",NOW.minusSeconds(120),
+                NOW.plusSeconds(60),null)));
+        when(repository.dbNow()).thenReturn(NOW);
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->service.submit(auth,11,100L,501L,800L,
+                new SubmitRequest(Map.of()))).getStatusCode());
+        verify(repository,never()).submit(anyInt(),anyLong(),anyString());
+    }
+
     @Test void immediateGradeShowsOnlyNumericPointsNotPassingOrKey() throws Exception {
         owner(policy(true,null));
         when(repository.attempts(11,100,501)).thenReturn(List.of(
