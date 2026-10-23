@@ -191,6 +191,36 @@ class RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest {
             String.format("00000000-0000-4000-8000-%012d",count));
     }
 
+    @Test void integrityAndManagerAuditTimestampsAreUtcAcrossSessionTimezones() {
+        var created=attempts.create(981001,985001,983001,984001,1,
+            attempts.dbNow().plusSeconds(90));
+        try {
+            // Session timezone is intentionally different from UTC.
+            jdbc.execute("SET time_zone='+03:00'");
+            attempts.insertIntegrityEvent(981001,created.id(),
+                "00000000-0000-4000-8000-000000000011","FOCUS_LOST","TAB_HIDDEN");
+            reviews.insertReinstatement(981001,985001,984001,created.id(),981002,
+                "Análise identificou interrupção involuntária do sistema",3,
+                attempts.dbNow().plusSeconds(1800));
+            Integer signalSkew=jdbc.queryForObject(
+                "SELECT ABS(TIMESTAMPDIFF(SECOND,occurred_at,UTC_TIMESTAMP(6))) "
+                    +"FROM recruitment_exam_integrity_events "
+                    +"WHERE community_id=981001 AND attempt_id=?",
+                Integer.class,created.id());
+            Integer reviewSkew=jdbc.queryForObject(
+                "SELECT ABS(TIMESTAMPDIFF(SECOND,reinstated_at,UTC_TIMESTAMP(6))) "
+                    +"FROM recruitment_exam_reinstatements "
+                    +"WHERE community_id=981001 AND attempt_id=?",
+                Integer.class,created.id());
+            assertNotNull(signalSkew);
+            assertNotNull(reviewSkew);
+            assertTrue(signalSkew<=2,"Focus audit timestamp is not UTC");
+            assertTrue(reviewSkew<=2,"Restoration audit timestamp is not UTC");
+        } finally {
+            jdbc.execute("SET time_zone='+00:00'");
+        }
+    }
+
     @Test void draftPolicySaveUsesOptimisticRevisionAndCannotWriteOtherCommunity() {
         // Published process must NOT be changeable by the administrative service.
         assertEquals("ACTIVE",attempts.lockDraft(981001,982001,984001).processStatus());
