@@ -124,11 +124,22 @@ public class RecruitmentCandidateAttemptRepository {
     }
 
     public List<Attempt> attempts(Integer communityId,long applicationId,long stageId) {
+        return loadAttempts(communityId,applicationId,stageId,false);
+    }
+
+    /** Current-read attempt history; required for serialized objective closure. */
+    public List<Attempt> attemptsLocked(Integer communityId,long applicationId,long stageId) {
+        return loadAttempts(communityId,applicationId,stageId,true);
+    }
+
+    private List<Attempt> loadAttempts(Integer communityId,long applicationId,long stageId,
+        boolean currentRead) {
         return jdbc.query(
             "SELECT id,application_id,stage_id,attempt_number,status,started_at,"
                 + "expires_at,submitted_at FROM recruitment_candidate_attempts "
                 + "WHERE community_id=? AND application_id=? AND stage_id=? "
-                + "ORDER BY attempt_number",
+                + "ORDER BY attempt_number"
+                + (currentRead ? " FOR UPDATE" : ""),
             (rs,n)->new Attempt(rs.getLong(1),rs.getLong(2),rs.getLong(3),
                 rs.getInt(4),rs.getString(5),
                 utc(rs.getObject(6,LocalDateTime.class)),
