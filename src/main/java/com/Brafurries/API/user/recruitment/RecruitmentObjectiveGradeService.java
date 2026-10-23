@@ -6,7 +6,6 @@ import com.Brafurries.API.user.CommunityAuthorizationService;
 import com.Brafurries.API.user.CommunityCapability;
 import com.Brafurries.API.user.recruitment.RecruitmentObjectiveGradeRepository.*;
 import java.math.BigDecimal;
-import java.util.Comparator;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -83,18 +82,7 @@ public class RecruitmentObjectiveGradeService {
         var policy=grades.policy(communityId,stage.versionId(),stageId);
         if(policy==null) throw missing();
         var rows=grades.grades(communityId,applicationId,stageId);
-        Grade selected=null;
-        if(!rows.isEmpty()) {
-            if("LAST".equals(policy.resultStrategy())) {
-                selected=rows.get(rows.size()-1);
-            } else if("BEST".equals(policy.resultStrategy())) {
-                selected=rows.stream()
-                    .max(Comparator.comparing((Grade g)->BigDecimal.valueOf(g.earnedPoints())
-                        .divide(BigDecimal.valueOf(g.possiblePoints()),12,java.math.RoundingMode.HALF_UP))
-                        .thenComparingLong(g->-g.attemptId()))
-                    .orElseThrow();
-            } else throw new IllegalStateException("Política de seleção inválida");
-        }
+        Grade selected=RecruitmentObjectiveGradeSelector.select(rows,policy.resultStrategy());
         audit(actor,"RECRUITMENT_GRADE_SUMMARY_VIEWED",applicationId);
         return new GradeSummary(applicationId,stageId,policy,List.copyOf(rows),selected,true);
     }
