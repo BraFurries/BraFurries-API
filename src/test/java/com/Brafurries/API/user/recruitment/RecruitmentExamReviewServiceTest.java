@@ -62,7 +62,7 @@ class RecruitmentExamReviewServiceTest {
         lenient().when(attempts.stage(11,100L,501L))
             .thenReturn(new RecruitmentCandidateAttemptRepository.Stage(
                 100,80,99,"IN_PROGRESS","AWAITING_CANDIDATE",
-                "AUTO_EVALUATION","{\\\"questions\\\":[]}",
+                "AUTO_EVALUATION",null,
                 new Policy(2,1800,now.minusSeconds(100),true,3,false)));
     }
     Incident blocked() {
