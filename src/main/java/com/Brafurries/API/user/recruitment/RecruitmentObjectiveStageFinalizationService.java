@@ -102,14 +102,17 @@ public class RecruitmentObjectiveStageFinalizationService {
         boolean deadlineReached=attemptPolicy.deadlineAt()!=null
             && !now.isBefore(attemptPolicy.deadlineAt());
         boolean attemptsExhausted=history.size()>=attemptPolicy.maxAttempts();
-        if(!deadlineReached && !attemptsExhausted)
+        boolean integrityBlocked=history.stream().anyMatch(a->"BLOCKED".equals(a.status()));
+        if(!deadlineReached && !attemptsExhausted && !integrityBlocked)
             throw conflict("Ainda é possível iniciar novas tentativas");
 
         List<Grade> scores=grades.gradesLocked(communityId,applicationId,stageId);
         // Submitted-but-ungraded rows are a data consistency blocker, never a zero.
         if(scores.size()!=submitted)
             throw conflict("Há tentativas enviadas sem correção concluída");
-        var selected=RecruitmentObjectiveGradeSelector.select(
+        // Integrity block ends the exam even if earlier attempts had passing
+        // grades. The manager explicitly finalizes; result is never published here.
+        var selected=integrityBlocked ? null : RecruitmentObjectiveGradeSelector.select(
             scores,scoringPolicy.resultStrategy());
         String outcome=selected!=null && selected.passed() ? "APPROVE":"REJECT";
         Long selectedId=selected==null?null:selected.attemptId();
@@ -117,7 +120,9 @@ public class RecruitmentObjectiveStageFinalizationService {
             BigDecimal.valueOf(selected.earnedPoints()).multiply(BigDecimal.valueOf(100))
                 .divide(BigDecimal.valueOf(selected.possiblePoints()),4,
                     java.math.RoundingMode.HALF_UP);
-        String reason=selected==null
+        String reason=integrityBlocked
+            ? "Prova bloqueada após alcançar limite configurado de saídas da tela"
+            : selected==null
             ? "Prova objetiva sem tentativa enviada válida após encerramento das oportunidades"
             : "Nota objetiva da tentativa "+selectedId+": "+selected.earnedPoints()
                 +"/"+selected.possiblePoints()+" pontos; política "
