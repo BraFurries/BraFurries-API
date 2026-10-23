@@ -230,6 +230,10 @@ public class RecruitmentPublicationService {
                 blockers.add("A etapa " + stage.position()
                     + " precisa de política de tentativas antes da publicação");
             }
+            if ("AUTO_EVALUATION".equals(stage.stageType()) && !stage.hasGradingPolicy()) {
+                blockers.add("A etapa " + stage.position()
+                    + " precisa de nota de corte e estratégia de tentativas");
+            }
             if (!"AUTO_EVALUATION".equals(stage.stageType())) {
                 try {
                     var decisionPolicy = RecruitmentDecisionPolicy.parse(
