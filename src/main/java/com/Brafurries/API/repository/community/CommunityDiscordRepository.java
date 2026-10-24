@@ -20,6 +20,8 @@ public interface CommunityDiscordRepository extends JpaRepository<CommunityDisco
     Optional<CommunityDiscord> findByGuildId(Long guildId);
     Optional<CommunityDiscord> findByCommunity(Community community);
     boolean existsByCommunityIdAndActiveTrue(Integer communityId);
+    // Single indexed EXISTS query. Both tenant FK and active official guild must match.
+    boolean existsByGuildIdAndCommunityIdAndActiveTrue(Long guildId, Integer communityId);
     List<CommunityDiscord> findAllByActiveTrueOrderByGuildIdAsc();
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
