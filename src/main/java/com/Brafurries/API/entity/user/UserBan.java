@@ -28,7 +28,7 @@ public class UserBan {
     @Column(nullable = false)
     private LocalDate date;
 
-    @Column(nullable = false, length = 256)
+    @Column(nullable = false, length = 2048)
     private String reason;
 
     @Column(name = "can_appeal", nullable = false)
