@@ -68,7 +68,7 @@ class RecruitmentCandidateAttemptServiceTest {
         actor(99,true,false);
         when(decisions.lockApplication(11,100L))
             .thenReturn(new Application(100,80,99,"IN_PROGRESS"));
-        when(repository.stage(11,100,501)).thenReturn(stage(policy));
+        lenient().when(repository.stage(11,100,501)).thenReturn(stage(policy));
     }
     Policy policy(boolean hard, Instant deadline) {
         return new Policy(2,120,deadline,hard,null,false);
@@ -330,12 +330,34 @@ class RecruitmentCandidateAttemptServiceTest {
             new Attempt(800,100,501,1,"STARTED",NOW,NOW.plusSeconds(120),null)));
         when(repository.eventExists(11,800,EVENT)).thenReturn(true);
         when(repository.focusLosses(11,800)).thenReturn(1);
+        when(repository.policy(11,80,501)).thenReturn(
+            new Policy(2,120,null,true,3,false));
         var result=service.recordIntegrityEvent(auth,11,100L,501L,800L,
             new IntegrityEventRequest(EVENT,"FOCUS_LOST","WINDOW_BLUR"));
         assertEquals(1,result.focusLosses());
         verify(repository,never()).incrementFocusLoss(anyInt(),anyLong());
         verify(repository,never()).insertIntegrityEvent(anyInt(),anyLong(),anyString(),anyString(),anyString());
         verifyNoInteractions(audits);
+    }
+
+    @Test void exactFocusEventReplayAfterAutomaticBlockIsIdempotent() {
+        actor(99,true,false);
+        when(decisions.lockApplication(11,100L))
+            .thenReturn(new Application(100,80,99,"AWAITING_PUBLICATION"));
+        when(repository.attemptsLocked(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"BLOCKED",NOW,NOW.plusSeconds(120),null)));
+        when(repository.eventExists(11,800,EVENT)).thenReturn(true);
+        when(repository.policy(11,80,501)).thenReturn(
+            new Policy(2,120,null,true,3,false));
+        when(repository.focusLosses(11,800)).thenReturn(3);
+        var result=service.recordIntegrityEvent(auth,11,100L,501L,800L,
+            new IntegrityEventRequest(EVENT,"FOCUS_LOST","TAB_HIDDEN"));
+        assertTrue(result.blocked());
+        assertEquals("BLOCKED",result.status());
+        assertEquals(3,result.focusLosses());
+        verify(repository,never()).incrementFocusLoss(anyInt(),anyLong());
+        verify(decisions,never()).blockObjective(anyInt(),anyLong(),anyLong());
+        verifyNoInteractions(notices,audits);
     }
 
     @Test void thirdFocusLossBlocksAttemptAndAuditsIt() {
