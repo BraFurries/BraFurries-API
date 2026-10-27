@@ -73,6 +73,9 @@ jobs:
       - name: Check production workflow safety invariants
         run: python3 scripts/ci/check_production_workflow.py
 
+      - name: Validate UserBan reason mapping (no Docker dependency)
+        run: ./mvnw -B -Dtest=UserBanReasonMappingTest test
+
       - name: Run tests
         run: ./mvnw test
 
