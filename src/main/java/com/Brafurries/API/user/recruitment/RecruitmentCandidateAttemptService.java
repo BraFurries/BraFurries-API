@@ -80,6 +80,7 @@ public class RecruitmentCandidateAttemptService {
         long attemptId,long applicationId,long stageId,String status,Instant submittedAt,
         PublicScore score
     ) {}
+    public record ReleasedScoreStage(long stageId,String publicName,List<PublicScore> scores) {}
 
     @Transactional
     public PolicyResponse configure(
@@ -298,6 +299,29 @@ public class RecruitmentCandidateAttemptService {
         return scores;
     }
 
+    /** Numeric score history survives objective-stage completion; answers never leave the API. */
+    @Transactional
+    public List<ReleasedScoreStage> releasedScores(
+        Authentication auth,Integer communityId,Long applicationId
+    ) {
+        var actor=candidate(auth,communityId);
+        if(applicationId==null || applicationId<=0) throw bad("Candidatura inválida");
+        Integer owner=decisions.candidateId(communityId,applicationId);
+        if(owner==null || owner!=actor.user().getId()) throw missing();
+        var now=repository.dbNow();
+        var visible=grades.scoreStages(communityId,applicationId,actor.user().getId())
+            .stream()
+            .filter(s->canDiscloseNumericScore(s.visibility(),s.releaseAt(),now))
+            .map(s->new ReleasedScoreStage(s.stageId(),s.publicName(),
+                grades.grades(communityId,applicationId,s.stageId()).stream()
+                    .map(g->publicScore(g.attemptId(),g.earnedPoints(),g.possiblePoints()))
+                    .toList()))
+            .filter(s->!s.scores().isEmpty())
+            .toList();
+        if(!visible.isEmpty()) audit(actor,"RECRUITMENT_CANDIDATE_GRADE_HISTORY_VIEWED",applicationId);
+        return visible;
+    }
+
     @Transactional
     public PolicyResponse policy(Authentication auth,Integer communityId,
         Long processId,Long stageId) {
@@ -315,9 +339,12 @@ public class RecruitmentCandidateAttemptService {
     private boolean canDiscloseNumericScore(
         RecruitmentObjectiveGradeRepository.GradePolicy policy,java.time.Instant now
     ) {
-        return "AFTER_SUBMISSION".equals(policy.scoreVisibility()) ||
-            ("AT_TIME".equals(policy.scoreVisibility()) &&
-                policy.scoreReleaseAt()!=null && !now.isBefore(policy.scoreReleaseAt()));
+        return canDiscloseNumericScore(policy.scoreVisibility(),policy.scoreReleaseAt(),now);
+    }
+    private boolean canDiscloseNumericScore(String visibility,Instant releaseAt,Instant now) {
+        return "AFTER_SUBMISSION".equals(visibility) ||
+            ("AT_TIME".equals(visibility) && releaseAt!=null &&
+                !now.isBefore(releaseAt));
     }
 
     private PublicScore publicScore(long id,int earned,int total) {
