@@ -27,6 +27,35 @@ public class RecruitmentObjectiveGradeRepository {
         int correctQuestions,int totalQuestions,BigDecimal passingPercentage,
         boolean passed,Instant gradedAt) {}
     public record StageRef(long versionId,int candidateId,String type) {}
+    /** Candidate-safe grade history lookup, including already finished stages. */
+    public record ScoreStage(long stageId,String publicName,String visibility,Instant releaseAt) {}
+
+    public List<ScoreStage> scoreStages(Integer communityId,long applicationId,int candidateId) {
+        return jdbc.query(
+            "SELECT s.id,s.public_name,pol.score_visibility,pol.score_release_at "
+                + "FROM recruitment_applications a "
+                + "JOIN recruitment_application_stages ras "
+                + "ON ras.community_id=a.community_id AND ras.application_id=a.id "
+                + "AND ras.process_version_id=a.process_version_id "
+                + "JOIN recruitment_stages s "
+                + "ON s.community_id=ras.community_id "
+                + "AND s.process_version_id=ras.process_version_id AND s.id=ras.stage_id "
+                + "JOIN recruitment_stage_attempt_policies pol "
+                + "ON pol.community_id=s.community_id "
+                + "AND pol.process_version_id=s.process_version_id AND pol.stage_id=s.id "
+                + "WHERE a.community_id=? AND a.id=? AND a.candidate_user_id=? "
+                + "AND s.stage_type='AUTO_EVALUATION' "
+                + "AND EXISTS (SELECT 1 FROM recruitment_candidate_attempts t "
+                + "JOIN recruitment_candidate_attempt_grades g "
+                + "ON g.community_id=t.community_id AND g.attempt_id=t.id "
+                + "WHERE t.community_id=a.community_id AND t.application_id=a.id "
+                + "AND t.stage_id=s.id AND t.status='SUBMITTED') "
+                + "ORDER BY s.position,s.id",
+            (rs,n)->new ScoreStage(rs.getLong(1),rs.getString(2),rs.getString(3),
+                utc(rs.getObject(4,LocalDateTime.class))),
+            communityId,applicationId,candidateId
+        );
+    }
 
     private static Instant utc(LocalDateTime value) {
         return value == null ? null : value.toInstant(ZoneOffset.UTC);
