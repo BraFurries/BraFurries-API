@@ -343,20 +343,24 @@ public class RecruitmentCandidateAttemptService {
 
         var locked=decisions.lockApplication(communityId,applicationId);
         if(locked==null || locked.candidateId()!=actor.user().getId()) throw missing();
-        var stage=stage(communityId,applicationId,stageId,locked.versionId());
         var attempt=repository.attemptsLocked(communityId,applicationId,stageId)
             .stream().filter(a->a.id()==attemptId).findFirst().orElse(null);
         if(attempt==null) throw missing();
+
+        // A terminal block closes the stage immediately. A legitimate retry of
+        // the SAME recorded UUID must still be idempotent after that transition.
+        // Verify tenant, candidate and attempt ownership before checking the UUID.
+        if(repository.eventExists(communityId,attemptId,uuid)) {
+            var frozen=repository.policy(communityId,locked.versionId(),stageId);
+            if(frozen==null) throw missing();
+            int current=repository.focusLosses(communityId,attemptId);
+            return new IntegrityEventReceipt(uuid,attempt.status(),current,
+                frozen.maxFocusLosses(),"BLOCKED".equals(attempt.status()));
+        }
+        var stage=stage(communityId,applicationId,stageId,locked.versionId());
         var policy=stage.policy();
         if((focus && policy.maxFocusLosses()==null) || (copied && !policy.blockCopy()))
             throw conflict("Este monitoramento não está habilitado na etapa");
-
-        // Replaying the same UUID cannot increment focus_losses twice.
-        if(repository.eventExists(communityId,attemptId,uuid)) {
-            int current=repository.focusLosses(communityId,attemptId);
-            return new IntegrityEventReceipt(uuid,attempt.status(),current,
-                policy.maxFocusLosses(),"BLOCKED".equals(attempt.status()));
-        }
         if(!"STARTED".equals(attempt.status()) ||
            !repository.dbNow().isBefore(attempt.expiresAt()))
             throw conflict("Tentativa encerrada ou expirada");
