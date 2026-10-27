@@ -21,6 +21,51 @@ public class RecruitmentExamReviewRepository {
         Integer reviewedByUserId,String reviewReason) {}
     public record Signal(long id,String eventType,String source,Instant occurredAt) {}
 
+    /** One candidate-initiated technical appeal per original blocked attempt. */
+    public record Appeal(long attemptId,long applicationId,long stageId,int candidateUserId,
+                         String reason,String status,Instant requestedAt,
+                         Integer reviewedByUserId,String reviewReason,Instant reviewedAt) {}
+
+    public Appeal appeal(Integer communityId,long applicationId,long stageId,long attemptId) {
+        var values=jdbc.query(
+            "SELECT attempt_id,application_id,stage_id,candidate_user_id,"
+                + "reason,status,requested_at,reviewed_by_user_id,review_reason,reviewed_at "
+                + "FROM recruitment_exam_block_appeals "
+                + "WHERE community_id=? AND application_id=? AND stage_id=? AND attempt_id=?",
+            (rs,n)->new Appeal(rs.getLong(1),rs.getLong(2),rs.getLong(3),rs.getInt(4),
+                rs.getString(5),rs.getString(6),utc(rs.getObject(7,LocalDateTime.class)),
+                (Integer)rs.getObject(8),rs.getString(9),
+                utc(rs.getObject(10,LocalDateTime.class))),
+            communityId,applicationId,stageId,attemptId
+        );
+        return values.isEmpty()?null:values.get(0);
+    }
+
+    public boolean requestAppeal(Integer communityId,long applicationId,long stageId,
+                                 long attemptId,int candidateId,String reason) {
+        return jdbc.update(
+            "INSERT INTO recruitment_exam_block_appeals "
+                + "(community_id,attempt_id,application_id,stage_id,candidate_user_id,reason) "
+                + "VALUES (?,?,?,?,?,?)",
+            communityId,attemptId,applicationId,stageId,candidateId,reason
+        )==1;
+    }
+
+    /** Must be called under the candidate application's FOR UPDATE lock. */
+    public boolean resolveAppeal(Integer communityId,long applicationId,long stageId,
+        long attemptId,int reviewerId,String status,String reason) {
+        if(!"APPROVED".equals(status) && !"DENIED".equals(status))
+            throw new IllegalArgumentException("Decisão de revisão inválida");
+        return jdbc.update(
+            "UPDATE recruitment_exam_block_appeals "
+                + "SET status=?,reviewed_by_user_id=?,review_reason=?,"
+                + "reviewed_at=UTC_TIMESTAMP(6) "
+                + "WHERE community_id=? AND application_id=? AND stage_id=? "
+                + "AND attempt_id=? AND status='PENDING'",
+            status,reviewerId,reason,communityId,applicationId,stageId,attemptId
+        )==1;
+    }
+
     public Incident incident(Integer communityId,long applicationId,long stageId,long attemptId) {
         var rows=jdbc.query(
             "SELECT a.id,a.status,a.focus_losses,COALESCE(r.original_expires_at,a.expires_at),"

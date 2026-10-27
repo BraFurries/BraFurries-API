@@ -19,6 +19,30 @@ public class RecruitmentExamReviewController {
         return service.panel(auth,communityId,applicationId,stageId);
     }
 
+    @GetMapping("/attempts/{attemptId}/appeal")
+    public CandidateAppealStatus candidateAppeal(
+        Authentication auth,@PathVariable Integer communityId,
+        @PathVariable Long applicationId,@PathVariable Long stageId,
+        @PathVariable Long attemptId) {
+        return service.candidateAppeal(auth,communityId,applicationId,stageId,attemptId);
+    }
+
+    /** Candidate-owned request, separately authenticated from Staff operations. */
+    @PostMapping("/attempts/{attemptId}/appeal")
+    public RecruitmentExamReviewRepository.Appeal appeal(
+        Authentication auth,@PathVariable Integer communityId,
+        @PathVariable Long applicationId,@PathVariable Long stageId,
+        @PathVariable Long attemptId,@RequestBody ReasonRequest request) {
+        return service.requestAppeal(auth,communityId,applicationId,stageId,attemptId,request);
+    }
+
+    @PostMapping("/attempts/{attemptId}/appeal/deny")
+    public AppealDecision deny(Authentication auth,@PathVariable Integer communityId,
+        @PathVariable Long applicationId,@PathVariable Long stageId,
+        @PathVariable Long attemptId,@RequestBody ReasonRequest request) {
+        return service.denyAppeal(auth,communityId,applicationId,stageId,attemptId,request);
+    }
+
     @PostMapping("/attempts/{attemptId}/reinstate")
     public Reinstatement reinstate(Authentication auth,@PathVariable Integer communityId,
         @PathVariable Long applicationId,@PathVariable Long stageId,

@@ -71,6 +71,111 @@ class RecruitmentExamReviewServiceTest {
             null,null,null,null);
     }
 
+    void blockedAwaitingPublication() {
+        manager(77,true);
+        lenient().when(stages.lockApplication(11,100L))
+            .thenReturn(new Application(100,80,99,"AWAITING_PUBLICATION"));
+        lenient().when(stages.stagesLocked(11,100L,80L))
+            .thenReturn(List.of(new Stage(501,1,"AUTO_EVALUATION","BLOCKED",null)));
+        lenient().when(attempts.stage(11,100L,501L))
+            .thenReturn(new RecruitmentCandidateAttemptRepository.Stage(
+                100,80,99,"AWAITING_PUBLICATION","BLOCKED","AUTO_EVALUATION",null,
+                new Policy(2,1800,now.minusSeconds(100),true,3,false)));
+    }
+
+    Appeal pending() {
+        return new Appeal(800,100,501,99,
+            "Uma notificação do sistema retirou o foco da prova",
+            "PENDING",now.minusSeconds(30),null,null,null);
+    }
+
+    @Test void candidateCanRequestTechnicalAppealWithoutStaffDecision() {
+        var community=new Community();community.setId(11);
+        var user=new User();user.setId(99);
+        when(authz.resolve(auth,11)).thenReturn(
+            new CommunityAuthorizationService.CommunityAccessContext(
+                community,user,false,false,true,Set.of(),List.of(),Map.of(),Set.of()));
+        when(stages.lockApplication(11,100L))
+            .thenReturn(new Application(100,80,99,"AWAITING_PUBLICATION"));
+        when(attempts.stage(11,100L,501L))
+            .thenReturn(new RecruitmentCandidateAttemptRepository.Stage(
+                100,80,99,"AWAITING_PUBLICATION","BLOCKED","AUTO_EVALUATION",null,
+                new Policy(2,1800,now.minusSeconds(100),true,3,false)));
+        when(reviews.incident(11,100,501,800)).thenReturn(blocked());
+        when(reviews.focusSignals(11,800)).thenReturn(3);
+        when(reviews.requestAppeal(11,100,501,800,99,reason)).thenReturn(true);
+        when(reviews.appeal(11,100,501,800)).thenReturn(null,pending());
+        var result=service.requestAppeal(auth,11,100L,501L,800L,
+            new RecruitmentExamReviewService.ReasonRequest(reason));
+        assertEquals("PENDING",result.status());
+        verify(reviews).requestAppeal(11,100,501,800,99,reason);
+        verifyNoInteractions(notices);
+        verify(audits).save(argThat(a->"RECRUITMENT_EXAM_BLOCK_APPEAL_REQUESTED"
+            .equals(a.getAction())));
+    }
+
+    @Test void candidateCannotAppealSomeoneElsesBlockedAttempt() {
+        var community=new Community();community.setId(11);
+        var user=new User();user.setId(101);
+        when(authz.resolve(auth,11)).thenReturn(
+            new CommunityAuthorizationService.CommunityAccessContext(
+                community,user,false,false,true,Set.of(),List.of(),Map.of(),Set.of()));
+        when(stages.lockApplication(11,100L))
+            .thenReturn(new Application(100,80,99,"AWAITING_PUBLICATION"));
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
+            ()->service.requestAppeal(auth,11,100L,501L,800L,
+                new RecruitmentExamReviewService.ReasonRequest(reason))).getStatusCode());
+        verifyNoInteractions(reviews,attempts);
+    }
+
+    @Test void blockedAppealRestoresSameAttemptAndItsApplicationAtomically() {
+        blockedAwaitingPublication();
+        when(reviews.appeal(11,100,501,800)).thenReturn(pending());
+        when(reviews.incident(11,100,501,800)).thenReturn(blocked());
+        when(reviews.focusSignals(11,800)).thenReturn(3);
+        when(attempts.dbNow()).thenReturn(now);
+        when(attempts.attemptsLocked(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"BLOCKED",now.minusSeconds(200),
+                now.minusSeconds(10),null)));
+        when(reviews.reopenBlocked(11,100,501,800,3,now.plusSeconds(1800)))
+            .thenReturn(true);
+        when(stages.reopenBlockedObjective(11,100,501)).thenReturn(true);
+        when(stages.reopenBlockedApplication(11,100)).thenReturn(true);
+        when(reviews.resolveAppeal(11,100,501,800,77,"APPROVED",reason))
+            .thenReturn(true);
+        var reopened=service.reinstate(auth,11,100L,501L,800L,
+            new RecruitmentExamReviewService.ReasonRequest(reason));
+        assertTrue(reopened.restored());
+        verify(stages).reopenBlockedObjective(11,100,501);
+        verify(stages).reopenBlockedApplication(11,100);
+        verify(reviews).resolveAppeal(11,100,501,800,77,"APPROVED",reason);
+        verify(notices).record(11,100,501,800,"REINSTATED",now.plusSeconds(1800));
+    }
+
+    @Test void managerMayDenyAppealWithoutManualStageFinalization() {
+        blockedAwaitingPublication();
+        when(reviews.appeal(11,100,501,800)).thenReturn(pending());
+        when(reviews.resolveAppeal(11,100,501,800,77,"DENIED",reason))
+            .thenReturn(true);
+        var result=service.denyAppeal(auth,11,100L,501L,800L,
+            new RecruitmentExamReviewService.ReasonRequest(reason));
+        assertEquals("DENIED",result.status());
+        verify(reviews,never()).reopenBlocked(anyInt(),anyLong(),anyLong(),
+            anyLong(),anyInt(),any());
+        verify(stages,never()).reopenBlockedObjective(anyInt(),anyLong(),anyLong());
+        verify(audits).save(argThat(a->"RECRUITMENT_EXAM_BLOCK_APPEAL_DENIED"
+            .equals(a.getAction())));
+    }
+
+    @Test void automaticBlockWithoutAppealCannotBeReinstated() {
+        blockedAwaitingPublication();
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->service.reinstate(auth,11,100L,501L,800L,
+                new RecruitmentExamReviewService.ReasonRequest(reason))).getStatusCode());
+        verify(reviews,never()).insertReinstatement(anyInt(),anyLong(),anyLong(),
+            anyLong(),anyInt(),anyString(),anyInt(),any());
+    }
+
     @Test void gateBlocksOtherCommunityWithoutAuthOrRepositoryReads() {
         assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
             ()->service.panel(auth,12,100L,501L)).getStatusCode());
