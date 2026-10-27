@@ -40,8 +40,11 @@ public class RecruitmentExamReviewService {
 
     public record ReasonRequest(String reason) {}
     public record AppealDecision(long attemptId,String status) {}
+    /** Own technical appeal only; no Staff identity or confidential review evidence. */
+    public record CandidateAppealStatus(long attemptId,String status,Instant requestedAt) {}
     public record IncidentEvidence(Incident incident,List<Signal> signals,
-        boolean truncated,int recordedFocusSignals,boolean canReinstate) {}
+        boolean truncated,int recordedFocusSignals,boolean canReinstate,
+        Appeal appeal) {}
     public record ReviewPanel(long applicationId,long stageId,List<IncidentEvidence> incidents) {}
     public record Reinstatement(long applicationId,long stageId,long attemptId,
         Instant expiresAt,int previousFocusLosses,boolean restored) {}
@@ -64,10 +67,27 @@ public class RecruitmentExamReviewService {
                 (context.legacyActive() || pendingAppeal(communityId,applicationId,
                     stageId,incident.attemptId()));
             return new IncidentEvidence(incident,
-                signals.stream().limit(100).toList(),signals.size()>100,count,eligible);
+                signals.stream().limit(100).toList(),signals.size()>100,count,eligible,
+                reviews.appeal(communityId,applicationId,stageId,incident.attemptId()));
         }).toList();
         audit(actor,"RECRUITMENT_EXAM_BLOCK_REVIEW_VIEWED",applicationId+":"+stageId);
         return new ReviewPanel(applicationId,stageId,evidence);
+    }
+
+    /** A candidate can revisit an existing technical appeal after refreshing the page. */
+    @Transactional(readOnly=true)
+    public CandidateAppealStatus candidateAppeal(Authentication auth,Integer communityId,
+        Long applicationId,Long stageId,Long attemptId) {
+        gate.requireEnabledFor(communityId);
+        if(applicationId==null || applicationId<=0 || stageId==null || stageId<=0 ||
+           attemptId==null || attemptId<=0) throw missing();
+        var actor=authorization.resolve(auth,communityId);
+        if(!actor.activeMember()) throw missing();
+        Integer owner=stages.candidateId(communityId,applicationId);
+        if(owner==null || owner!=actor.user().getId()) throw missing();
+        var found=reviews.appeal(communityId,applicationId,stageId,attemptId);
+        if(found==null || found.candidateUserId()!=owner) throw missing();
+        return new CandidateAppealStatus(attemptId,found.status(),found.requestedAt());
     }
 
     /** Candidates may request a technical review, never a new attempt directly. */
