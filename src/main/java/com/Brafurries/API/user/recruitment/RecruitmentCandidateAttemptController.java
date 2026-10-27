@@ -72,6 +72,21 @@ class RecruitmentCandidateAvailableExamController {
     ) { return service.availableExams(auth,communityId,applicationId); }
 }
 
+/** Candidate-owned numeric score history, including completed exams. */
+@RestController
+@RequestMapping("/user/me/communities/{communityId}/recruitment/applications/{applicationId}/released-scores")
+class RecruitmentCandidateReleasedScoreController {
+    private final RecruitmentCandidateAttemptService service;
+    RecruitmentCandidateReleasedScoreController(RecruitmentCandidateAttemptService service) {
+        this.service=service;
+    }
+
+    @GetMapping
+    public java.util.List<RecruitmentCandidateAttemptService.ReleasedScoreStage> scores(
+        Authentication auth,@PathVariable Integer communityId,@PathVariable Long applicationId
+    ) { return service.releasedScores(auth,communityId,applicationId); }
+}
+
 @RestController
 @RequestMapping("/user/me/communities/{communityId}/recruitment/processes/{processId}/stages/{stageId}/attempt-policy")
 class RecruitmentCandidateAttemptPolicyController {
