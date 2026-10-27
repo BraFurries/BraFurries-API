@@ -39,6 +39,7 @@ public class RecruitmentExamReviewService {
     }
 
     public record ReasonRequest(String reason) {}
+    public record AppealDecision(long attemptId,String status) {}
     public record IncidentEvidence(Incident incident,List<Signal> signals,
         boolean truncated,int recordedFocusSignals,boolean canReinstate) {}
     public record ReviewPanel(long applicationId,long stageId,List<IncidentEvidence> incidents) {}
@@ -59,7 +60,9 @@ public class RecruitmentExamReviewService {
                 incident.reinstatedAt()==null && policy.maxFocusLosses()!=null &&
                 count>=policy.maxFocusLosses() &&
                 incident.focusLosses()>=policy.maxFocusLosses() &&
-                stages.decision(communityId,applicationId,stageId)==null;
+                stages.decision(communityId,applicationId,stageId)==null &&
+                (context.legacyActive() || pendingAppeal(communityId,applicationId,
+                    stageId,incident.attemptId()));
             return new IncidentEvidence(incident,
                 signals.stream().limit(100).toList(),signals.size()>100,count,eligible);
         }).toList();
@@ -67,16 +70,91 @@ public class RecruitmentExamReviewService {
         return new ReviewPanel(applicationId,stageId,evidence);
     }
 
+    /** Candidates may request a technical review, never a new attempt directly. */
+    @Transactional
+    public Appeal requestAppeal(Authentication auth,Integer communityId,
+        Long applicationId,Long stageId,Long attemptId,ReasonRequest request) {
+        gate.requireEnabledFor(communityId);
+        if(applicationId==null || applicationId<=0 || stageId==null || stageId<=0 ||
+            attemptId==null || attemptId<=0) throw missing();
+        String reason=reason(request,"Explique a solicitação de revisão (20–2000 caracteres)");
+        var actor=authorization.resolve(auth,communityId);
+        if(!actor.activeMember()) throw missing();
+        var app=stages.lockApplication(communityId,applicationId);
+        if(app==null || app.candidateId()!=actor.user().getId()) throw missing();
+        if(!"AWAITING_PUBLICATION".equals(app.status())) throw conflict(
+            "Somente bloqueios ainda não publicados podem ser contestados");
+        var stage=attempts.stage(communityId,applicationId,stageId);
+        if(stage==null || stage.versionId()!=app.versionId() ||
+            !"BLOCKED".equals(stage.stageStatus()) ||
+            !"AUTO_EVALUATION".equals(stage.stageType()) ||
+            !"AWAITING_PUBLICATION".equals(stage.applicationStatus()))
+            throw conflict("Esta prova não está disponível para revisão");
+        if(stages.decision(communityId,applicationId,stageId)!=null)
+            throw conflict("A avaliação já possui decisão registrada");
+        var incident=reviews.incident(communityId,applicationId,stageId,attemptId);
+        if(incident==null || !"BLOCKED".equals(incident.status()) ||
+            incident.reinstatedAt()!=null) throw missing();
+        if(reviews.appeal(communityId,applicationId,stageId,attemptId)!=null)
+            throw conflict("A tentativa já possui pedido de revisão");
+        if(stage.policy()==null || stage.policy().maxFocusLosses()==null ||
+            incident.focusLosses()<stage.policy().maxFocusLosses() ||
+            reviews.focusSignals(communityId,attemptId)<stage.policy().maxFocusLosses())
+            throw conflict("A tentativa não foi bloqueada pelo limite de saídas");
+        try {
+            reviews.requestAppeal(communityId,applicationId,stageId,attemptId,
+                actor.user().getId(),reason);
+        } catch(DataIntegrityViolationException duplicate) {
+            throw conflict("Pedido de revisão já registrado");
+        }
+        audit(actor,"RECRUITMENT_EXAM_BLOCK_APPEAL_REQUESTED",
+            applicationId+":"+stageId+":"+attemptId);
+        return reviews.appeal(communityId,applicationId,stageId,attemptId);
+    }
+
+    /** Denial is a terminal review decision, not an administrative closure of the block. */
+    @Transactional
+    public AppealDecision denyAppeal(Authentication auth,Integer communityId,
+        Long applicationId,Long stageId,Long attemptId,ReasonRequest request) {
+        var actor=manager(auth,communityId);
+        String reason=reason(request,"Justificativa administrativa deve ter 20–2000 caracteres");
+        var context=validateStage(actor,communityId,applicationId,stageId);
+        if(context.legacyActive()) throw conflict("Bloqueio sem solicitação de revisão");
+        var appeal=reviews.appeal(communityId,applicationId,stageId,attemptId);
+        if(appeal==null || !"PENDING".equals(appeal.status()))
+            throw conflict("Não existe pedido pendente");
+        if(!reviews.resolveAppeal(communityId,applicationId,stageId,attemptId,
+            actor.user().getId(),"DENIED",reason))
+            throw conflict("Pedido já decidido");
+        audit(actor,"RECRUITMENT_EXAM_BLOCK_APPEAL_DENIED",
+            applicationId+":"+stageId+":"+attemptId);
+        return new AppealDecision(attemptId,"DENIED");
+    }
+
+    private boolean pendingAppeal(Integer communityId,long applicationId,
+        long stageId,long attemptId) {
+        var appeal=reviews.appeal(communityId,applicationId,stageId,attemptId);
+        return appeal!=null && "PENDING".equals(appeal.status());
+    }
+
+    private String reason(ReasonRequest request,String message) {
+        if(request==null || request.reason()==null ||
+            request.reason().trim().length()<20 ||
+            request.reason().trim().length()>2000) throw bad(message);
+        return request.reason().trim();
+    }
+
     @Transactional
     public Reinstatement reinstate(Authentication auth,Integer communityId,
         Long applicationId,Long stageId,Long attemptId,ReasonRequest request) {
         var actor=manager(auth,communityId);
         if(attemptId==null || attemptId<=0) throw bad("Tentativa inválida");
-        if(request==null || request.reason()==null ||
-            request.reason().trim().length()<20 ||
-            request.reason().trim().length()>2000)
-            throw bad("Justificativa administrativa deve ter de 20 a 2000 caracteres");
+        String reason=reason(request,
+            "Justificativa administrativa deve ter de 20 a 2000 caracteres");
         var context=validateStage(actor,communityId,applicationId,stageId);
+        if(!context.legacyActive() &&
+            !pendingAppeal(communityId,applicationId,stageId,attemptId))
+            throw conflict("A reabertura exige pedido de revisão pendente");
         var incident=reviews.incident(communityId,applicationId,stageId,attemptId);
         if(incident==null) throw missing();
         if(!"BLOCKED".equals(incident.status()) || incident.reinstatedAt()!=null)
@@ -94,13 +172,20 @@ public class RecruitmentExamReviewService {
         Instant expiry=attempts.dbNow().plusSeconds(policy.timeLimitSeconds());
         try {
             reviews.insertReinstatement(communityId,applicationId,stageId,attemptId,
-                actor.user().getId(),request.reason().trim(),incident.focusLosses(),expiry);
+                actor.user().getId(),reason,incident.focusLosses(),expiry);
         } catch(DataIntegrityViolationException duplicate) {
             throw conflict("Esta tentativa já recebeu uma reabertura");
         }
         if(!reviews.reopenBlocked(communityId,applicationId,stageId,
             attemptId,incident.focusLosses(),expiry))
             throw conflict("A tentativa mudou durante a revisão");
+        if(!context.legacyActive()) {
+            if(!stages.reopenBlockedObjective(communityId,applicationId,stageId) ||
+               !stages.reopenBlockedApplication(communityId,applicationId) ||
+               !reviews.resolveAppeal(communityId,applicationId,stageId,attemptId,
+                   actor.user().getId(),"APPROVED",reason))
+                throw conflict("Candidatura ou pedido modificados durante a revisão");
+        }
         notices.record(communityId,applicationId,stageId,attemptId,
             "REINSTATED",expiry);
         audit(actor,"RECRUITMENT_EXAM_ATTEMPT_REINSTATED",
@@ -109,7 +194,8 @@ public class RecruitmentExamReviewService {
             incident.focusLosses(),true);
     }
 
-    private record Context(RecruitmentCandidateAttemptRepository.Policy policy) {}
+    private record Context(RecruitmentCandidateAttemptRepository.Policy policy,
+                           boolean legacyActive) {}
     /** Serialized with the same lock used by candidate submit and finalization. */
     private Context validateStage(
         CommunityAuthorizationService.CommunityAccessContext actor,
@@ -122,12 +208,15 @@ public class RecruitmentExamReviewService {
         if(app.candidateId()==actor.user().getId())
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                 "Gestor não pode revisar o bloqueio da própria candidatura");
-        if(!"IN_PROGRESS".equals(app.status()))
-            throw conflict("Candidatura não está em andamento");
+        boolean legacyActive="IN_PROGRESS".equals(app.status());
+        boolean blockedAwaitingPublication="AWAITING_PUBLICATION".equals(app.status());
+        if(!legacyActive && !blockedAwaitingPublication)
+            throw conflict("Candidatura não pode ser revisada neste estado");
         var s=stages.stagesLocked(communityId,applicationId,app.versionId()).stream()
             .filter(row->row.id()==stageId).findFirst().orElse(null);
         if(s==null || !"AUTO_EVALUATION".equals(s.type()) ||
-            !"AWAITING_CANDIDATE".equals(s.status()))
+            !(legacyActive && "AWAITING_CANDIDATE".equals(s.status()) ||
+              blockedAwaitingPublication && "BLOCKED".equals(s.status())))
             throw conflict("Esta etapa não permite reabertura de prova");
         if(stages.decision(communityId,applicationId,stageId)!=null)
             throw conflict("A decisão da etapa já foi registrada");
@@ -136,11 +225,11 @@ public class RecruitmentExamReviewService {
         var candidateStage=attempts.stage(communityId,applicationId,stageId);
         if(candidateStage==null || candidateStage.versionId()!=app.versionId() ||
            candidateStage.policy()==null ||
-           !"IN_PROGRESS".equals(candidateStage.applicationStatus()) ||
-           !"AWAITING_CANDIDATE".equals(candidateStage.stageStatus()) ||
+           !app.status().equals(candidateStage.applicationStatus()) ||
+           !s.status().equals(candidateStage.stageStatus()) ||
            !"AUTO_EVALUATION".equals(candidateStage.stageType()))
             throw conflict("A prova não está disponível para a pessoa candidata");
-        return new Context(candidateStage.policy());
+        return new Context(candidateStage.policy(),legacyActive);
     }
 
     private CommunityAuthorizationService.CommunityAccessContext manager(
