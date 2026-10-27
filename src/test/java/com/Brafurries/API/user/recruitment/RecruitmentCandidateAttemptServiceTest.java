@@ -263,6 +263,42 @@ class RecruitmentCandidateAttemptServiceTest {
             new SubmitRequest(Map.of("question",answer))).score());
     }
 
+    @Test void scheduledScoreIsPrivateBeforeReleaseAndReadableAfterRelease() {
+        actor(99,true,false);
+        var release=NOW.plusSeconds(60);
+        when(decisions.candidateId(11,100L)).thenReturn(99);
+        when(grades.stage(11,100L,501L)).thenReturn(
+            new RecruitmentObjectiveGradeRepository.StageRef(80,99,"AUTO_EVALUATION"));
+        when(grades.policy(11,80,501)).thenReturn(
+            new RecruitmentObjectiveGradeRepository.GradePolicy(
+                new java.math.BigDecimal("70.00"),"BEST","AT_TIME",release));
+        when(repository.dbNow()).thenReturn(NOW,NOW.plusSeconds(60));
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
+            ()->service.ownScores(auth,11,100L,501L)).getStatusCode());
+        verify(grades,never()).grades(anyInt(),anyLong(),anyLong());
+        when(grades.grades(11,100L,501L)).thenReturn(List.of(
+            new RecruitmentObjectiveGradeRepository.Grade(
+                800,7,10,1,2,new java.math.BigDecimal("70.00"),true,NOW)));
+        var revealed=service.ownScores(auth,11,100L,501L);
+        assertEquals(7,revealed.getFirst().earnedPoints());
+        assertFalse(revealed.toString().contains("correctAnswers"));
+    }
+
+    @Test void futureScheduledScoreNeverLeaksInSubmissionReceipt() throws Exception {
+        owner(policy(true,null));
+        when(repository.attempts(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"STARTED",NOW,NOW.plusSeconds(60),null)));
+        when(repository.dbNow()).thenReturn(NOW,NOW);
+        when(repository.submit(eq(11),eq(800L),anyString())).thenReturn(true);
+        when(grades.policy(11,80,501)).thenReturn(
+            new RecruitmentObjectiveGradeRepository.GradePolicy(
+                new java.math.BigDecimal("70.00"),"BEST","AT_TIME",NOW.plusSeconds(3600)));
+        var receipt=service.submit(auth,11,100L,501L,800L,
+            new SubmitRequest(Map.of("question",
+                new ObjectMapper().readTree("\"a\""))));
+        assertNull(receipt.score());
+    }
+
     @Test void foreignUserCannotDiscoverCurrentExamOrNumericScores() {
         actor(101,true,false);
         when(decisions.candidateId(11,100L)).thenReturn(99);
