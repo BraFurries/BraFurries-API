@@ -159,6 +159,39 @@ public class RecruitmentStageDecisionRepository {
     }
 
     /** Objective exams end from their candidate-facing status, not human-review status. */
+    /** Definitive browser-policy block closes the candidate opportunity automatically.
+     *  No human actor or immutable objective-grade decision is forged here.
+     *  A separate, auditable appeal may reopen the same attempt before publication.
+     */
+    public boolean blockObjective(Integer communityId,long applicationId,long stageId) {
+        return jdbc.update(
+            "UPDATE recruitment_application_stages SET status='BLOCKED',"
+                + "completed_at=UTC_TIMESTAMP(6) "
+                + "WHERE community_id=? AND application_id=? AND stage_id=? "
+                + "AND status='AWAITING_CANDIDATE'",
+            communityId,applicationId,stageId
+        )==1;
+    }
+
+    /** Only an approved technical appeal can reopen the exact blocked stage. */
+    public boolean reopenBlockedObjective(Integer communityId,long applicationId,long stageId) {
+        return jdbc.update(
+            "UPDATE recruitment_application_stages SET status='AWAITING_CANDIDATE',"
+                + "completed_at=NULL,entered_at=UTC_TIMESTAMP(6) "
+                + "WHERE community_id=? AND application_id=? AND stage_id=? "
+                + "AND status='BLOCKED'",
+            communityId,applicationId,stageId
+        )==1;
+    }
+
+    public boolean reopenBlockedApplication(Integer communityId,long applicationId) {
+        return jdbc.update(
+            "UPDATE recruitment_applications SET status='IN_PROGRESS' "
+                + "WHERE community_id=? AND id=? AND status='AWAITING_PUBLICATION'",
+            communityId,applicationId
+        )==1;
+    }
+
     public boolean completeObjective(Integer communityId,long applicationId,long stageId) {
         return jdbc.update(
             "UPDATE recruitment_application_stages SET status='COMPLETED',"
