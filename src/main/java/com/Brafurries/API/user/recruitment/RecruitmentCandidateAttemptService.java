@@ -263,9 +263,10 @@ public class RecruitmentCandidateAttemptService {
         grades.insertGrade(communityId,attemptId,score,grading.passingPercentage());
         audit(actor,"RECRUITMENT_OBJECTIVE_ATTEMPT_GRADED",attemptId);
         audit(actor,"RECRUITMENT_CANDIDATE_ATTEMPT_SUBMITTED",attemptId);
-        PublicScore feedback="AFTER_SUBMISSION".equals(grading.scoreVisibility())
+        var submittedAt=repository.dbNow();
+        PublicScore feedback=canDiscloseNumericScore(grading,submittedAt)
             ? publicScore(attemptId,score.earnedPoints(),score.possiblePoints()):null;
-        return new Submission(attemptId,applicationId,stageId,"SUBMITTED",repository.dbNow(),feedback);
+        return new Submission(attemptId,applicationId,stageId,"SUBMITTED",submittedAt,feedback);
     }
 
     @Transactional(readOnly=true)
@@ -288,7 +289,7 @@ public class RecruitmentCandidateAttemptService {
         var stage=grades.stage(communityId,applicationId,stageId);
         if(stage==null || !"AUTO_EVALUATION".equals(stage.type())) throw missing();
         var grading=grades.policy(communityId,stage.versionId(),stageId);
-        if(grading==null || !"AFTER_SUBMISSION".equals(grading.scoreVisibility()))
+        if(grading==null || !canDiscloseNumericScore(grading,repository.dbNow()))
             throw missing();
         var scores=grades.grades(communityId,applicationId,stageId).stream()
             .map(g->publicScore(g.attemptId(),g.earnedPoints(),g.possiblePoints()))
@@ -308,6 +309,15 @@ public class RecruitmentCandidateAttemptService {
         var policy=repository.policy(communityId,stage.versionId(),stageId);
         if(policy==null) throw missing();
         return new PolicyResponse(stageId,stage.versionId(),stage.revision(),policy);
+    }
+
+    /** Read the same frozen release policy on submission and history; never leak the key. */
+    private boolean canDiscloseNumericScore(
+        RecruitmentObjectiveGradeRepository.GradePolicy policy,java.time.Instant now
+    ) {
+        return "AFTER_SUBMISSION".equals(policy.scoreVisibility()) ||
+            ("AT_TIME".equals(policy.scoreVisibility()) &&
+                policy.scoreReleaseAt()!=null && !now.isBefore(policy.scoreReleaseAt()));
     }
 
     private PublicScore publicScore(long id,int earned,int total) {
