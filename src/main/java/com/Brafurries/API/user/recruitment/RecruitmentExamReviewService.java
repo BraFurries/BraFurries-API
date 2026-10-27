@@ -102,8 +102,9 @@ public class RecruitmentExamReviewService {
             reviews.focusSignals(communityId,attemptId)<stage.policy().maxFocusLosses())
             throw conflict("A tentativa não foi bloqueada pelo limite de saídas");
         try {
-            reviews.requestAppeal(communityId,applicationId,stageId,attemptId,
-                actor.user().getId(),reason);
+            if(!reviews.requestAppeal(communityId,applicationId,stageId,attemptId,
+                actor.user().getId(),reason))
+                throw conflict("Não foi possível registrar a revisão");
         } catch(DataIntegrityViolationException duplicate) {
             throw conflict("Pedido de revisão já registrado");
         }
@@ -117,6 +118,7 @@ public class RecruitmentExamReviewService {
     public AppealDecision denyAppeal(Authentication auth,Integer communityId,
         Long applicationId,Long stageId,Long attemptId,ReasonRequest request) {
         var actor=manager(auth,communityId);
+        if(attemptId==null || attemptId<=0) throw missing();
         String reason=reason(request,"Justificativa administrativa deve ter 20–2000 caracteres");
         var context=validateStage(actor,communityId,applicationId,stageId);
         if(context.legacyActive()) throw conflict("Bloqueio sem solicitação de revisão");
