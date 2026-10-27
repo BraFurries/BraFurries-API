@@ -378,6 +378,13 @@ public class RecruitmentCandidateAttemptService {
                 blocked=true;
                 notices.record(communityId,applicationId,stageId,attemptId,
                     "BLOCKED",null);
+                // Terminal focus block: close the stage automatically under the
+                // application lock, without impersonating a manager or publishing
+                // any selection outcome. An approved appeal can undo this transition.
+                if(!decisions.blockObjective(communityId,applicationId,stageId) ||
+                   !decisions.setApplicationStatus(communityId,applicationId,
+                       "AWAITING_PUBLICATION"))
+                    throw conflict("A etapa foi alterada durante o bloqueio");
             }
         }
         audit(actor,blocked?"RECRUITMENT_EXAM_ATTEMPT_BLOCKED":
