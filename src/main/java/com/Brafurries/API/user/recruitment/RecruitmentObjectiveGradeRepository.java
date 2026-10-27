@@ -15,9 +15,12 @@ public class RecruitmentObjectiveGradeRepository {
     public RecruitmentObjectiveGradeRepository(JdbcTemplate jdbc) {this.jdbc=jdbc;}
 
     public record GradePolicy(BigDecimal passingPercentage,String resultStrategy,
-                              String scoreVisibility) {
+                              String scoreVisibility,Instant scoreReleaseAt) {
         public GradePolicy(BigDecimal percentage,String strategy) {
-            this(percentage,strategy,"PRIVATE");
+            this(percentage,strategy,"PRIVATE",null);
+        }
+        public GradePolicy(BigDecimal percentage,String strategy,String visibility) {
+            this(percentage,strategy,visibility,null);
         }
     }
     public record Grade(long attemptId,int earnedPoints,int possiblePoints,
@@ -25,14 +28,19 @@ public class RecruitmentObjectiveGradeRepository {
         boolean passed,Instant gradedAt) {}
     public record StageRef(long versionId,int candidateId,String type) {}
 
+    private static Instant utc(LocalDateTime value) {
+        return value == null ? null : value.toInstant(ZoneOffset.UTC);
+    }
+
     /** Null means grading is not yet configured for this frozen stage. */
     public GradePolicy policy(Integer communityId,long versionId,long stageId) {
         var rows=jdbc.query(
-            "SELECT passing_percentage,result_strategy,score_visibility "
+            "SELECT passing_percentage,result_strategy,score_visibility,score_release_at "
                 + "FROM recruitment_stage_attempt_policies "
                 + "WHERE community_id=? AND process_version_id=? AND stage_id=? "
                 + "AND passing_percentage IS NOT NULL AND result_strategy IS NOT NULL",
-            (rs,n)->new GradePolicy(rs.getBigDecimal(1),rs.getString(2),rs.getString(3)),
+            (rs,n)->new GradePolicy(rs.getBigDecimal(1),rs.getString(2),rs.getString(3),
+                utc(rs.getObject(4,LocalDateTime.class))),
             communityId,versionId,stageId
         );
         return rows.isEmpty()?null:rows.get(0);
@@ -48,9 +56,11 @@ public class RecruitmentObjectiveGradeRepository {
         )!=1) return false;
         if(jdbc.update(
             "UPDATE recruitment_stage_attempt_policies "
-                + "SET passing_percentage=?,result_strategy=?,score_visibility=? "
+                + "SET passing_percentage=?,result_strategy=?,score_visibility=?,score_release_at=? "
                 + "WHERE community_id=? AND process_version_id=? AND stage_id=?",
             policy.passingPercentage(),policy.resultStrategy(),policy.scoreVisibility(),
+            policy.scoreReleaseAt()==null ? null
+                : LocalDateTime.ofInstant(policy.scoreReleaseAt(),ZoneOffset.UTC),
             communityId,versionId,stageId
         )!=1) {
             throw new IllegalStateException("Política de tentativas não existe nesta versão");
