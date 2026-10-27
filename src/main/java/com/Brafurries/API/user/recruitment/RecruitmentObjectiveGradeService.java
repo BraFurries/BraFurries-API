@@ -64,6 +64,11 @@ public class RecruitmentObjectiveGradeService {
              !List.of("PRIVATE","AFTER_SUBMISSION","AT_TIME").contains(request.scoreVisibility()))) {
             throw bad("Nota de corte (1–100%) e estratégia BEST/LAST obrigatórias");
         }
+        // Validate explicit mode/timestamp pairs before touching draft state.
+        if("AT_TIME".equals(request.scoreVisibility()) && request.scoreReleaseAt()==null)
+            throw bad("A divulgação agendada exige data e horário");
+        if(request.scoreReleaseAt()!=null && !"AT_TIME".equals(request.scoreVisibility()))
+            throw bad("Horário de divulgação só pode ser usado com AT_TIME");
         var locked=attempts.lockDraft(communityId,processId,stageId);
         if(locked==null) throw missing();
         if(!"DRAFT".equals(locked.processStatus()) ||
