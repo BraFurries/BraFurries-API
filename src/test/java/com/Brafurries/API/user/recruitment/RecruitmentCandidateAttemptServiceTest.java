@@ -299,6 +299,35 @@ class RecruitmentCandidateAttemptServiceTest {
         assertNull(receipt.score());
     }
 
+    @Test void releasedGradeHistoryWorksAfterStageCompletionAndNeverLeaksPrivateScores() {
+        actor(99,true,false);
+        var release=NOW.plusSeconds(3600);
+        when(decisions.candidateId(11,100L)).thenReturn(99);
+        when(repository.dbNow()).thenReturn(NOW,NOW.plusSeconds(3600));
+        when(grades.scoreStages(11,100L,99)).thenReturn(List.of(
+            new RecruitmentObjectiveGradeRepository.ScoreStage(501,"Prova","AT_TIME",release),
+            new RecruitmentObjectiveGradeRepository.ScoreStage(502,"Oculta","PRIVATE",null)));
+        assertTrue(service.releasedScores(auth,11,100L).isEmpty());
+        verify(grades,never()).grades(anyInt(),anyLong(),anyLong());
+        when(grades.grades(11,100L,501L)).thenReturn(List.of(
+            new RecruitmentObjectiveGradeRepository.Grade(
+                800,8,10,1,2,new java.math.BigDecimal("70.00"),true,NOW)));
+        var history=service.releasedScores(auth,11,100L);
+        assertEquals(1,history.size());
+        assertEquals(501L,history.getFirst().stageId());
+        assertEquals(8,history.getFirst().scores().getFirst().earnedPoints());
+        assertFalse(history.toString().contains("correctAnswers"));
+        verify(grades,never()).grades(eq(11),eq(100L),eq(502L));
+    }
+
+    @Test void foreignUserCannotReadReleasedGradeHistory() {
+        actor(101,true,false);
+        when(decisions.candidateId(11,100L)).thenReturn(99);
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
+            ()->service.releasedScores(auth,11,100L)).getStatusCode());
+        verifyNoInteractions(repository,grades);
+    }
+
     @Test void foreignUserCannotDiscoverCurrentExamOrNumericScores() {
         actor(101,true,false);
         when(decisions.candidateId(11,100L)).thenReturn(99);
