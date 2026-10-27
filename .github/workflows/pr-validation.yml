@@ -108,6 +108,13 @@ jobs:
           path: .ci/coddy-runtime
           persist-credentials: false
 
+      # discord.py 2.3.2 needs stdlib audioop, removed after Python 3.12.
+      # Keep this pinned integration client on a supported isolated interpreter.
+      - name: Set up Python 3.12 for pinned Coddy client
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
       - name: Install isolated Coddy HTTP client dependencies
         run: |
           set -euo pipefail
