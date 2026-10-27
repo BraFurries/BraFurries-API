@@ -346,10 +346,16 @@ class RecruitmentCandidateAttemptServiceTest {
         when(repository.focusLosses(11,800)).thenReturn(2);
         when(repository.incrementFocusLoss(11,800)).thenReturn(true);
         when(repository.blockAttempt(11,800,3)).thenReturn(true);
+        when(decisions.blockObjective(11,100,501)).thenReturn(true);
+        when(decisions.setApplicationStatus(11,100,"AWAITING_PUBLICATION")).thenReturn(true);
         var result=service.recordIntegrityEvent(auth,11,100L,501L,800L,
             new IntegrityEventRequest(EVENT,"FOCUS_LOST","TAB_HIDDEN"));
         assertTrue(result.blocked());
         verify(notices).record(11,100,501,800,"BLOCKED",null);
+        verify(decisions).blockObjective(11,100,501);
+        verify(decisions).setApplicationStatus(11,100,"AWAITING_PUBLICATION");
+        verify(decisions,never()).insertObjectiveDecision(
+            anyInt(),anyLong(),anyLong(),anyInt(),anyString(),anyString(),any());
         assertEquals("BLOCKED",result.status());
         assertEquals(3,result.focusLosses());
         verify(audits).save(org.mockito.ArgumentMatchers.argThat(
