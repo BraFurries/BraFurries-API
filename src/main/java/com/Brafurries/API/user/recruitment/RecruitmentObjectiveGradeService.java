@@ -6,6 +6,7 @@ import com.Brafurries.API.user.CommunityAuthorizationService;
 import com.Brafurries.API.user.CommunityCapability;
 import com.Brafurries.API.user.recruitment.RecruitmentObjectiveGradeRepository.*;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -31,9 +32,14 @@ public class RecruitmentObjectiveGradeService {
     }
 
     public record ConfigureRequest(Long expectedRevision,BigDecimal passingPercentage,
-                                    String resultStrategy,String scoreVisibility) {
+                                    String resultStrategy,String scoreVisibility,
+                                    Instant scoreReleaseAt) {
         public ConfigureRequest(Long revision,BigDecimal percentage,String strategy) {
-            this(revision,percentage,strategy,"PRIVATE");
+            this(revision,percentage,strategy,"PRIVATE",null);
+        }
+        public ConfigureRequest(Long revision,BigDecimal percentage,String strategy,
+                                String visibility) {
+            this(revision,percentage,strategy,visibility,null);
         }
     }
     public record Configured(long processVersionId,long stageId,long revision,
@@ -55,7 +61,7 @@ public class RecruitmentObjectiveGradeService {
            !List.of("BEST","LAST").contains(
                request.resultStrategy()==null?"":request.resultStrategy()) ||
            (request.scoreVisibility()!=null &&
-             !List.of("PRIVATE","AFTER_SUBMISSION").contains(request.scoreVisibility()))) {
+             !List.of("PRIVATE","AFTER_SUBMISSION","AT_TIME").contains(request.scoreVisibility()))) {
             throw bad("Nota de corte (1–100%) e estratégia BEST/LAST obrigatórias");
         }
         var locked=attempts.lockDraft(communityId,processId,stageId);
@@ -70,7 +76,17 @@ public class RecruitmentObjectiveGradeService {
         var current=grades.policy(communityId,locked.versionId(),stageId);
         String visibility=request.scoreVisibility()!=null ? request.scoreVisibility()
             : current!=null ? current.scoreVisibility() : "PRIVATE";
-        var policy=new GradePolicy(request.passingPercentage(),request.resultStrategy(),visibility);
+        Instant releaseAt="AT_TIME".equals(visibility)
+            ? request.scoreReleaseAt()!=null ? request.scoreReleaseAt()
+                : request.scoreVisibility()==null && current!=null ? current.scoreReleaseAt() : null
+            : null;
+        if("AT_TIME".equals(visibility) &&
+            (releaseAt==null || !releaseAt.isAfter(attempts.dbNow())))
+            throw bad("A divulgação agendada exige uma data e horário futuros");
+        if(!"AT_TIME".equals(visibility) && request.scoreReleaseAt()!=null)
+            throw bad("Horário de divulgação só pode ser usado com AT_TIME");
+        var policy=new GradePolicy(request.passingPercentage(),request.resultStrategy(),
+            visibility,releaseAt);
         if(!grades.configure(communityId,processId,locked.versionId(),
             stageId,request.expectedRevision(),policy))
             throw conflict("Rascunho alterado");
