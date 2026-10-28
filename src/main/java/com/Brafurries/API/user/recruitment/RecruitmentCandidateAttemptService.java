@@ -80,6 +80,7 @@ public class RecruitmentCandidateAttemptService {
         long attemptId,long applicationId,long stageId,String status,Instant submittedAt,
         PublicScore score
     ) {}
+    public record ReleasedScoreStage(long stageId,String publicName,List<PublicScore> scores) {}
 
     @Transactional
     public PolicyResponse configure(
@@ -263,9 +264,10 @@ public class RecruitmentCandidateAttemptService {
         grades.insertGrade(communityId,attemptId,score,grading.passingPercentage());
         audit(actor,"RECRUITMENT_OBJECTIVE_ATTEMPT_GRADED",attemptId);
         audit(actor,"RECRUITMENT_CANDIDATE_ATTEMPT_SUBMITTED",attemptId);
-        PublicScore feedback="AFTER_SUBMISSION".equals(grading.scoreVisibility())
+        var submittedAt=repository.dbNow();
+        PublicScore feedback=canDiscloseNumericScore(grading,submittedAt)
             ? publicScore(attemptId,score.earnedPoints(),score.possiblePoints()):null;
-        return new Submission(attemptId,applicationId,stageId,"SUBMITTED",repository.dbNow(),feedback);
+        return new Submission(attemptId,applicationId,stageId,"SUBMITTED",submittedAt,feedback);
     }
 
     @Transactional(readOnly=true)
@@ -288,13 +290,36 @@ public class RecruitmentCandidateAttemptService {
         var stage=grades.stage(communityId,applicationId,stageId);
         if(stage==null || !"AUTO_EVALUATION".equals(stage.type())) throw missing();
         var grading=grades.policy(communityId,stage.versionId(),stageId);
-        if(grading==null || !"AFTER_SUBMISSION".equals(grading.scoreVisibility()))
+        if(grading==null || !canDiscloseNumericScore(grading,repository.dbNow()))
             throw missing();
         var scores=grades.grades(communityId,applicationId,stageId).stream()
             .map(g->publicScore(g.attemptId(),g.earnedPoints(),g.possiblePoints()))
             .toList();
         audit(actor,"RECRUITMENT_CANDIDATE_GRADE_VIEWED",stageId);
         return scores;
+    }
+
+    /** Numeric score history survives objective-stage completion; answers never leave the API. */
+    @Transactional
+    public List<ReleasedScoreStage> releasedScores(
+        Authentication auth,Integer communityId,Long applicationId
+    ) {
+        var actor=candidate(auth,communityId);
+        if(applicationId==null || applicationId<=0) throw bad("Candidatura inválida");
+        Integer owner=decisions.candidateId(communityId,applicationId);
+        if(owner==null || owner!=actor.user().getId()) throw missing();
+        var now=repository.dbNow();
+        var visible=grades.scoreStages(communityId,applicationId,actor.user().getId())
+            .stream()
+            .filter(s->canDiscloseNumericScore(s.visibility(),s.releaseAt(),now))
+            .map(s->new ReleasedScoreStage(s.stageId(),s.publicName(),
+                grades.grades(communityId,applicationId,s.stageId()).stream()
+                    .map(g->publicScore(g.attemptId(),g.earnedPoints(),g.possiblePoints()))
+                    .toList()))
+            .filter(s->!s.scores().isEmpty())
+            .toList();
+        if(!visible.isEmpty()) audit(actor,"RECRUITMENT_CANDIDATE_GRADE_HISTORY_VIEWED",applicationId);
+        return visible;
     }
 
     @Transactional
@@ -308,6 +333,18 @@ public class RecruitmentCandidateAttemptService {
         var policy=repository.policy(communityId,stage.versionId(),stageId);
         if(policy==null) throw missing();
         return new PolicyResponse(stageId,stage.versionId(),stage.revision(),policy);
+    }
+
+    /** Read the same frozen release policy on submission and history; never leak the key. */
+    private boolean canDiscloseNumericScore(
+        RecruitmentObjectiveGradeRepository.GradePolicy policy,java.time.Instant now
+    ) {
+        return canDiscloseNumericScore(policy.scoreVisibility(),policy.scoreReleaseAt(),now);
+    }
+    private boolean canDiscloseNumericScore(String visibility,Instant releaseAt,Instant now) {
+        return "AFTER_SUBMISSION".equals(visibility) ||
+            ("AT_TIME".equals(visibility) && releaseAt!=null &&
+                !now.isBefore(releaseAt));
     }
 
     private PublicScore publicScore(long id,int earned,int total) {
@@ -343,20 +380,24 @@ public class RecruitmentCandidateAttemptService {
 
         var locked=decisions.lockApplication(communityId,applicationId);
         if(locked==null || locked.candidateId()!=actor.user().getId()) throw missing();
-        var stage=stage(communityId,applicationId,stageId,locked.versionId());
         var attempt=repository.attemptsLocked(communityId,applicationId,stageId)
             .stream().filter(a->a.id()==attemptId).findFirst().orElse(null);
         if(attempt==null) throw missing();
+
+        // A terminal block closes the stage immediately. A legitimate retry of
+        // the SAME recorded UUID must still be idempotent after that transition.
+        // Verify tenant, candidate and attempt ownership before checking the UUID.
+        if(repository.eventExists(communityId,attemptId,uuid)) {
+            var frozen=repository.policy(communityId,locked.versionId(),stageId);
+            if(frozen==null) throw missing();
+            int current=repository.focusLosses(communityId,attemptId);
+            return new IntegrityEventReceipt(uuid,attempt.status(),current,
+                frozen.maxFocusLosses(),"BLOCKED".equals(attempt.status()));
+        }
+        var stage=stage(communityId,applicationId,stageId,locked.versionId());
         var policy=stage.policy();
         if((focus && policy.maxFocusLosses()==null) || (copied && !policy.blockCopy()))
             throw conflict("Este monitoramento não está habilitado na etapa");
-
-        // Replaying the same UUID cannot increment focus_losses twice.
-        if(repository.eventExists(communityId,attemptId,uuid)) {
-            int current=repository.focusLosses(communityId,attemptId);
-            return new IntegrityEventReceipt(uuid,attempt.status(),current,
-                policy.maxFocusLosses(),"BLOCKED".equals(attempt.status()));
-        }
         if(!"STARTED".equals(attempt.status()) ||
            !repository.dbNow().isBefore(attempt.expiresAt()))
             throw conflict("Tentativa encerrada ou expirada");
@@ -378,6 +419,13 @@ public class RecruitmentCandidateAttemptService {
                 blocked=true;
                 notices.record(communityId,applicationId,stageId,attemptId,
                     "BLOCKED",null);
+                // Terminal focus block: close the stage automatically under the
+                // application lock, without impersonating a manager or publishing
+                // any selection outcome. An approved appeal can undo this transition.
+                if(!decisions.blockObjective(communityId,applicationId,stageId) ||
+                   !decisions.setApplicationStatus(communityId,applicationId,
+                       "AWAITING_PUBLICATION"))
+                    throw conflict("A etapa foi alterada durante o bloqueio");
             }
         }
         audit(actor,blocked?"RECRUITMENT_EXAM_ATTEMPT_BLOCKED":

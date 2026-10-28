@@ -68,7 +68,7 @@ class RecruitmentCandidateAttemptServiceTest {
         actor(99,true,false);
         when(decisions.lockApplication(11,100L))
             .thenReturn(new Application(100,80,99,"IN_PROGRESS"));
-        when(repository.stage(11,100,501)).thenReturn(stage(policy));
+        lenient().when(repository.stage(11,100,501)).thenReturn(stage(policy));
     }
     Policy policy(boolean hard, Instant deadline) {
         return new Policy(2,120,deadline,hard,null,false);
@@ -263,6 +263,71 @@ class RecruitmentCandidateAttemptServiceTest {
             new SubmitRequest(Map.of("question",answer))).score());
     }
 
+    @Test void scheduledScoreIsPrivateBeforeReleaseAndReadableAfterRelease() {
+        actor(99,true,false);
+        var release=NOW.plusSeconds(60);
+        when(decisions.candidateId(11,100L)).thenReturn(99);
+        when(grades.stage(11,100L,501L)).thenReturn(
+            new RecruitmentObjectiveGradeRepository.StageRef(80,99,"AUTO_EVALUATION"));
+        when(grades.policy(11,80,501)).thenReturn(
+            new RecruitmentObjectiveGradeRepository.GradePolicy(
+                new java.math.BigDecimal("70.00"),"BEST","AT_TIME",release));
+        when(repository.dbNow()).thenReturn(NOW,NOW.plusSeconds(60));
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
+            ()->service.ownScores(auth,11,100L,501L)).getStatusCode());
+        verify(grades,never()).grades(anyInt(),anyLong(),anyLong());
+        when(grades.grades(11,100L,501L)).thenReturn(List.of(
+            new RecruitmentObjectiveGradeRepository.Grade(
+                800,7,10,1,2,new java.math.BigDecimal("70.00"),true,NOW)));
+        var revealed=service.ownScores(auth,11,100L,501L);
+        assertEquals(7,revealed.getFirst().earnedPoints());
+        assertFalse(revealed.toString().contains("correctAnswers"));
+    }
+
+    @Test void futureScheduledScoreNeverLeaksInSubmissionReceipt() throws Exception {
+        owner(policy(true,null));
+        when(repository.attempts(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"STARTED",NOW,NOW.plusSeconds(60),null)));
+        when(repository.dbNow()).thenReturn(NOW,NOW);
+        when(repository.submit(eq(11),eq(800L),anyString())).thenReturn(true);
+        when(grades.policy(11,80,501)).thenReturn(
+            new RecruitmentObjectiveGradeRepository.GradePolicy(
+                new java.math.BigDecimal("70.00"),"BEST","AT_TIME",NOW.plusSeconds(3600)));
+        var receipt=service.submit(auth,11,100L,501L,800L,
+            new SubmitRequest(Map.of("question",
+                new ObjectMapper().readTree("\"a\""))));
+        assertNull(receipt.score());
+    }
+
+    @Test void releasedGradeHistoryWorksAfterStageCompletionAndNeverLeaksPrivateScores() {
+        actor(99,true,false);
+        var release=NOW.plusSeconds(3600);
+        when(decisions.candidateId(11,100L)).thenReturn(99);
+        when(repository.dbNow()).thenReturn(NOW,NOW.plusSeconds(3600));
+        when(grades.scoreStages(11,100L,99)).thenReturn(List.of(
+            new RecruitmentObjectiveGradeRepository.ScoreStage(501,"Prova","AT_TIME",release),
+            new RecruitmentObjectiveGradeRepository.ScoreStage(502,"Oculta","PRIVATE",null)));
+        assertTrue(service.releasedScores(auth,11,100L).isEmpty());
+        verify(grades,never()).grades(anyInt(),anyLong(),anyLong());
+        when(grades.grades(11,100L,501L)).thenReturn(List.of(
+            new RecruitmentObjectiveGradeRepository.Grade(
+                800,8,10,1,2,new java.math.BigDecimal("70.00"),true,NOW)));
+        var history=service.releasedScores(auth,11,100L);
+        assertEquals(1,history.size());
+        assertEquals(501L,history.getFirst().stageId());
+        assertEquals(8,history.getFirst().scores().getFirst().earnedPoints());
+        assertFalse(history.toString().contains("correctAnswers"));
+        verify(grades,never()).grades(eq(11),eq(100L),eq(502L));
+    }
+
+    @Test void foreignUserCannotReadReleasedGradeHistory() {
+        actor(101,true,false);
+        when(decisions.candidateId(11,100L)).thenReturn(99);
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
+            ()->service.releasedScores(auth,11,100L)).getStatusCode());
+        verifyNoInteractions(repository,grades);
+    }
+
     @Test void foreignUserCannotDiscoverCurrentExamOrNumericScores() {
         actor(101,true,false);
         when(decisions.candidateId(11,100L)).thenReturn(99);
@@ -330,12 +395,34 @@ class RecruitmentCandidateAttemptServiceTest {
             new Attempt(800,100,501,1,"STARTED",NOW,NOW.plusSeconds(120),null)));
         when(repository.eventExists(11,800,EVENT)).thenReturn(true);
         when(repository.focusLosses(11,800)).thenReturn(1);
+        when(repository.policy(11,80,501)).thenReturn(
+            new Policy(2,120,null,true,3,false));
         var result=service.recordIntegrityEvent(auth,11,100L,501L,800L,
             new IntegrityEventRequest(EVENT,"FOCUS_LOST","WINDOW_BLUR"));
         assertEquals(1,result.focusLosses());
         verify(repository,never()).incrementFocusLoss(anyInt(),anyLong());
         verify(repository,never()).insertIntegrityEvent(anyInt(),anyLong(),anyString(),anyString(),anyString());
         verifyNoInteractions(audits);
+    }
+
+    @Test void exactFocusEventReplayAfterAutomaticBlockIsIdempotent() {
+        actor(99,true,false);
+        when(decisions.lockApplication(11,100L))
+            .thenReturn(new Application(100,80,99,"AWAITING_PUBLICATION"));
+        when(repository.attemptsLocked(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"BLOCKED",NOW,NOW.plusSeconds(120),null)));
+        when(repository.eventExists(11,800,EVENT)).thenReturn(true);
+        when(repository.policy(11,80,501)).thenReturn(
+            new Policy(2,120,null,true,3,false));
+        when(repository.focusLosses(11,800)).thenReturn(3);
+        var result=service.recordIntegrityEvent(auth,11,100L,501L,800L,
+            new IntegrityEventRequest(EVENT,"FOCUS_LOST","TAB_HIDDEN"));
+        assertTrue(result.blocked());
+        assertEquals("BLOCKED",result.status());
+        assertEquals(3,result.focusLosses());
+        verify(repository,never()).incrementFocusLoss(anyInt(),anyLong());
+        verify(decisions,never()).blockObjective(anyInt(),anyLong(),anyLong());
+        verifyNoInteractions(notices,audits);
     }
 
     @Test void thirdFocusLossBlocksAttemptAndAuditsIt() {
@@ -346,10 +433,16 @@ class RecruitmentCandidateAttemptServiceTest {
         when(repository.focusLosses(11,800)).thenReturn(2);
         when(repository.incrementFocusLoss(11,800)).thenReturn(true);
         when(repository.blockAttempt(11,800,3)).thenReturn(true);
+        when(decisions.blockObjective(11,100,501)).thenReturn(true);
+        when(decisions.setApplicationStatus(11,100,"AWAITING_PUBLICATION")).thenReturn(true);
         var result=service.recordIntegrityEvent(auth,11,100L,501L,800L,
             new IntegrityEventRequest(EVENT,"FOCUS_LOST","TAB_HIDDEN"));
         assertTrue(result.blocked());
         verify(notices).record(11,100,501,800,"BLOCKED",null);
+        verify(decisions).blockObjective(11,100,501);
+        verify(decisions).setApplicationStatus(11,100,"AWAITING_PUBLICATION");
+        verify(decisions,never()).insertObjectiveDecision(
+            anyInt(),anyLong(),anyLong(),anyInt(),anyString(),anyString(),any());
         assertEquals("BLOCKED",result.status());
         assertEquals(3,result.focusLosses());
         verify(audits).save(org.mockito.ArgumentMatchers.argThat(

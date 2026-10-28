@@ -117,6 +117,39 @@ class RecruitmentObjectiveGradeServiceTest {
                 (GradePolicy policy)->"AFTER_SUBMISSION".equals(policy.scoreVisibility())));
     }
 
+    @Test void scheduledVisibilityNeedsFutureTimeAndPersistsOnlyInDraft() {
+        manager(77,true);
+        var release=now.plusSeconds(3600);
+        when(attempts.lockDraft(11,70L,501L)).thenReturn(
+            new DraftStage(80,"DRAFT","DRAFT","AUTO_EVALUATION",4));
+        when(attempts.dbNow()).thenReturn(now);
+        when(grades.configure(eq(11),eq(70L),eq(80L),eq(501L),
+            eq(4L),any(GradePolicy.class))).thenReturn(true);
+        var result=service.configure(auth,11,70L,501L,
+            new ConfigureRequest(4L,new BigDecimal("70.00"),"BEST","AT_TIME",release));
+        assertEquals("AT_TIME",result.policy().scoreVisibility());
+        assertEquals(release,result.policy().scoreReleaseAt());
+        verify(grades).configure(eq(11),eq(70L),eq(80L),eq(501L),eq(4L),
+            argThat(p->release.equals(p.scoreReleaseAt())));
+    }
+
+    @Test void scheduledVisibilityRejectsMissingOrPastRelease() {
+        manager(77,true);
+        assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
+            ()->service.configure(auth,11,70L,501L,
+                new ConfigureRequest(4L,new BigDecimal("70.00"),"BEST","AT_TIME",null)))
+            .getStatusCode());
+        when(attempts.lockDraft(11,70L,501L)).thenReturn(
+            new DraftStage(80,"DRAFT","DRAFT","AUTO_EVALUATION",4));
+        when(attempts.dbNow()).thenReturn(now);
+        assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
+            ()->service.configure(auth,11,70L,501L,
+                new ConfigureRequest(4L,new BigDecimal("70.00"),"BEST","AT_TIME",now)))
+            .getStatusCode());
+        verify(grades,never()).configure(anyInt(),anyLong(),anyLong(),anyLong(),
+            anyLong(),any());
+    }
+
     @Test void publishedVersionCannotMutatePolicy() {
         manager(77,true);
         when(attempts.lockDraft(11,70L,501L)).thenReturn(
