@@ -3,6 +3,7 @@ package com.Brafurries.API.entity.user;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import com.Brafurries.API.user.dto.UserModerationDtos;
 import jakarta.persistence.Column;
 import java.time.LocalDate;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,13 @@ class UserBanReasonMappingTest {
         assertEquals("reason_details", column.name());
         assertEquals(2048, column.length());
         assertEquals(true, column.nullable());
+    }
+
+    @Test
+    void memberFacingModerationHistoryNeverSerializesPrivateBanDetails() {
+        for (var component : UserModerationDtos.MemberModerationRecord.class.getRecordComponents()) {
+            assertEquals(false, component.getName().equals("reasonDetails"));
+        }
     }
 
     @Test
