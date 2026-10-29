@@ -137,7 +137,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: BraFurries/BraFurries-Database
-          ref: 20bdcc4212d37b1d7870387745d212b18561a610
+          ref: 94a44a59bd60e2bc8429ec4d5cb16c8d52738c11
           path: .ci/recruitment-database
           persist-credentials: false
 
@@ -146,7 +146,7 @@ jobs:
           BRF_RECRUITMENT_JDBC_INTEGRATION: "true"
         run: |
           set -euo pipefail
-          test "$(git -C .ci/recruitment-database rev-parse HEAD)" = "20bdcc4212d37b1d7870387745d212b18561a610"
+          test "$(git -C .ci/recruitment-database rev-parse HEAD)" = "94a44a59bd60e2bc8429ec4d5cb16c8d52738c11"
           baseline=".ci/database-baseline/flyway/sql/baseline/B20261020_001__adopt_production_schema.sql"
           migration=".ci/recruitment-database/flyway/sql/versioned/V20261021_001__create_recruitment_foundation.sql"
           revision=".ci/recruitment-database/flyway/sql/versioned/V20261022_001__add_recruitment_draft_revision.sql"
@@ -179,9 +179,11 @@ jobs:
           test -s "$notices"
           scheduled=".ci/recruitment-database/flyway/sql/versioned/V20261027_001__schedule_recruitment_score_release.sql"
           appeals=".ci/recruitment-database/flyway/sql/versioned/V20261027_002__create_recruitment_exam_block_appeals.sql"
+          focus_ack=".ci/recruitment-database/flyway/sql/versioned/V20261029_001__acknowledge_recruitment_focus_warnings.sql"
           test -s "$scheduled"
           test -s "$appeals"
-          cat "$baseline" "$migration" "$revision" "$submission" "$review" "$decisions" "$ballots" "$attempts" "$objective" "$finalization" "$visibility" "$integrity" "$reinstatement" "$autosave" "$notices" "$scheduled" "$appeals" > src/test/resources/recruitment_schema.sql
+          test -s "$focus_ack"
+          cat "$baseline" "$migration" "$revision" "$submission" "$review" "$decisions" "$ballots" "$attempts" "$objective" "$finalization" "$visibility" "$integrity" "$reinstatement" "$autosave" "$notices" "$scheduled" "$appeals" "$focus_ack" > src/test/resources/recruitment_schema.sql
           ./mvnw -B -Dtest=RecruitmentDraftJdbcMariaDbIntegrationTest,RecruitmentStageEditorJdbcMariaDbIntegrationTest,RecruitmentPublicationJdbcMariaDbIntegrationTest,RecruitmentCandidateJdbcMariaDbIntegrationTest,RecruitmentTrackingJdbcMariaDbIntegrationTest,RecruitmentHumanReviewJdbcMariaDbIntegrationTest,RecruitmentStageDecisionJdbcMariaDbIntegrationTest,RecruitmentDecisionPolicyJdbcMariaDbIntegrationTest,RecruitmentDecisionDeskJdbcMariaDbIntegrationTest,RecruitmentStageVotingJdbcMariaDbIntegrationTest,RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest,RecruitmentObjectiveGradeJdbcMariaDbIntegrationTest test
 
       - name: Package without rerunning tests
