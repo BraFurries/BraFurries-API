@@ -31,6 +31,13 @@ public class RecruitmentCandidateAttemptController {
         @PathVariable Long attemptId,@RequestBody IntegrityEventRequest request
     ) { return service.recordIntegrityEvent(auth,communityId,applicationId,stageId,attemptId,request); }
 
+    @PostMapping("/{attemptId}/focus-warning/ack")
+    public FocusAcknowledgement acknowledgeFocusWarning(
+        Authentication auth,@PathVariable Integer communityId,
+        @PathVariable Long applicationId,@PathVariable Long stageId,
+        @PathVariable Long attemptId
+    ) { return service.acknowledgeFocusWarning(auth,communityId,applicationId,stageId,attemptId); }
+
     @GetMapping("/{attemptId}/draft")
     public org.springframework.http.ResponseEntity<DraftResponse> draft(
         Authentication auth,@PathVariable Integer communityId,
@@ -70,6 +77,21 @@ class RecruitmentCandidateAvailableExamController {
     public java.util.List<RecruitmentCandidateAttemptRepository.AvailableExam> available(
         Authentication auth,@PathVariable Integer communityId,@PathVariable Long applicationId
     ) { return service.availableExams(auth,communityId,applicationId); }
+}
+
+/** Candidate-owned numeric score history, including completed exams. */
+@RestController
+@RequestMapping("/user/me/communities/{communityId}/recruitment/applications/{applicationId}/released-scores")
+class RecruitmentCandidateReleasedScoreController {
+    private final RecruitmentCandidateAttemptService service;
+    RecruitmentCandidateReleasedScoreController(RecruitmentCandidateAttemptService service) {
+        this.service=service;
+    }
+
+    @GetMapping
+    public java.util.List<RecruitmentCandidateAttemptService.ReleasedScoreStage> scores(
+        Authentication auth,@PathVariable Integer communityId,@PathVariable Long applicationId
+    ) { return service.releasedScores(auth,communityId,applicationId); }
 }
 
 @RestController
