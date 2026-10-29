@@ -78,7 +78,8 @@ public class UserIdentityModerationService {
                 .thenComparing(UserBan::getId, Comparator.reverseOrder()))
             .map(ban -> new BanHistory(
                 ban.getId(), ban.getUser().getId(), sourceDiscordIds(discordIds, ban.getUser()),
-                ban.getCommunity().getId(), ban.getCommunity().getName(), ban.getDate(), ban.getReason(), ban.getCanAppeal(),
+                ban.getCommunity().getId(), ban.getCommunity().getName(), ban.getDate(), ban.getReason(),
+                ban.getReasonDetails(), ban.getCanAppeal(),
                 ban.getValidUntil(), ban.getAppliedBy() == null ? null : ban.getAppliedBy().getId(), displayName(ban.getAppliedBy()),
                 ban.getRegisteredAt(), ban.getRevokedAt(), ban.getRevokedBy() == null ? null : ban.getRevokedBy().getId(),
                 ban.getRevocationReason()
