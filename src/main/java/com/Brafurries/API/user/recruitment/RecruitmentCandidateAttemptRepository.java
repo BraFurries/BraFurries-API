@@ -203,6 +203,23 @@ public class RecruitmentCandidateAttemptRepository {
         return found!=null && found>0;
     }
 
+    /** Exact-attempt warning acknowledgment; server owns this state. */
+    public int acknowledgedFocusLosses(Integer communityId,long attemptId) {
+        Integer n=jdbc.queryForObject(
+            "SELECT focus_losses_acknowledged FROM recruitment_candidate_attempts "
+                + "WHERE community_id=? AND id=?",Integer.class,communityId,attemptId);
+        return n==null?0:n;
+    }
+
+    /** Compare-and-set while the calling transaction holds the application lock. */
+    public boolean acknowledgeFocusLosses(Integer communityId,long attemptId,int expected) {
+        return jdbc.update(
+            "UPDATE recruitment_candidate_attempts SET focus_losses_acknowledged=? "
+                + "WHERE community_id=? AND id=? AND status='STARTED' "
+                + "AND focus_losses=? AND focus_losses_acknowledged<?",
+            expected,communityId,attemptId,expected,expected)==1;
+    }
+
     public int focusLosses(Integer communityId,long attemptId) {
         Integer n=jdbc.queryForObject(
             "SELECT focus_losses FROM recruitment_candidate_attempts "

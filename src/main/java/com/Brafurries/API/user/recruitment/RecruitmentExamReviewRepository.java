@@ -158,7 +158,7 @@ public class RecruitmentExamReviewRepository {
         long attemptId,int expectedFocusLosses,Instant newExpiry) {
         return jdbc.update(
             "UPDATE recruitment_candidate_attempts "
-                + "SET status='STARTED',focus_losses=0,"
+                + "SET status='STARTED',focus_losses=0,focus_losses_acknowledged=0,"
                 + "started_at=UTC_TIMESTAMP(6),expires_at=? "
                 + "WHERE community_id=? AND application_id=? AND stage_id=? AND id=? "
                 + "AND status='BLOCKED' AND focus_losses=?",

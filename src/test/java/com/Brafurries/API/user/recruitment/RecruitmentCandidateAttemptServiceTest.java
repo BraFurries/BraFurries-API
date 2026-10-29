@@ -425,12 +425,66 @@ class RecruitmentCandidateAttemptServiceTest {
         verifyNoInteractions(notices,audits);
     }
 
+    @Test void secondFocusEventBeforeAcknowledgementIsRejectedWithoutCounting() {
+        owner(new Policy(2,120,null,true,3,false));
+        when(repository.attemptsLocked(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"STARTED",NOW,NOW.plusSeconds(120),null)));
+        when(repository.focusLosses(11,800)).thenReturn(1);
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->service.recordIntegrityEvent(auth,11,100L,501L,800L,
+                new IntegrityEventRequest(EVENT,"FOCUS_LOST","TAB_HIDDEN")))
+            .getStatusCode());
+        verify(repository,never()).insertIntegrityEvent(anyInt(),anyLong(),
+            anyString(),anyString(),anyString());
+    }
+
+    @Test void acknowledgementIsOwnedLockedAuditedAndIdempotent() {
+        owner(new Policy(2,120,null,true,3,false));
+        when(repository.attemptsLocked(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"STARTED",NOW,NOW.plusSeconds(120),null)));
+        when(repository.dbNow()).thenReturn(NOW);
+        when(repository.focusLosses(11,800)).thenReturn(1);
+        when(repository.acknowledgedFocusLosses(11,800)).thenReturn(0,1);
+        when(repository.acknowledgeFocusLosses(11,800,1)).thenReturn(true);
+        assertEquals(1,service.acknowledgeFocusWarning(auth,11,100L,501L,800L)
+            .acknowledgedFocusLosses());
+        assertEquals(1,service.acknowledgeFocusWarning(auth,11,100L,501L,800L)
+            .acknowledgedFocusLosses());
+        verify(repository,times(1)).acknowledgeFocusLosses(11,800,1);
+        verify(audits,times(1)).save(org.mockito.ArgumentMatchers.argThat(
+            (CommunityAuditLog log)->"RECRUITMENT_EXAM_FOCUS_WARNING_ACKNOWLEDGED"
+                .equals(log.getAction())));
+    }
+
+    @Test void foreignCandidateCannotAcknowledgeWarning() {
+        actor(101,true,false);
+        when(decisions.lockApplication(11,100L)).thenReturn(
+            new Application(100,80,99,"IN_PROGRESS"));
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
+            ()->service.acknowledgeFocusWarning(auth,11,100L,501L,800L))
+            .getStatusCode());
+        verifyNoInteractions(repository,audits);
+    }
+
+    @Test void cannotSubmitWhileWarningIsUnacknowledged() {
+        owner(new Policy(2,120,null,true,3,false));
+        when(repository.attempts(11,100,501)).thenReturn(List.of(
+            new Attempt(800,100,501,1,"STARTED",NOW,NOW.plusSeconds(120),null)));
+        when(repository.dbNow()).thenReturn(NOW);
+        when(repository.focusLosses(11,800)).thenReturn(1);
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->service.submit(auth,11,100L,501L,800L,
+                new SubmitRequest(Map.of()))).getStatusCode());
+        verify(repository,never()).submit(anyInt(),anyLong(),anyString());
+    }
+
     @Test void thirdFocusLossBlocksAttemptAndAuditsIt() {
         owner(new Policy(2,120,null,true,3,false));
         when(repository.attemptsLocked(11,100,501)).thenReturn(List.of(
             new Attempt(800,100,501,1,"STARTED",NOW,NOW.plusSeconds(120),null)));
         when(repository.dbNow()).thenReturn(NOW);
         when(repository.focusLosses(11,800)).thenReturn(2);
+        when(repository.acknowledgedFocusLosses(11,800)).thenReturn(2);
         when(repository.incrementFocusLoss(11,800)).thenReturn(true);
         when(repository.blockAttempt(11,800,3)).thenReturn(true);
         when(decisions.blockObjective(11,100,501)).thenReturn(true);

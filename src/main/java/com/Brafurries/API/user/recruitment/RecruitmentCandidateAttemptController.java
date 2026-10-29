@@ -31,6 +31,13 @@ public class RecruitmentCandidateAttemptController {
         @PathVariable Long attemptId,@RequestBody IntegrityEventRequest request
     ) { return service.recordIntegrityEvent(auth,communityId,applicationId,stageId,attemptId,request); }
 
+    @PostMapping("/{attemptId}/focus-warning/ack")
+    public FocusAcknowledgement acknowledgeFocusWarning(
+        Authentication auth,@PathVariable Integer communityId,
+        @PathVariable Long applicationId,@PathVariable Long stageId,
+        @PathVariable Long attemptId
+    ) { return service.acknowledgeFocusWarning(auth,communityId,applicationId,stageId,attemptId); }
+
     @GetMapping("/{attemptId}/draft")
     public org.springframework.http.ResponseEntity<DraftResponse> draft(
         Authentication auth,@PathVariable Integer communityId,

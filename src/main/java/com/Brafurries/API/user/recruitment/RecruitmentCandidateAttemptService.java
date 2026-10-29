@@ -62,7 +62,8 @@ public class RecruitmentCandidateAttemptService {
     public record AttemptSession(
         long attemptId,long applicationId,long stageId,int attemptNumber,
         String status,Instant expiresAt,Instant serverNow,PublicForm form,
-        Integer maxFocusLosses,boolean blockCopy,int focusLosses
+        Integer maxFocusLosses,boolean blockCopy,int focusLosses,
+        int acknowledgedFocusLosses
     ) {}
     public record SubmitRequest(Map<String,JsonNode> answers) {}
     public record DraftRequest(Long expectedRevision,Map<String,JsonNode> answers) {}
@@ -70,6 +71,7 @@ public class RecruitmentCandidateAttemptService {
         Map<String,JsonNode> answers) {}
 
     public record IntegrityEventRequest(String eventId,String eventType,String source) {}
+    public record FocusAcknowledgement(int attemptFocusLosses,int acknowledgedFocusLosses) {}
     public record IntegrityEventReceipt(
         String eventId,String status,int focusLosses,Integer maxFocusLosses,boolean blocked
     ) {}
@@ -247,6 +249,10 @@ public class RecruitmentCandidateAttemptService {
             repository.expire(communityId,attempt.id());
             throw conflict("Prazo rígido da etapa encerrado");
         }
+        if(stage.policy().maxFocusLosses()!=null &&
+           repository.focusLosses(communityId,attemptId)>
+             repository.acknowledgedFocusLosses(communityId,attemptId))
+            throw conflict("Confirme a advertência de foco antes de enviar a prova");
         var form=internalForm(stage.formJson());
         var validated=answerValidator.validate(form,request.answers());
         var grading=grades.policy(communityId,stage.versionId(),stageId);
@@ -357,6 +363,33 @@ public class RecruitmentCandidateAttemptService {
      * Browser-provided integrity events are advisory, not proof of cheating.
      * The application's FOR UPDATE lock serializes start, submit, event and finalization.
      */
+    /** Only the candidate who owns this active attempt may confirm a warning. */
+    @Transactional
+    public FocusAcknowledgement acknowledgeFocusWarning(
+        Authentication auth,Integer communityId,Long applicationId,Long stageId,Long attemptId
+    ) {
+        var actor=candidate(auth,communityId);
+        validateIds(applicationId,stageId);
+        if(attemptId==null || attemptId<=0) throw missing();
+        var locked=decisions.lockApplication(communityId,applicationId);
+        if(locked==null || locked.candidateId()!=actor.user().getId()) throw missing();
+        var stage=stage(communityId,applicationId,stageId,locked.versionId());
+        var attempt=repository.attemptsLocked(communityId,applicationId,stageId).stream()
+            .filter(a->a.id()==attemptId).findFirst().orElse(null);
+        if(attempt==null || !"STARTED".equals(attempt.status()) ||
+            !repository.dbNow().isBefore(attempt.expiresAt()) ||
+            stage.policy().maxFocusLosses()==null) throw conflict("Advertência indisponível");
+        int counted=repository.focusLosses(communityId,attemptId);
+        int acknowledged=repository.acknowledgedFocusLosses(communityId,attemptId);
+        if(acknowledged>counted) throw conflict("Contagem inconsistente");
+        if(counted==acknowledged)
+            return new FocusAcknowledgement(counted,acknowledged);
+        if(!repository.acknowledgeFocusLosses(communityId,attemptId,counted))
+            throw conflict("Advertência alterada durante confirmação");
+        audit(actor,"RECRUITMENT_EXAM_FOCUS_WARNING_ACKNOWLEDGED",attemptId);
+        return new FocusAcknowledgement(counted,counted);
+    }
+
     @Transactional
     public IntegrityEventReceipt recordIntegrityEvent(
         Authentication auth,Integer communityId,Long applicationId,Long stageId,
@@ -394,6 +427,11 @@ public class RecruitmentCandidateAttemptService {
             return new IntegrityEventReceipt(uuid,attempt.status(),current,
                 frozen.maxFocusLosses(),"BLOCKED".equals(attempt.status()));
         }
+        // Additional losses are not counted until the candidate confirms
+        // the previous warning, even if another browser tab sends a request.
+        if(focus && repository.focusLosses(communityId,attemptId)>
+            repository.acknowledgedFocusLosses(communityId,attemptId))
+            throw conflict("Confirme a advertência de foco antes de nova contagem");
         var stage=stage(communityId,applicationId,stageId,locked.versionId());
         var policy=stage.policy();
         if((focus && policy.maxFocusLosses()==null) || (copied && !policy.blockCopy()))
@@ -456,7 +494,8 @@ public class RecruitmentCandidateAttemptService {
         return new AttemptSession(attempt.id(),attempt.applicationId(),attempt.stageId(),
             attempt.number(),attempt.status(),attempt.expiresAt(),serverNow,new PublicForm(fields),
             policy.maxFocusLosses(),policy.blockCopy(),
-            repository.focusLosses(communityId,attempt.id()));
+            repository.focusLosses(communityId,attempt.id()),
+            repository.acknowledgedFocusLosses(communityId,attempt.id()));
     }
 
     private RecruitmentFormDefinition internalForm(String source) {
