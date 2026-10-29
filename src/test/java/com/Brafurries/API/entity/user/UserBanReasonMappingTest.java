@@ -18,6 +18,15 @@ class UserBanReasonMappingTest {
     }
 
     @Test
+    void optionalPrivateDetailsMapToTheirOwnNullableColumn() throws Exception {
+        Column column = UserBan.class.getDeclaredField("reasonDetails").getAnnotation(Column.class);
+        assertNotNull(column);
+        assertEquals("reason_details", column.name());
+        assertEquals(2048, column.length());
+        assertEquals(true, column.nullable());
+    }
+
+    @Test
     void banDateAndValidityRemainDateOnlyDuringCapacityMigration() throws Exception {
         assertEquals(LocalDate.class, UserBan.class.getDeclaredField("date").getType());
         assertEquals(LocalDate.class, UserBan.class.getDeclaredField("validUntil").getType());
