@@ -120,6 +120,24 @@ class RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest {
         assertEquals("{\"q\":\"b\"}",stored);
     }
 
+    @Test void focusAcknowledgementIsBoundToTheSameAttemptAndCommunity() {
+        var attempt=attempts.create(981001,985001,983001,984001,1,
+            attempts.dbNow().plusSeconds(90));
+        assertEquals(0,attempts.focusLosses(981001,attempt.id()));
+        assertEquals(0,attempts.acknowledgedFocusLosses(981001,attempt.id()));
+        assertFalse(attempts.acknowledgeFocusLosses(981001,attempt.id(),1));
+        assertTrue(attempts.incrementFocusLoss(981001,attempt.id()));
+        assertTrue(attempts.acknowledgeFocusLosses(981001,attempt.id(),1));
+        assertEquals(1,attempts.acknowledgedFocusLosses(981001,attempt.id()));
+        assertFalse(attempts.acknowledgeFocusLosses(981001,attempt.id(),1));
+        assertFalse(attempts.acknowledgeFocusLosses(981002,attempt.id(),1));
+        assertThrows(DataIntegrityViolationException.class,()->
+            jdbc.update("UPDATE recruitment_candidate_attempts "
+                    +"SET focus_losses_acknowledged=2 WHERE community_id=? AND id=?",
+                981001,attempt.id()));
+        assertEquals(1,attempts.acknowledgedFocusLosses(981001,attempt.id()));
+    }
+
     @Test void integrityEventsAreTenantScopedUniqueAndBlockedAttemptsCannotSubmit() {
         jdbc.update("UPDATE recruitment_stage_attempt_policies "
             +"SET max_focus_losses=3,block_copy=1 "
