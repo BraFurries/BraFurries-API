@@ -74,6 +74,7 @@ class UserIdentityModerationServiceTest {
         assertEquals(20, result.warnings().getFirst().sourceUserId());
         assertEquals(List.of("222"), result.warnings().getFirst().sourceDiscordIds());
         assertEquals(10, result.bans().getFirst().sourceUserId());
+        assertEquals("Private evidence for tenant 5", result.bans().getFirst().reasonDetails());
         assertEquals(30, result.suspectedLinks().getFirst().userB().userId());
         verify(warnings).findByUserIdInAndCommunityId(Set.of(10, 20), 5);
         verify(bans).findByUserIdInAndCommunityId(Set.of(10, 20), 5);
@@ -139,6 +140,7 @@ class UserIdentityModerationServiceTest {
         ban.setCommunity(community);
         ban.setDate(LocalDate.of(2026, 8, 1));
         ban.setReason("Ban");
+        ban.setReasonDetails("Private evidence for tenant 5");
         ban.setCanAppeal(true);
         ban.setRegisteredAt(LocalDateTime.now());
         return ban;
