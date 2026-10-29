@@ -123,7 +123,9 @@ public class PortariaClarificationConfigurationService {
         try {
             audit.setMetadata(objectMapper.writeValueAsString(Map.of(
                 "enabled", after.enabled(),
-                "categoryId", after.categoryId() == null ? "" : after.categoryId()
+                "categoryId", after.categoryId() == null ? "" : after.categoryId(),
+                "previousEnabled", before.enabled(),
+                "previousCategoryId", before.categoryId() == null ? "" : before.categoryId()
             )));
         } catch (JsonProcessingException ex) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
