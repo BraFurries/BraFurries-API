@@ -1,0 +1,42 @@
+package com.Brafurries.API.entity.user;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+import com.Brafurries.API.user.dto.UserModerationDtos;
+import jakarta.persistence.Column;
+import java.time.LocalDate;
+import org.junit.jupiter.api.Test;
+
+class UserBanReasonMappingTest {
+
+    @Test
+    void reasonColumnSupportsDetailedModerationRationale() throws Exception {
+        Column column = UserBan.class.getDeclaredField("reason").getAnnotation(Column.class);
+        assertNotNull(column);
+        assertEquals(2048, column.length());
+        assertEquals(false, column.nullable());
+    }
+
+    @Test
+    void optionalPrivateDetailsMapToTheirOwnNullableColumn() throws Exception {
+        Column column = UserBan.class.getDeclaredField("reasonDetails").getAnnotation(Column.class);
+        assertNotNull(column);
+        assertEquals("reason_details", column.name());
+        assertEquals(2048, column.length());
+        assertEquals(true, column.nullable());
+    }
+
+    @Test
+    void memberFacingModerationHistoryNeverSerializesPrivateBanDetails() {
+        for (var component : UserModerationDtos.MemberModerationRecord.class.getRecordComponents()) {
+            assertEquals(false, component.getName().equals("reasonDetails"));
+        }
+    }
+
+    @Test
+    void banDateAndValidityRemainDateOnlyDuringCapacityMigration() throws Exception {
+        assertEquals(LocalDate.class, UserBan.class.getDeclaredField("date").getType());
+        assertEquals(LocalDate.class, UserBan.class.getDeclaredField("validUntil").getType());
+    }
+}

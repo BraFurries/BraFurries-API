@@ -87,6 +87,7 @@ public final class UserIdentityDtos {
         String communityName,
         LocalDate date,
         String reason,
+        String reasonDetails,
         Boolean canAppeal,
         LocalDate validUntil,
         Integer appliedByUserId,

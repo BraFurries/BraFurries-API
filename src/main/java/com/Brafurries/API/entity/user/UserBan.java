@@ -28,8 +28,12 @@ public class UserBan {
     @Column(nullable = false)
     private LocalDate date;
 
-    @Column(nullable = false, length = 256)
+    @Column(nullable = false, length = 2048)
     private String reason;
+
+    // Restricted administrative context; never publish through member-facing DTOs.
+    @Column(name = "reason_details", length = 2048)
+    private String reasonDetails;
 
     @Column(name = "can_appeal", nullable = false)
     private Boolean canAppeal;

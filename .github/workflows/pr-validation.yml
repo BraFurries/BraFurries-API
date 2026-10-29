@@ -73,6 +73,9 @@ jobs:
       - name: Check production workflow safety invariants
         run: python3 scripts/ci/check_production_workflow.py
 
+      - name: Validate UserBan mapping (no Docker dependency)
+        run: ./mvnw -B -Dtest=UserBanReasonMappingTest test
+
       - name: Run tests
         run: ./mvnw test
 
@@ -82,6 +85,16 @@ jobs:
           repository: BraFurries/BraFurries-Database
           ref: 0df5070079d26d18752282c642a9ff10037c8bfb
           path: .ci/database-baseline
+          persist-credentials: false
+
+      # These migrations are supplied by Database, never authored or modified by API.
+      # Pin the reviewed, unmerged Database #36 HEAD until it is integrated to main.
+      - name: Checkout pinned Database ban-detail migrations (read only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: BraFurries/BraFurries-Database
+          ref: c7adf21fa8d9b3b61c04a5306ca61a695e1c335d
+          path: .ci/moderation-database
           persist-credentials: false
 
       - name: Verify baseline source and run opt-in MariaDB Testcontainers compatibility
@@ -94,7 +107,19 @@ jobs:
           baseline=".ci/database-baseline/flyway/sql/baseline/B20261020_001__adopt_production_schema.sql"
           test "$(grep -c '^CREATE TABLE ' "$baseline")" -eq 107
           mkdir -p src/test/resources
-          cp "$baseline" src/test/resources/brafurries_schema_baseline.sql
+          test "$(git -C .ci/moderation-database rev-parse HEAD)" = "c7adf21fa8d9b3b61c04a5306ca61a695e1c335d"
+          moderation_dir=".ci/moderation-database/flyway/sql/versioned"
+          for migration in \
+            V20261029_002__expand_user_ban_reasons.sql \
+            V20261029_003__allow_repeated_user_warnings.sql \
+            V20261029_004__add_user_ban_reason_details.sql; do
+            test -s "$moderation_dir/$migration"
+          done
+          cat "$baseline" \
+            "$moderation_dir/V20261029_002__expand_user_ban_reasons.sql" \
+            "$moderation_dir/V20261029_003__allow_repeated_user_warnings.sql" \
+            "$moderation_dir/V20261029_004__add_user_ban_reason_details.sql" \
+            > src/test/resources/brafurries_schema_baseline.sql
           ./mvnw -B -Dtest=BaselineSchemaJpaMariaDbIntegrationTest,BaselineSchemaFullContextMariaDbIntegrationTest test
 
       # Run a real loopback HTTP request path against the Spring service and
@@ -184,6 +209,14 @@ jobs:
           test -s "$appeals"
           test -s "$focus_ack"
           cat "$baseline" "$migration" "$revision" "$submission" "$review" "$decisions" "$ballots" "$attempts" "$objective" "$finalization" "$visibility" "$integrity" "$reinstatement" "$autosave" "$notices" "$scheduled" "$appeals" "$focus_ack" > src/test/resources/recruitment_schema.sql
+          # The API's UserBan mapping must also validate against the reviewed
+          # moderation migrations in disposable recruitment integration databases.
+          moderation_dir=".ci/moderation-database/flyway/sql/versioned"
+          cat \
+            "$moderation_dir/V20261029_002__expand_user_ban_reasons.sql" \
+            "$moderation_dir/V20261029_003__allow_repeated_user_warnings.sql" \
+            "$moderation_dir/V20261029_004__add_user_ban_reason_details.sql" \
+            >> src/test/resources/recruitment_schema.sql
           ./mvnw -B -Dtest=RecruitmentDraftJdbcMariaDbIntegrationTest,RecruitmentStageEditorJdbcMariaDbIntegrationTest,RecruitmentPublicationJdbcMariaDbIntegrationTest,RecruitmentCandidateJdbcMariaDbIntegrationTest,RecruitmentTrackingJdbcMariaDbIntegrationTest,RecruitmentHumanReviewJdbcMariaDbIntegrationTest,RecruitmentStageDecisionJdbcMariaDbIntegrationTest,RecruitmentDecisionPolicyJdbcMariaDbIntegrationTest,RecruitmentDecisionDeskJdbcMariaDbIntegrationTest,RecruitmentStageVotingJdbcMariaDbIntegrationTest,RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest,RecruitmentObjectiveGradeJdbcMariaDbIntegrationTest test
 
       - name: Package without rerunning tests
