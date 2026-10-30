@@ -2,10 +2,12 @@ package com.Brafurries.API.user;
 
 import com.Brafurries.API.user.TemporaryRoleGrantService.*;
 import java.util.List;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
+@ConditionalOnProperty(name="app.temporary-roles.enabled",havingValue="true")
 @RequestMapping("/user/me/guilds/{guildId}/temporary-roles")
 public class TemporaryRoleGrantController {
     private final TemporaryRoleGrantService service;
