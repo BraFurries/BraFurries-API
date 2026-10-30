@@ -9,6 +9,7 @@ import java.sql.Statement;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -114,7 +115,7 @@ public class TemporaryRoleGrantService {
         Instant now=Instant.now();
         if(value==null || !value.isAfter(now) || value.isAfter(now.plusSeconds(366L*86400)))
             throw invalid("O prazo deve estar no futuro e ser de até 366 dias");
-        return utc(value);
+        return utc(value.truncatedTo(ChronoUnit.MICROS));
     }
     private static void roleAllowed(Access a,String roleId) {
         if(a.resources().botCapabilities()==null ||
@@ -145,7 +146,7 @@ public class TemporaryRoleGrantService {
             Grant found=existing.get(0);
             if(!found.guildId().equals(guildId) || !found.discordUserId().equals(request.discordUserId())
                 || !found.roleId().equals(request.roleId()) ||
-                !found.reason().equals(reason) || !found.expiresAt().equals(request.expiresAt()))
+                !found.reason().equals(reason) || !found.expiresAt().equals(request.expiresAt().truncatedTo(ChronoUnit.MICROS)))
                 throw conflict("Identificador de solicitação já utilizado com outros dados");
             return found;
         }
