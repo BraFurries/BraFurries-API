@@ -20,8 +20,8 @@ public class UserTempRole {
     @JoinColumn(name = "disc_community_id", nullable = false)
     private CommunityDiscord discordCommunity;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "disc_user_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "disc_user_id", nullable = true)
     private UserDiscord discordUser;
 
     @Column(name = "role_id", nullable = false)
@@ -30,6 +30,6 @@ public class UserTempRole {
     @Column(name = "expiring_date", nullable = false)
     private LocalDateTime expiringDate;
 
-    @Column(nullable = false, length = 100)
+    @Column(nullable = false, length = 200)
     private String reason;
 }
