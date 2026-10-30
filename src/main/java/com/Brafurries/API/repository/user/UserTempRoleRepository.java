@@ -18,14 +18,14 @@ public interface UserTempRoleRepository extends JpaRepository<UserTempRole, Inte
     List<UserTempRole> findByDiscordCommunity_Id(@Param("discordCommunityId") Integer discordCommunityId);
 
     @EntityGraph(attributePaths = {"discordUser", "discordCommunity"})
-    @Query(value = """
-        SELECT t.* FROM user_temp_roles t
-        JOIN user_discord ud ON ud.id=t.disc_user_id
-        JOIN community_discord cd ON cd.id=t.disc_community_id
-        WHERE ud.user_id=:userId AND cd.community_id=:communityId
-          AND t.grant_source='LEGACY' AND t.status='ACTIVE'
-        ORDER BY t.expiring_date ASC
-        """, nativeQuery = true)
+    @Query("""
+        SELECT t FROM UserTempRole t
+        JOIN t.discordUser du
+        JOIN t.discordCommunity dc
+        WHERE du.user.id = :userId AND dc.community.id = :communityId
+          AND t.grantSource = 'LEGACY' AND t.status = 'ACTIVE'
+        ORDER BY t.expiringDate ASC
+        """)
     List<UserTempRole> findAllByDiscordUser_User_IdAndDiscordCommunity_Community_IdOrderByExpiringDateAsc(
         @Param("userId") Integer userId, @Param("communityId") Integer communityId
     );
