@@ -42,7 +42,7 @@ public class TemporaryRoleGrantService {
     }
 
     public record Grant(long id,String guildId,String discordUserId,String roleId,
-        Instant expiresAt,String reason,String status,String syncStatus,
+        String grantSource,Instant expiresAt,String reason,String status,String syncStatus,
         String lastErrorCode,boolean roleAddedByBot,long version,
         Instant createdAt,Instant appliedAt) {}
     public record Create(String requestId,String discordUserId,String roleId,
@@ -75,25 +75,25 @@ public class TemporaryRoleGrantService {
     private Grant row(java.sql.ResultSet rs,int ignored) throws java.sql.SQLException {
         return new Grant(rs.getLong("id"),String.valueOf(rs.getLong("guild_id")),
             String.valueOf(rs.getLong("discord_user_id")),String.valueOf(rs.getLong("role_id")),
-            instant(rs,"expires_at"),rs.getString("reason"),rs.getString("status"),
+            rs.getString("grant_source"),instant(rs,"expires_at"),rs.getString("reason"),rs.getString("status"),
             rs.getString("sync_status"),rs.getString("last_error_code"),
             rs.getBoolean("role_added_by_bot"),rs.getLong("version"),
             instant(rs,"created_at"),instant(rs,"applied_at"));
     }
     private static final String COLUMNS =
-        "id,guild_id,discord_user_id,role_id,expires_at,reason,status,sync_status,"+
+        "id,guild_id,discord_user_id,role_id,grant_source,expiring_date AS expires_at,reason,status,sync_status,"+
         "last_error_code,role_added_by_bot,version,created_at,applied_at";
 
     @Transactional(readOnly=true)
     public List<Grant> list(Authentication auth,String guildId) {
         var a=access(auth,guildId);
-        return jdbc.query("SELECT "+COLUMNS+" FROM community_temporary_role_grants "+
+        return jdbc.query("SELECT "+COLUMNS+" FROM user_temp_roles "+
                 "WHERE community_id=? AND guild_id=? ORDER BY id DESC LIMIT 100",
             this::row,a.communityId(),a.guildId());
     }
 
     private Grant get(Access a,long id) {
-        var rows=jdbc.query("SELECT "+COLUMNS+" FROM community_temporary_role_grants "+
+        var rows=jdbc.query("SELECT "+COLUMNS+" FROM user_temp_roles "+
                 "WHERE community_id=? AND guild_id=? AND id=?",
             this::row,a.communityId(),a.guildId(),id);
         if(rows.isEmpty()) throw missing();
@@ -140,7 +140,7 @@ public class TemporaryRoleGrantService {
         String reason=reason(request.reason());
         LocalDateTime expires=expiry(request.expiresAt());
         roleAllowed(a,request.roleId());
-        var existing=jdbc.query("SELECT "+COLUMNS+" FROM community_temporary_role_grants "+
+        var existing=jdbc.query("SELECT "+COLUMNS+" FROM user_temp_roles "+
             "WHERE community_id=? AND request_id=?",this::row,a.communityId(),uuid);
         if(!existing.isEmpty()) {
             Grant found=existing.get(0);
@@ -152,21 +152,25 @@ public class TemporaryRoleGrantService {
         }
         // Release a timed-out unique active slot; Coddy will reconcile the old
         // Discord effect and preserve any newer active grant for this target.
-        jdbc.update("UPDATE community_temporary_role_grants SET status='EXPIRED',"+
+        jdbc.update("UPDATE user_temp_roles SET status='EXPIRED',"+
             "sync_status='PENDING',version=version+1 WHERE community_id=? AND guild_id=? "+
-            "AND discord_user_id=? AND role_id=? AND status='ACTIVE' "+
+            "AND discord_user_id=? AND role_id=? AND grant_source='MANUAL' AND status='ACTIVE' "+
             "AND expires_at<=UTC_TIMESTAMP(6)",a.communityId(),a.guildId(),user,role);
         var keys=new GeneratedKeyHolder();
         try {
             jdbc.update(conn->{
-                var ps=conn.prepareStatement("INSERT INTO community_temporary_role_grants "+
-                    "(community_id,guild_id,discord_user_id,role_id,expires_at,reason,request_id,"+
-                    "created_by_user_id,updated_by_user_id) VALUES (?,?,?,?,?,?,?,?,?)",
+                var ps=conn.prepareStatement("INSERT INTO user_temp_roles "+
+                    "(disc_community_id,disc_user_id,community_id,guild_id,discord_user_id,role_id,"+
+                    "expiring_date,reason,request_id,grant_source,sync_status,"+
+                    "created_by_user_id,updated_by_user_id) VALUES ("+
+                    "(SELECT id FROM community_discord WHERE community_id=? AND guild_id=? AND active=1),"+
+                    "NULL,?,?,?,?,?,?,?,'MANUAL','PENDING',?,?)",
                     Statement.RETURN_GENERATED_KEYS);
                 ps.setInt(1,a.communityId());ps.setLong(2,a.guildId());
-                ps.setLong(3,user);ps.setLong(4,role);
-                ps.setObject(5,expires);ps.setString(6,reason);ps.setString(7,uuid);
-                ps.setInt(8,a.actor().user().getId());ps.setInt(9,a.actor().user().getId());
+                ps.setInt(3,a.communityId());ps.setLong(4,a.guildId());
+                ps.setLong(5,user);ps.setLong(6,role);
+                ps.setObject(7,expires);ps.setString(8,reason);ps.setString(9,uuid);
+                ps.setInt(10,a.actor().user().getId());ps.setInt(11,a.actor().user().getId());
                 return ps;
             },keys);
         } catch(DataIntegrityViolationException ex) {throw conflict("Concessão já existe ou solicitação duplicada");}
@@ -180,16 +184,17 @@ public class TemporaryRoleGrantService {
         var a=access(auth,guildId);
         if(grantId<=0 || request==null) throw invalid("Concessão inválida");
         Grant old=get(a,grantId);
+        if(!"MANUAL".equals(old.grantSource())) throw conflict("Recompensas automáticas não são administradas por este formulário");
         roleAllowed(a,old.roleId());
         LocalDateTime expires=expiry(request.expiresAt());
         String reason=reason(request.reason());
         if(!"ACTIVE".equals(old.status()) || !old.expiresAt().isAfter(Instant.now()))
             throw conflict("Concessão não está ativa");
         if(!request.expiresAt().isAfter(old.expiresAt())) throw invalid("Renovação deve aumentar o prazo");
-        if(jdbc.update("UPDATE community_temporary_role_grants SET expires_at=?,"+
+        if(jdbc.update("UPDATE user_temp_roles SET expiring_date=?,"+
             "reason=?,sync_status='PENDING',last_error_code=NULL,updated_by_user_id=?,"+
             "version=version+1 WHERE community_id=? AND guild_id=? AND id=? "+
-            "AND status='ACTIVE' AND version=? AND expires_at>UTC_TIMESTAMP(6)",
+            "AND grant_source='MANUAL' AND status='ACTIVE' AND version=? AND expiring_date>UTC_TIMESTAMP(6)",
             expires,reason,a.actor().user().getId(),a.communityId(),a.guildId(),grantId,
             request.expectedVersion())!=1) throw conflict("Concessão alterada; atualize antes de renovar");
         audit(a,"TEMPORARY_ROLE_RENEWED",grantId);
@@ -201,12 +206,13 @@ public class TemporaryRoleGrantService {
         var a=access(auth,guildId);
         if(grantId<=0) throw invalid("Concessão inválida");
         Grant old=get(a,grantId);
+        if(!"MANUAL".equals(old.grantSource())) throw conflict("Recompensas automáticas não são administradas por este formulário");
         if("CANCELLED".equals(old.status())) return old;
         if(!"ACTIVE".equals(old.status())) throw conflict("Concessão já expirada");
-        if(jdbc.update("UPDATE community_temporary_role_grants SET status='CANCELLED',"+
+        if(jdbc.update("UPDATE user_temp_roles SET status='CANCELLED',"+
             "sync_status='PENDING',last_error_code=NULL,updated_by_user_id=?,"+
             "version=version+1 WHERE community_id=? AND guild_id=? AND id=? "+
-            "AND status='ACTIVE' AND version=?",
+            "AND grant_source='MANUAL' AND status='ACTIVE' AND version=?",
             a.actor().user().getId(),a.communityId(),a.guildId(),grantId,
             expectedVersion)!=1) throw conflict("Concessão alterada; atualize antes de cancelar");
         audit(a,"TEMPORARY_ROLE_CANCELLED",grantId);
