@@ -10,21 +10,22 @@ import org.springframework.data.repository.query.Param;
 
 @Repository
 public interface UserTempRoleRepository extends JpaRepository<UserTempRole, Integer> {
-    @Query("""
-        SELECT r FROM UserTempRole r
-        WHERE r.discordCommunity.id = :discordCommunityId
-          AND r.grantSource = 'LEGACY' AND r.status = 'ACTIVE'
-        """)
+    @Query(value = """
+        SELECT t.* FROM user_temp_roles t
+        WHERE t.disc_community_id = :discordCommunityId
+          AND t.grant_source = 'LEGACY' AND t.status = 'ACTIVE'
+        """, nativeQuery = true)
     List<UserTempRole> findByDiscordCommunity_Id(@Param("discordCommunityId") Integer discordCommunityId);
 
     @EntityGraph(attributePaths = {"discordUser", "discordCommunity"})
-    @Query("""
-        SELECT r FROM UserTempRole r
-        WHERE r.discordUser.user.id = :userId
-          AND r.discordCommunity.community.id = :communityId
-          AND r.grantSource = 'LEGACY' AND r.status = 'ACTIVE'
-        ORDER BY r.expiringDate ASC
-        """)
+    @Query(value = """
+        SELECT t.* FROM user_temp_roles t
+        JOIN user_discord ud ON ud.id=t.disc_user_id
+        JOIN community_discord cd ON cd.id=t.disc_community_id
+        WHERE ud.user_id=:userId AND cd.community_id=:communityId
+          AND t.grant_source='LEGACY' AND t.status='ACTIVE'
+        ORDER BY t.expiring_date ASC
+        """, nativeQuery = true)
     List<UserTempRole> findAllByDiscordUser_User_IdAndDiscordCommunity_Community_IdOrderByExpiringDateAsc(
         @Param("userId") Integer userId, @Param("communityId") Integer communityId
     );
