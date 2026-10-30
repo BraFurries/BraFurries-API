@@ -32,4 +32,12 @@ public class UserTempRole {
 
     @Column(nullable = false, length = 200)
     private String reason;
+
+    // Read-only ledger discriminator fields; the legacy JPA entity does not
+    // administer temporary role state.
+    @Column(name = "grant_source", insertable = false, updatable = false)
+    private String grantSource;
+
+    @Column(name = "status", insertable = false, updatable = false)
+    private String status;
 }
