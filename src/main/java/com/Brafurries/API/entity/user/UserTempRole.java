@@ -32,4 +32,10 @@ public class UserTempRole {
 
     @Column(nullable = false, length = 200)
     private String reason;
+
+    @Column(name = "grant_source", nullable = false, length = 12)
+    private String grantSource;
+
+    @Column(name = "status", nullable = false, length = 12)
+    private String status;
 }
