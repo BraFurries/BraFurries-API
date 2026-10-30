@@ -24,7 +24,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 /**
  * The API controls a tenant-scoped desired state; Coddy alone changes Discord.
- * This table is deliberately independent of legacy user_temp_roles rewards.
+ * Manual and legacy grants share the canonical user_temp_roles ledger; only
+ * manual grants can be managed through these administrative endpoints.
  */
 @Service
 public class TemporaryRoleGrantService {
@@ -155,7 +156,7 @@ public class TemporaryRoleGrantService {
         jdbc.update("UPDATE user_temp_roles SET status='EXPIRED',"+
             "sync_status='PENDING',version=version+1 WHERE community_id=? AND guild_id=? "+
             "AND discord_user_id=? AND role_id=? AND grant_source='MANUAL' AND status='ACTIVE' "+
-            "AND expires_at<=UTC_TIMESTAMP(6)",a.communityId(),a.guildId(),user,role);
+            "AND expiring_date<=UTC_TIMESTAMP(6)",a.communityId(),a.guildId(),user,role);
         var keys=new GeneratedKeyHolder();
         try {
             jdbc.update(conn->{
