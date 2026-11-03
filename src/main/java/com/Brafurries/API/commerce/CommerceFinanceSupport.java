@@ -123,11 +123,15 @@ public class CommerceFinanceSupport {
         if (locks.isEmpty()) throw new IllegalStateException("Falha de lock do período");
     }
     public void requirePeriodNotSettled(int artist,int year,int month) {
-        Integer count=jdbc.queryForObject("""
-            SELECT COUNT(*) FROM commerce_settlements
+        // Locking current read: COUNT(*) using the earlier REPEATABLE READ
+        // snapshot could miss a just-committed settlement while we waited
+        // on the period mutex.
+        List<Long> existing=jdbc.queryForList("""
+            SELECT id FROM commerce_settlements
              WHERE artist_user_id=? AND period_year=? AND period_month=?
-            """,Integer.class,artist,year,month);
-        if (count!=null && count>0) {
+             FOR UPDATE
+            """,Long.class,artist,year,month);
+        if (!existing.isEmpty()) {
             throw conflict("O mês deste artista já possui fechamento. Remova o rascunho antes de corrigir vendas.");
         }
     }
