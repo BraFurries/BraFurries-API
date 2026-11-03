@@ -130,7 +130,7 @@ public class CommerceSalesService {
         TreeSet<Long> artworkIds=new TreeSet<>();
         for (Long productId:new TreeSet<>(batchProducts.values())) {
             artworkIds.addAll(jdbc.queryForList("""
-                SELECT artwork_id FROM commerce_product_artworks WHERE product_id=?
+                SELECT artwork_id FROM commerce_product_artworks WHERE product_id=? FOR UPDATE
                 """,Long.class,productId));
         }
         for (Long artworkId:artworkIds) {
@@ -152,7 +152,7 @@ public class CommerceSalesService {
                   JOIN commerce_artworks a ON a.id=pa.artwork_id
                   LEFT JOIN commerce_artwork_contracts c
                     ON c.artwork_id=pa.artwork_id AND c.status='ACTIVE'
-                 WHERE pa.product_id=? ORDER BY pa.artwork_id
+                 WHERE pa.product_id=? ORDER BY pa.artwork_id FOR UPDATE
                 """,(rs,index)->new Rights(
                     rs.getLong("artwork_id"),rs.getInt("artist_user_id"),
                     (Long)rs.getObject("contract_id",Long.class),
@@ -317,6 +317,7 @@ public class CommerceSalesService {
               JOIN commerce_sale_items item ON item.id=accrual.sale_item_id
              WHERE item.sale_id=?
              ORDER BY accrual.artist_user_id,accrual.period_year,accrual.period_month
+             FOR UPDATE
             """,saleId);
         for (Map<String,Object> period:periods) {
             int artist=((Number)period.get("artist_user_id")).intValue();
@@ -330,7 +331,7 @@ public class CommerceSalesService {
         // The sale row is locked above, so cancellation cannot release twice.
         for (Map<String,Object> item:jdbc.queryForList("""
             SELECT production_batch_id,quantity FROM commerce_sale_items
-             WHERE sale_id=? ORDER BY production_batch_id
+             WHERE sale_id=? ORDER BY production_batch_id FOR UPDATE
             """,saleId)) {
             long batchId=((Number)item.get("production_batch_id")).longValue();
             int quantity=((Number)item.get("quantity")).intValue();
