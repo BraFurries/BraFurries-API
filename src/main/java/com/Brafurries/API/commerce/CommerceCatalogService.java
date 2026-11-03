@@ -107,6 +107,29 @@ public class CommerceCatalogService {
             """);
     }
 
+    @Transactional(readOnly = true)
+    public List<Map<String,Object>> searchArtists(Authentication auth,String search) {
+        authorization.require(auth,CommercePermission.ARTWORKS_MANAGE);
+        if (search == null || search.trim().length() < 2 || search.length() > 100) {
+            throw invalid("Informe ao menos 2 caracteres para pesquisar artistas");
+        }
+        String like = "%" + search.trim().replace("%","").replace("_","") + "%";
+        return jdbc.queryForList("""
+            SELECT u.id,COALESCE(u.display_name,u.username,
+                CONCAT('Usuário ',u.id)) AS name
+              FROM users u
+              JOIN user_community_status member
+                ON member.user_id=u.id
+               AND member.community_id=?
+             WHERE member.is_present=1
+               AND COALESCE(member.banned,0)=0
+               AND (LOWER(COALESCE(u.display_name,'')) LIKE LOWER(?)
+                    OR LOWER(COALESCE(u.username,'')) LIKE LOWER(?)
+                    OR LOWER(COALESCE(member.display_name,'')) LIKE LOWER(?))
+             ORDER BY u.id DESC LIMIT 30
+            """,authorization.officialCommunityId(),like,like,like);
+    }
+
     @Transactional
     public Created createArtwork(Authentication auth, CreateArtwork input) {
         User actor = authorization.require(auth, CommercePermission.ARTWORKS_MANAGE).user();
