@@ -1,11 +1,7 @@
 package com.Brafurries.API.commerce;
 
 import com.Brafurries.API.entity.user.User;
-import com.Brafurries.API.repository.user.UserRepository;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
-import java.util.Locale;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
@@ -20,16 +16,13 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class CommerceAccessService {
     private final CommerceAuthorizationService authorization;
-    private final UserRepository users;
     private final JdbcTemplate jdbc;
 
     public CommerceAccessService(
         CommerceAuthorizationService authorization,
-        UserRepository users,
         JdbcTemplate jdbc
     ) {
         this.authorization = authorization;
-        this.users = users;
         this.jdbc = jdbc;
     }
 
@@ -50,14 +43,14 @@ public class CommerceAccessService {
     public List<PersonView> listPeople(Authentication auth) {
         authorization.requireOwner(auth);
         return jdbc.query("""
-            SELECT allowed.user_id, user.display_name, user.username,
+            SELECT allowed.user_id, u.display_name, u.username,
                    GROUP_CONCAT(grant.permission_code ORDER BY grant.permission_code
                        SEPARATOR ',') AS permission_codes
               FROM commerce_authorized_users allowed
-              JOIN users user ON user.id = allowed.user_id
+              JOIN users u ON u.id = allowed.user_id
               LEFT JOIN commerce_user_permissions grant ON grant.user_id = allowed.user_id
-             GROUP BY allowed.user_id, user.display_name, user.username
-             ORDER BY COALESCE(user.display_name, user.username, ''), allowed.user_id
+             GROUP BY allowed.user_id, u.display_name, u.username
+             ORDER BY COALESCE(u.display_name, u.username, ''), allowed.user_id
             """, (rs, index) -> new PersonView(
                 rs.getInt("user_id"),
                 displayName(rs.getString("display_name"), rs.getString("username"),
@@ -91,11 +84,14 @@ public class CommerceAccessService {
             throw invalid("O responsável já possui acesso integral");
         }
         lockUser(userId);
-        int inserted = jdbc.update("""
+        if (exists("SELECT COUNT(*) FROM commerce_authorized_users WHERE user_id = ?", userId)) {
+            return;
+        }
+        jdbc.update("""
             INSERT INTO commerce_authorized_users (user_id, approved_by_user_id)
-            VALUES (?, ?) ON DUPLICATE KEY UPDATE user_id = user_id
+            VALUES (?, ?)
             """, userId, owner.getId());
-        if (inserted > 0) audit(owner.getId(), "PERSON_APPROVED", userId, null, null);
+        audit(owner.getId(), "PERSON_APPROVED", userId, null, null);
     }
 
     @Transactional
@@ -121,13 +117,13 @@ public class CommerceAccessService {
         }
         lockUser(userId);
         requireApproved(userId);
-        int changed = jdbc.update("""
+        if (exists("SELECT COUNT(*) FROM commerce_user_permissions WHERE user_id = ? AND permission_code = ?",
+                userId, permission.name())) return;
+        jdbc.update("""
             INSERT INTO commerce_user_permissions (user_id, permission_code, granted_by_user_id)
-            VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE user_id = user_id
+            VALUES (?, ?, ?)
             """, userId, permission.name(), owner.getId());
-        if (changed > 0) {
-            audit(owner.getId(), "PERSON_PERMISSION_GRANTED", userId, null, permission.name());
-        }
+        audit(owner.getId(), "PERSON_PERMISSION_GRANTED", userId, null, permission.name());
     }
 
     @Transactional
@@ -148,13 +144,13 @@ public class CommerceAccessService {
         User owner = authorization.requireOwner(auth);
         CommercePermission permission = CommercePermission.parse(code);
         lockOfficialRole(roleId);
-        int changed = jdbc.update("""
+        if (exists("SELECT COUNT(*) FROM commerce_role_permissions WHERE role_id = ? AND permission_code = ?",
+                roleId, permission.name())) return;
+        jdbc.update("""
             INSERT INTO commerce_role_permissions (role_id, permission_code, granted_by_user_id)
-            VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE role_id = role_id
+            VALUES (?, ?, ?)
             """, roleId, permission.name(), owner.getId());
-        if (changed > 0) {
-            audit(owner.getId(), "ROLE_PERMISSION_GRANTED", null, roleId, permission.name());
-        }
+        audit(owner.getId(), "ROLE_PERMISSION_GRANTED", null, roleId, permission.name());
     }
 
     @Transactional
@@ -190,12 +186,13 @@ public class CommerceAccessService {
         }
     }
 
+    private boolean exists(String sql, Object... args) {
+        Integer count = jdbc.queryForObject(sql, Integer.class, args);
+        return count != null && count > 0;
+    }
+
     private void requireApproved(int userId) {
-        Integer count = jdbc.queryForObject(
-            "SELECT COUNT(*) FROM commerce_authorized_users WHERE user_id = ?",
-            Integer.class, userId
-        );
-        if (count == null || count == 0) {
+        if (!exists("SELECT COUNT(*) FROM commerce_authorized_users WHERE user_id = ?", userId)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                 "Primeiro aprove esta pessoa para a Gestão Comercial");
         }
