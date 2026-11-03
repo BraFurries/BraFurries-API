@@ -53,6 +53,11 @@ public class CommerceCatalogController {
         return catalog.artworks(auth);
     }
 
+    @GetMapping("/artists/search")
+    public List<Map<String,Object>> searchArtists(Authentication auth,@RequestParam String search) {
+        return catalog.searchArtists(auth,search);
+    }
+
     @PostMapping("/artworks")
     @ResponseStatus(HttpStatus.CREATED)
     public Created createArtwork(Authentication auth,@Valid @RequestBody CreateArtwork request) {
