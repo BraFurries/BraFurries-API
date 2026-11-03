@@ -18,6 +18,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
+import java.sql.ResultSet;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -118,6 +120,47 @@ class CommerceSettlementServiceTest {
                 new RecordPayment(PAYMENT_KEY,new BigDecimal("30.00"),
                     LocalDate.of(2025,12,4),"TX-1","Original"))).getStatusCode());
         verifyNoInteractions(support);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void givenStatement(String status,BigDecimal total) {
+        when(jdbc.query(contains("FROM commerce_settlements WHERE id=?"),
+            any(RowMapper.class),eq(90L))).thenAnswer(invocation -> {
+            RowMapper<Object> mapper = invocation.getArgument(1);
+            ResultSet rs=mock(ResultSet.class);
+            when(rs.getLong("id")).thenReturn(90L);
+            when(rs.getInt("artist_user_id")).thenReturn(12);
+            when(rs.getInt("period_year")).thenReturn(2025);
+            when(rs.getInt("period_month")).thenReturn(12);
+            when(rs.getString("status")).thenReturn(status);
+            when(rs.getBigDecimal("total_amount")).thenReturn(total);
+            return List.of(mapper.mapRow(rs,0));
+        });
+    }
+
+    @Test
+    void paymentCannotExceedOutstandingStatementBalance() {
+        givenStatement("APPROVED",new BigDecimal("100.00"));
+        when(jdbc.queryForObject(contains("FROM commerce_payments"),
+            eq(BigDecimal.class),eq(90L))).thenReturn(new BigDecimal("75.00"));
+
+        assertEquals(HttpStatus.CONFLICT,
+            assertThrows(ResponseStatusException.class,
+                () -> service.recordPayment(auth,90L,new RecordPayment(
+                    PAYMENT_KEY,new BigDecimal("30.00"),LocalDate.of(2025,12,5),
+                    "PIX-OVER",null))).getStatusCode());
+        verify(support,never()).insert(anyString(),any(Object[].class));
+    }
+
+    @Test
+    void paymentCannotBeRecordedAgainstUnapprovedDraft() {
+        givenStatement("DRAFT",new BigDecimal("100.00"));
+        assertEquals(HttpStatus.CONFLICT,
+            assertThrows(ResponseStatusException.class,
+                () -> service.recordPayment(auth,90L,new RecordPayment(
+                    PAYMENT_KEY,new BigDecimal("30.00"),LocalDate.of(2025,12,5),
+                    "PIX-UNAPPROVED",null))).getStatusCode());
+        verify(support,never()).insert(anyString(),any(Object[].class));
     }
 
     @Test
