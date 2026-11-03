@@ -9,3 +9,8 @@ d9280a1110c803b23849b97509e307479d58d934:src/test/java/com/Brafurries/API/admin/
 # Scoped to original commit + test file + generic-api-key rule + line.
 b594ea3f1dadd9e22f7700cebc582a507199edb6:src/test/java/com/Brafurries/API/commerce/CommerceSettlementServiceTest.java:generic-api-key:31
 77c83549870ae1a473b10a156b4220eaa38167c9:src/test/java/com/Brafurries/API/commerce/CommerceSalesServiceTest.java:generic-api-key:67
+
+# Squash of #65 recreated the same reviewed UUID-only test fixtures at a new commit.
+# These are not access tokens; scope suppressions to exact historical lines.
+ea57b2ca0c58915b29950112af93cb1c3c99d4ff:src/test/java/com/Brafurries/API/commerce/CommerceSettlementServiceTest.java:generic-api-key:33
+ea57b2ca0c58915b29950112af93cb1c3c99d4ff:src/test/java/com/Brafurries/API/commerce/CommerceSalesServiceTest.java:generic-api-key:67
