@@ -15,7 +15,7 @@ class CommercePrivateDocumentStorageTest {
     }
 
     @Test
-    void acceptsOnlySmallValidPdfFiles() {
+    void acceptsOnlySmallValidPdfFiles() throws java.io.IOException {
         var storage=storage("private-contracts","public-media");
         var valid=new MockMultipartFile("file","signed.pdf","application/pdf",
             "%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF".getBytes(StandardCharsets.US_ASCII));
@@ -38,7 +38,7 @@ class CommercePrivateDocumentStorageTest {
     }
 
     @Test
-    void refusesToUploadIntoPublicR2Bucket() {
+    void refusesToUploadIntoPublicR2Bucket() throws java.io.IOException {
         var storage=storage("public-media","public-media");
         var valid=new MockMultipartFile("file","signed.pdf","application/pdf",
             "%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF".getBytes(StandardCharsets.US_ASCII));
