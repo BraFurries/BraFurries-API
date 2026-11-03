@@ -44,11 +44,11 @@ public class CommerceAccessService {
         authorization.requireOwner(auth);
         return jdbc.query("""
             SELECT allowed.user_id, u.display_name, u.username,
-                   GROUP_CONCAT(grant.permission_code ORDER BY grant.permission_code
+                   GROUP_CONCAT(perm.permission_code ORDER BY perm.permission_code
                        SEPARATOR ',') AS permission_codes
               FROM commerce_authorized_users allowed
               JOIN users u ON u.id = allowed.user_id
-              LEFT JOIN commerce_user_permissions grant ON grant.user_id = allowed.user_id
+              LEFT JOIN commerce_user_permissions perm ON perm.user_id = allowed.user_id
              GROUP BY allowed.user_id, u.display_name, u.username
              ORDER BY COALESCE(u.display_name, u.username, ''), allowed.user_id
             """, (rs, index) -> new PersonView(
@@ -64,10 +64,10 @@ public class CommerceAccessService {
         authorization.requireOwner(auth);
         return jdbc.query("""
             SELECT role.id, role.name, role.active,
-                   GROUP_CONCAT(grant.permission_code ORDER BY grant.permission_code
+                   GROUP_CONCAT(perm.permission_code ORDER BY perm.permission_code
                        SEPARATOR ',') AS permission_codes
               FROM community_team_roles role
-              LEFT JOIN commerce_role_permissions grant ON grant.role_id = role.id
+              LEFT JOIN commerce_role_permissions perm ON perm.role_id = role.id
              WHERE role.community_id = ?
              GROUP BY role.id, role.name, role.active
              ORDER BY role.name, role.id
