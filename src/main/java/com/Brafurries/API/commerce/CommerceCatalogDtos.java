@@ -44,7 +44,8 @@ public final class CommerceCatalogDtos {
         @NotBlank @Size(max = 180) String name,
         @Size(max = 5000) String description,
         @NotNull @DecimalMin("0.0") BigDecimal estimatedUnitCost,
-        @NotNull @DecimalMin("0.0") BigDecimal suggestedPrice
+        @NotNull @DecimalMin("0.0") BigDecimal suggestedPrice,
+        Long preferredSupplierId
     ) {}
 
     public record LinkArtwork(
