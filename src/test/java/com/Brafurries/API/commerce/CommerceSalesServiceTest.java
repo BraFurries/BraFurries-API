@@ -93,6 +93,25 @@ class CommerceSalesServiceTest {
     }
 
     @Test
+    void cancellationOfAnAlreadySettledSaleCannotRewriteApprovedRoyalties() {
+        when(jdbc.queryForList(contains("FROM commerce_sales WHERE id=? FOR UPDATE"),eq(23L)))
+            .thenReturn(List.of(Map.of("id",23L,"status","CONFIRMED")));
+        when(jdbc.queryForList(contains("SELECT DISTINCT accrual.artist_user_id"),
+            eq(23L))).thenReturn(List.of(Map.of(
+                "artist_user_id",13,"period_year",2025,"period_month",12
+            )));
+        doThrow(new ResponseStatusException(HttpStatus.CONFLICT,"Mês fechado"))
+            .when(support).requirePeriodNotSettled(13,2025,12);
+
+        assertEquals(HttpStatus.CONFLICT,
+            assertThrows(ResponseStatusException.class,
+                () -> service.cancelSale(auth,23L,"Cliente desistiu")).getStatusCode());
+        verify(support).lockPeriod(13,2025,12);
+        verify(jdbc,never()).update(contains("INSERT INTO commerce_royalty_accruals"),any());
+        verify(jdbc,never()).update(contains("UPDATE commerce_sales"),any(),any(),any());
+    }
+
+    @Test
     void unauthorizedSaleManagerIsRejectedBeforeAnyBusinessQuery() {
         when(authorization.require(auth,CommercePermission.SALES_MANAGE))
             .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
