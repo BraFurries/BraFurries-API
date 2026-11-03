@@ -42,7 +42,8 @@ public class CommerceSalesService {
         this.jdbc=jdbc;
     }
 
-    private record Batch(long id,long productId,int quantity,BigDecimal totalCost,LocalDate producedOn) {}
+    private record Batch(long id,long productId,int quantity,int soldQuantity,
+                         BigDecimal totalCost,LocalDate producedOn) {}
     private record Rights(
         long artworkId,int artistId,Long contractId,String method,
         BigDecimal rate,BigDecimal fixedUnit,BigDecimal allocation,
@@ -205,11 +206,12 @@ public class CommerceSalesService {
         for (SaleLine item:lines.values()) {
             long productId=batchProducts.get(item.batchId());
             List<Batch> matched=jdbc.query("""
-                SELECT id,product_id,quantity,total_cost,produced_on
+                SELECT id,product_id,quantity,sold_quantity,total_cost,produced_on
                   FROM commerce_production_batches WHERE id=? FOR UPDATE
                 """,(rs,index)->new Batch(
                     rs.getLong("id"),rs.getLong("product_id"),rs.getInt("quantity"),
-                    rs.getBigDecimal("total_cost"),rs.getObject("produced_on",LocalDate.class)
+                    rs.getInt("sold_quantity"),rs.getBigDecimal("total_cost"),
+                    rs.getObject("produced_on",LocalDate.class)
                 ),item.batchId());
             if (matched.isEmpty() || matched.get(0).productId()!=productId) {
                 throw conflict("Lote de produção alterado durante a operação");
@@ -218,13 +220,9 @@ public class CommerceSalesService {
             if (batch.producedOn().isAfter(request.soldOn())) {
                 throw conflict("Não é possível vender unidades antes da produção do lote");
             }
-            Long sold=jdbc.queryForObject("""
-                SELECT COALESCE(SUM(si.quantity),0)
-                  FROM commerce_sale_items si
-                  JOIN commerce_sales sale ON sale.id=si.sale_id
-                 WHERE si.production_batch_id=? AND sale.status='CONFIRMED'
-                """,Long.class,batch.id());
-            long available=batch.quantity()-(sold==null?0:sold);
+            // Read under the batch row lock. A SUM of sale rows would use
+            // a potentially stale REPEATABLE READ snapshot and allow oversell.
+            long available=(long)batch.quantity()-batch.soldQuantity();
             if (available<item.quantity()) {
                 throw conflict("Estoque insuficiente no lote "+batch.id()+
                     ". Disponível: "+Math.max(0,available));
@@ -239,6 +237,17 @@ public class CommerceSalesService {
             gross=money(gross.add(lineGross),"Total da venda");
             snapshots.add(new LineSnapshot(batch,item.quantity(),item.unitPrice(),
                 lineGross,cost,rightsByProduct.getOrDefault(productId,List.of())));
+        }
+
+        // Reserve units atomically before writing financial events. The entire
+        // sale runs in one transaction: any failure rolls all counters back.
+        for (LineSnapshot line:snapshots) {
+            int changed=jdbc.update("""
+                UPDATE commerce_production_batches
+                   SET sold_quantity=sold_quantity+?
+                 WHERE id=? AND sold_quantity+?<=quantity
+                """,line.quantity(),line.batch().id(),line.quantity());
+            if (changed!=1) throw conflict("Estoque do lote alterado; atualize os dados");
         }
 
         long saleId;
@@ -317,15 +326,22 @@ public class CommerceSalesService {
             support.requirePeriodNotSettled(artist,year,month);
         }
 
-        // Every sale/cancellation locks its batches, so concurrent transactions
-        // cannot oversell stock immediately after a cancellation.
-        for (Long batchId:jdbc.queryForList("""
-            SELECT production_batch_id FROM commerce_sale_items
+        // Release only sold units of this sale while retaining historical items.
+        // The sale row is locked above, so cancellation cannot release twice.
+        for (Map<String,Object> item:jdbc.queryForList("""
+            SELECT production_batch_id,quantity FROM commerce_sale_items
              WHERE sale_id=? ORDER BY production_batch_id
-            """,Long.class,saleId)) {
-            jdbc.queryForList("""
-                SELECT id FROM commerce_production_batches WHERE id=? FOR UPDATE
-                """,Long.class,batchId);
+            """,saleId)) {
+            long batchId=((Number)item.get("production_batch_id")).longValue();
+            int quantity=((Number)item.get("quantity")).intValue();
+            int released=jdbc.update("""
+                UPDATE commerce_production_batches
+                   SET sold_quantity=sold_quantity-?
+                 WHERE id=? AND sold_quantity>=?
+                """,quantity,batchId,quantity);
+            if (released!=1) {
+                throw new IllegalStateException("Inconsistência no estoque do lote "+batchId);
+            }
         }
         jdbc.update("""
             INSERT INTO commerce_royalty_accruals
@@ -360,17 +376,10 @@ public class CommerceSalesService {
             SELECT batch.id AS batchId,
                    batch.product_id AS productId,product.name AS productName,
                    product.sku,product.suggested_price AS suggestedPrice,
-                   batch.quantity-COALESCE(SUM(
-                       CASE WHEN sale.status='CONFIRMED' THEN item.quantity ELSE 0 END
-                   ),0) AS availableUnits
+                   batch.quantity-batch.sold_quantity AS availableUnits
               FROM commerce_production_batches batch
               JOIN commerce_products product ON product.id=batch.product_id
-              LEFT JOIN commerce_sale_items item ON item.production_batch_id=batch.id
-              LEFT JOIN commerce_sales sale ON sale.id=item.sale_id
-             WHERE product.active=1
-             GROUP BY batch.id,batch.product_id,product.name,product.sku,
-                      product.suggested_price,batch.quantity
-            HAVING availableUnits > 0
+             WHERE product.active=1 AND batch.sold_quantity<batch.quantity
              ORDER BY product.name,batch.id LIMIT 500
             """);
     }
