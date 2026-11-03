@@ -56,7 +56,7 @@ public class CommerceCashMovementService {
         if (input==null) throw invalid("Movimentação não informada");
         String key=requestId(input.requestKey());
         String type=input.movementType();
-        if (!TYPES.contains(type)) throw invalid("Tipo de movimentação inválido");
+        if (type==null || !TYPES.contains(type)) throw invalid("Tipo de movimentação inválido");
         BigDecimal amount=money(input.amount(),"Valor da movimentação");
         if (amount.signum()<=0) throw invalid("O valor da movimentação deve ser maior que zero");
         LocalDate occurredOn=input.occurredOn();
@@ -67,14 +67,14 @@ public class CommerceCashMovementService {
         String description=text(input.description(),500,"Descrição",true);
         String counterparty=text(input.counterpartyLabel(),160,"Origem/destino",true);
         String method=input.paymentMethod();
-        if (!METHODS.contains(method)) throw invalid("Forma de pagamento inválida");
+        if (method==null || !METHODS.contains(method)) throw invalid("Forma de pagamento inválida");
         String reference=text(input.externalReference(),120,"Referência",false);
         String notes=text(input.notes(),5000,"Observações",false);
         String contributorType=input.contributorType();
         String nature=input.contributionNature();
 
         if ("CONTRIBUTION".equals(type)) {
-            if (!CONTRIBUTOR_TYPES.contains(contributorType) || !NATURES.contains(nature)) {
+            if (contributorType==null || nature==null || !CONTRIBUTOR_TYPES.contains(contributorType) || !NATURES.contains(nature)) {
                 throw invalid("Aporte exige tipo de contribuinte e natureza reembolsável ou não");
             }
         } else if (contributorType!=null || nature!=null) {
