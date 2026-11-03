@@ -108,9 +108,6 @@ class CommerceCatalogServiceTest {
             eq(Long.class),eq(12L))).thenReturn(List.of(12L));
         when(jdbc.queryForObject(contains("commerce_artworks"),eq(Integer.class),eq(11L)))
             .thenReturn(1);
-        when(jdbc.queryForList(contains("royalty_allocation_percent FROM"),
-            any(org.springframework.jdbc.core.RowMapper.class),eq(12L),eq(11L)))
-            .thenReturn(List.of());
         when(jdbc.queryForObject(contains("SUM(royalty_allocation_percent)"),
             eq(BigDecimal.class),eq(12L),eq(11L))).thenReturn(new BigDecimal("80.0000"));
 
