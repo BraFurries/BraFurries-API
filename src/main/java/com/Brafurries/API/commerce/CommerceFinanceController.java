@@ -28,6 +28,11 @@ public class CommerceFinanceController {
         this.settlements=settlements;
     }
 
+    @GetMapping("/sales/available-batches")
+    public List<Map<String,Object>> availableBatches(Authentication auth) {
+        return sales.sellableBatches(auth);
+    }
+
     @GetMapping("/sales")
     public List<Map<String,Object>> sales(Authentication auth) {
         return sales.listSales(auth);
