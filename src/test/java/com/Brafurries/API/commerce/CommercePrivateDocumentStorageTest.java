@@ -47,6 +47,21 @@ class CommercePrivateDocumentStorageTest {
     }
 
     @Test
+    void missingPrivateR2CredentialsFailClosedBeforeNetworkAccess() {
+        var storage = new CommercePrivateDocumentStorage(
+            "https://r2.example.invalid", "private-contracts",
+            "public-media", "", ""
+        );
+        var valid = new MockMultipartFile(
+            "file", "signed.pdf", "application/pdf",
+            "%PDF-1.7\n%%EOF\n".getBytes(StandardCharsets.US_ASCII)
+        );
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE,
+            assertThrows(ResponseStatusException.class,
+                () -> storage.upload(14L, valid)).getStatusCode());
+    }
+
+    @Test
     void refusesObjectKeysOutsideTheArtworkPrefixBeforeReadingAnything() {
         var storage=storage("private-contracts","public-media");
         assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
