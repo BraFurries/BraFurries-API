@@ -280,19 +280,13 @@ public class CommerceSalesService {
     }
 
     static BigDecimal calculateRoyalty(LineSnapshot line,Rights right) {
-        if ("PERCENT_GROSS".equals(right.method())) {
-            if (right.rate()==null) throw conflict("Percentual contratual indefinido");
-            return line.lineGross().multiply(right.rate())
-                .multiply(right.allocation())
-                .divide(new BigDecimal("10000"),2,RoundingMode.HALF_UP);
-        }
-        if ("FIXED_UNIT".equals(right.method())) {
-            if (right.fixedUnit()==null) throw conflict("Valor contratual por unidade indefinido");
-            return right.fixedUnit().multiply(BigDecimal.valueOf(line.quantity()))
-                .multiply(right.allocation())
-                .divide(new BigDecimal("100"),2,RoundingMode.HALF_UP);
-        }
-        throw conflict("Método de royalty não suportado");
+        return switch(right.method()) {
+            case "PERCENT_GROSS" -> CommerceRoyaltyMath.gross(
+                line.lineGross(),right.rate(),right.allocation());
+            case "FIXED_UNIT" -> CommerceRoyaltyMath.fixedUnit(
+                right.fixedUnit(),line.quantity(),right.allocation());
+            default -> throw conflict("Método de royalty não suportado");
+        };
     }
 
     @Transactional
