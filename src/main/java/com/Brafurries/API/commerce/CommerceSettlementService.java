@@ -59,6 +59,7 @@ public class CommerceSettlementService {
         List<Map<String,Object>> existing=jdbc.queryForList("""
             SELECT id,status FROM commerce_settlements
              WHERE artist_user_id=? AND period_year=? AND period_month=?
+             FOR UPDATE
             """,artist,year,month);
         if (!existing.isEmpty()) {
             return new Created(((Number)existing.get(0).get("id")).longValue());
@@ -66,7 +67,7 @@ public class CommerceSettlementService {
         List<Map<String,Object>> events=jdbc.queryForList("""
             SELECT id,amount FROM commerce_royalty_accruals
              WHERE artist_user_id=? AND period_year=? AND period_month=?
-             ORDER BY id
+             ORDER BY id FOR UPDATE
             """,artist,year,month);
         if (events.isEmpty()) throw conflict("Nenhum royalty apurado para o artista neste mês");
         BigDecimal total=BigDecimal.ZERO;
@@ -128,22 +129,27 @@ public class CommerceSettlementService {
         }
         // Validate that every posted accrual is present exactly once, so a
         // draft can never approve partial or stale royalty history.
-        Integer uncovered=jdbc.queryForObject("""
-            SELECT COUNT(*) FROM commerce_royalty_accruals a
+        List<Long> uncovered=jdbc.queryForList("""
+            SELECT a.id FROM commerce_royalty_accruals a
               LEFT JOIN commerce_settlement_items i
                 ON i.accrual_id=a.id AND i.settlement_id=?
              WHERE a.artist_user_id=? AND a.period_year=? AND a.period_month=?
                AND i.accrual_id IS NULL
-            """,Integer.class,statement.id(),statement.artistId(),
+             FOR UPDATE
+            """,Long.class,statement.id(),statement.artistId(),
             statement.year(),statement.month());
-        if (uncovered!=null && uncovered>0) {
+        if (!uncovered.isEmpty()) {
             throw conflict("Existem lançamentos não incluídos no rascunho");
         }
-        BigDecimal total=jdbc.queryForObject("""
-            SELECT COALESCE(SUM(i.amount_snapshot),0)
-              FROM commerce_settlement_items i WHERE i.settlement_id=?
+        List<BigDecimal> itemAmounts=jdbc.queryForList("""
+            SELECT amount_snapshot FROM commerce_settlement_items
+             WHERE settlement_id=? FOR UPDATE
             """,BigDecimal.class,statement.id());
-        if (total==null || total.compareTo(statement.total())!=0) {
+        BigDecimal total=BigDecimal.ZERO;
+        for (BigDecimal lineAmount:itemAmounts) {
+            total=total.add(lineAmount);
+        }
+        if (total.compareTo(statement.total())!=0) {
             throw conflict("A soma dos itens do demonstrativo não confere");
         }
         String status=total.signum()==0?"PAID":"APPROVED";
@@ -189,11 +195,12 @@ public class CommerceSettlementService {
         if (!List.of("APPROVED","PARTIALLY_PAID").contains(statement.status())) {
             throw conflict("O fechamento precisa estar aprovado e com saldo a pagar");
         }
-        BigDecimal paid=jdbc.queryForObject("""
-            SELECT COALESCE(SUM(amount),0) FROM commerce_payments
-             WHERE settlement_id=?
+        List<BigDecimal> paidAmounts=jdbc.queryForList("""
+            SELECT amount FROM commerce_payments
+             WHERE settlement_id=? FOR UPDATE
             """,BigDecimal.class,settlementId);
-        if (paid==null) paid=BigDecimal.ZERO;
+        BigDecimal paid=BigDecimal.ZERO;
+        for (BigDecimal recorded:paidAmounts) paid=paid.add(recorded);
         BigDecimal remaining=statement.total().subtract(paid);
         if (remaining.compareTo(amount)<0) {
             throw conflict("Pagamento excede o saldo pendente do fechamento");
