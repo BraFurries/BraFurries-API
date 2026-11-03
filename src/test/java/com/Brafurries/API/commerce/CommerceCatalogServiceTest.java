@@ -44,8 +44,10 @@ class CommerceCatalogServiceTest {
 
     @Test
     void blocksArtistListWithoutPrivateArtworkPermission() {
-        when(authorization.require(auth,CommercePermission.ARTWORKS_MANAGE))
-            .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
+        when(authorization.resolve(auth)).thenReturn(
+            new CommerceAuthorizationService.Actor(new User(),
+                new CommerceAuthorizationService.Access(false,true,java.util.Set.of()))
+        );
         assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
             ()->catalog.artworks(auth)).getStatusCode());
         verifyNoInteractions(jdbc);
