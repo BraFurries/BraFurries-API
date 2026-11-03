@@ -29,6 +29,7 @@ public class CommerceAccessService {
     public record AccessView(boolean enabled, boolean owner, List<String> permissions) {}
     public record PersonView(int userId, String name, List<String> permissions) {}
     public record RoleView(int roleId, String name, boolean active, List<String> permissions) {}
+    public record PersonCandidate(int userId, String name) {}
 
     @Transactional(readOnly = true)
     public AccessView myAccess(Authentication auth) {
@@ -57,6 +58,33 @@ public class CommerceAccessService {
                     rs.getInt("user_id")),
                 permissionList(rs.getString("permission_codes"))
             ));
+    }
+
+    @Transactional(readOnly = true)
+    public List<PersonCandidate> findEligiblePeople(Authentication auth, String search) {
+        authorization.requireOwner(auth);
+        if (search != null && search.length() > 100) {
+            throw invalid("A pesquisa deve ter no máximo 100 caracteres");
+        }
+        String normalized = search == null ? "" : search.replace("%", "")
+            .replace("_", "").trim();
+        String like = "%" + normalized + "%";
+        return jdbc.query("""
+            SELECT u.id, u.display_name, u.username
+              FROM user_community_status member
+              JOIN users u ON u.id = member.user_id
+             WHERE member.community_id = ?
+               AND member.is_present = 1
+               AND COALESCE(member.banned, 0) = 0
+               AND (LOWER(COALESCE(u.display_name, '')) LIKE LOWER(?)
+                    OR LOWER(COALESCE(u.username, '')) LIKE LOWER(?))
+             ORDER BY COALESCE(u.display_name, u.username, ''), u.id
+             LIMIT 30
+            """, (rs, index) -> new PersonCandidate(
+                rs.getInt("id"),
+                displayName(rs.getString("display_name"),
+                    rs.getString("username"), rs.getInt("id"))
+            ), authorization.officialCommunityId(), like, like);
     }
 
     @Transactional(readOnly = true)
