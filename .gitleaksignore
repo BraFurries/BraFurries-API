@@ -3,3 +3,8 @@
 # response, not a Discord OAuth client ID or credential.
 # Fingerprint is scoped to this commit, path, rule, and line only.
 d9280a1110c803b23849b97509e307479d58d934:src/test/java/com/Brafurries/API/admin/AdminDiscordIdentityClientTest.java:discord-client-id:30
+
+# Reviewed false positives for synthetic test-only UUID idempotency keys.
+# Exact historical commit + path + rule + line; never ignore entire files or generic-api-key globally.
+b594ea3f1dadd9e22f7700cebc582a507199edb6:src/test/java/com/Brafurries/API/commerce/CommerceSettlementServiceTest.java:generic-api-key:31
+77c83549870ae1a473b10a156b4220eaa38167c9:src/test/java/com/Brafurries/API/commerce/CommerceSalesServiceTest.java:generic-api-key:67
