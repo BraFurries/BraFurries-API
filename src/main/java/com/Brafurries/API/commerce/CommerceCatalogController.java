@@ -75,6 +75,11 @@ public class CommerceCatalogController {
         return catalog.createSupplier(auth,request);
     }
 
+    @GetMapping("/suppliers/choices")
+    public List<Map<String,Object>> supplierChoices(Authentication auth) {
+        return catalog.supplierChoices(auth);
+    }
+
     @GetMapping("/products")
     public List<Map<String,Object>> products(Authentication auth) {
         return catalog.products(auth);
