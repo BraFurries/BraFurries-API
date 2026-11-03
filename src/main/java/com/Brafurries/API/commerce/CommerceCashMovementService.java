@@ -87,7 +87,7 @@ public class CommerceCashMovementService {
             Integer exists=jdbc.queryForObject(
                 "SELECT COUNT(*) FROM users WHERE id=?",Integer.class,linkedId);
             if (exists==null || exists!=1) throw invalid("Usuário vinculado não encontrado");
-            if (Set.of("STAFF","COMMUNITY_MEMBER").contains(contributorType)) {
+            if (contributorType!=null && Set.of("STAFF","COMMUNITY_MEMBER").contains(contributorType)) {
                 Integer member=jdbc.queryForObject("""
                     SELECT COUNT(*) FROM user_community_status
                      WHERE user_id=? AND community_id=?
@@ -244,13 +244,13 @@ public class CommerceCashMovementService {
 
         // Costs of production aren't automatically cash outflows: invoice
         // production and payment need not happen in the same period.
-        return Map.of(
-            "year",year,"month",month,
-            "grossSales",salesGross,"processingFees",fees,
-            "netSales",netSales,"otherIncome",miscIncome,
-            "operatingExpenses",expenses,"fundingNonRepayable",nonRepayable,
-            "fundingRepayable",repayable,"artistPayouts",artistPayouts,
-            "netCashMovement",cashChange
+        return Map.ofEntries(
+            Map.entry("year",year),Map.entry("month",month),
+            Map.entry("grossSales",salesGross),Map.entry("processingFees",fees),
+            Map.entry("netSales",netSales),Map.entry("otherIncome",miscIncome),
+            Map.entry("operatingExpenses",expenses),Map.entry("fundingNonRepayable",nonRepayable),
+            Map.entry("fundingRepayable",repayable),Map.entry("artistPayouts",artistPayouts),
+            Map.entry("netCashMovement",cashChange)
         );
     }
 
