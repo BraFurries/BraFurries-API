@@ -31,8 +31,19 @@ public final class CommerceFinanceDtos {
         @Size(max=160) String buyerLabel,
         @NotNull LocalDate soldOn,
         @Size(max=5000) String notes,
-        @Valid @NotEmpty List<SaleLine> items
-    ) {}
+        @Valid @NotEmpty List<SaleLine> items,
+        String paymentMethod,
+        @Size(max=120) String processingProvider,
+        @DecimalMin("0") BigDecimal processingFeePercent,
+        @DecimalMin("0") BigDecimal processingFeeFixed
+    ) {
+        // Legacy/test callers without payment details remain fee-free.
+        public CreateSale(String requestKey,String channel,String externalReference,
+                          String buyerLabel,LocalDate soldOn,String notes,List<SaleLine> items) {
+            this(requestKey,channel,externalReference,buyerLabel,soldOn,notes,
+                 items,"UNSPECIFIED",null,BigDecimal.ZERO,BigDecimal.ZERO);
+        }
+    }
 
     public record CancelSale(@NotBlank @Size(max=500) String reason) {}
 
