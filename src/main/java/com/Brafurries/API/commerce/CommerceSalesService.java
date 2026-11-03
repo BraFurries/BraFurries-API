@@ -71,6 +71,20 @@ public class CommerceSalesService {
         String reference=text(request.externalReference(),120,"Referência",false);
         String buyer=text(request.buyerLabel(),160,"Identificação do comprador",false);
         String notes=text(request.notes(),5000,"Observações",false);
+        String paymentMethod=request.paymentMethod()==null?"UNSPECIFIED":request.paymentMethod();
+        if (!Set.of("UNSPECIFIED","CASH","PIX","CARD_DEBIT","CARD_CREDIT",
+                    "BANK_TRANSFER","BANK_SLIP","OTHER").contains(paymentMethod)) {
+            throw invalid("Forma de recebimento da venda inválida");
+        }
+        String processingProvider=text(request.processingProvider(),120,"Operadora",false);
+        BigDecimal processingRate=request.processingFeePercent()==null
+            ?BigDecimal.ZERO:request.processingFeePercent();
+        if (processingRate.signum()<0 || processingRate.compareTo(new BigDecimal("100"))>0
+            || processingRate.scale()>4) throw invalid("Taxa percentual inválida");
+        processingRate=processingRate.setScale(4,RoundingMode.UNNECESSARY);
+        BigDecimal processingFixed=money(
+            request.processingFeeFixed()==null?BigDecimal.ZERO:request.processingFeeFixed(),
+            "Taxa fixa da venda");
 
         // Normalize inputs BEFORE hashing. A retry with changed values must be
         // rejected even when the client reuses the same UUID.
@@ -81,6 +95,10 @@ public class CommerceSalesService {
         canonical.add(reference);
         canonical.add(buyer);
         canonical.add(notes);
+        canonical.add(paymentMethod);
+        canonical.add(processingProvider);
+        canonical.add(processingRate.toPlainString());
+        canonical.add(processingFixed.toPlainString());
         for (SaleLine input:request.items()) {
             if (input==null || input.batchId()==null || input.batchId()<1
                 || input.quantity()==null || input.quantity()<1 || input.quantity()>1000000) {
@@ -250,15 +268,26 @@ public class CommerceSalesService {
             if (changed!=1) throw conflict("Estoque do lote alterado; atualize os dados");
         }
 
+        // Processing fees reduce cash received, but do not silently alter
+        // PERCENT_GROSS artist royalties or create duplicate expense postings.
+        BigDecimal fee=money(
+            gross.multiply(processingRate).divide(new BigDecimal("100"),2,RoundingMode.HALF_UP)
+                .add(processingFixed),
+            "Taxa da operadora");
+        if (fee.compareTo(gross)>0) throw invalid("Taxa não pode exceder a venda");
+
         long saleId;
         try {
             saleId=support.insert("""
                 INSERT INTO commerce_sales
                     (request_key,request_sha256,channel,external_reference,buyer_label,
-                     sold_on,status,gross_amount,notes,created_by_user_id)
-                VALUES (?,?,?,?,?,?,'CONFIRMED',?,?,?)
+                     sold_on,status,gross_amount,notes,created_by_user_id,
+                     payment_method,processing_provider,processing_fee_percent,
+                     processing_fee_fixed,processing_fee_amount)
+                VALUES (?,?,?,?,?,?,'CONFIRMED',?,?,?,?,?,?,?,?)
                 """,key,fingerprint,channel,reference,buyer,request.soldOn(),
-                gross,notes,actor);
+                gross,notes,actor,paymentMethod,processingProvider,processingRate,
+                processingFixed,fee);
         } catch (DataIntegrityViolationException ex) {
             // Concurrent duplicate request: return a conflict; retrying with the
             // same UUID then returns the existing sale. Never duplicate effects.
@@ -396,7 +425,13 @@ public class CommerceSalesService {
         return jdbc.queryForList("""
             SELECT id,channel,external_reference AS externalReference,
                    buyer_label AS buyerLabel,sold_on AS soldOn,status,
-                   gross_amount AS grossAmount,created_at AS createdAt,
+                   gross_amount AS grossAmount,payment_method AS paymentMethod,
+                   processing_provider AS processingProvider,
+                   processing_fee_percent AS processingFeePercent,
+                   processing_fee_fixed AS processingFeeFixed,
+                   processing_fee_amount AS processingFeeAmount,
+                   net_receipt_amount AS netReceiptAmount,
+                   created_at AS createdAt,
                    cancellation_reason AS cancellationReason
               FROM commerce_sales ORDER BY id DESC LIMIT 500
             """);
