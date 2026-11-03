@@ -12,7 +12,8 @@ public enum CommercePermission {
     SALES_MANAGE,
     FINANCE_VIEW,
     SETTLEMENTS_MANAGE,
-    PAYMENTS_RECORD;
+    PAYMENTS_RECORD,
+    CASHFLOW_MANAGE;
 
     public static CommercePermission parse(String input) {
         try {
