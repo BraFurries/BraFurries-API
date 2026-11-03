@@ -174,27 +174,47 @@ public class CommerceCatalogService {
     }
 
     @Transactional(readOnly = true)
+    public List<Map<String,Object>> supplierChoices(Authentication auth) {
+        authorization.require(auth,CommercePermission.PRODUCTS_MANAGE);
+        return jdbc.queryForList("""
+            SELECT id,name FROM commerce_suppliers WHERE active=1 ORDER BY name,id LIMIT 500
+            """);
+    }
+
+    @Transactional(readOnly = true)
     public List<Map<String,Object>> products(Authentication auth) {
         authorization.require(auth, CommercePermission.PRODUCTS_MANAGE);
         return jdbc.queryForList("""
-            SELECT id,sku,name,description,estimated_unit_cost AS estimatedUnitCost,
-                   suggested_price AS suggestedPrice,active,created_at AS createdAt
-              FROM commerce_products ORDER BY id DESC LIMIT 500
+            SELECT product.id,product.sku,product.name,product.description,
+                   product.estimated_unit_cost AS estimatedUnitCost,
+                   product.suggested_price AS suggestedPrice,
+                   product.preferred_supplier_id AS preferredSupplierId,
+                   supplier.name AS preferredSupplierName,
+                   product.active,product.created_at AS createdAt
+              FROM commerce_products product
+              LEFT JOIN commerce_suppliers supplier
+                ON supplier.id=product.preferred_supplier_id
+             ORDER BY product.id DESC LIMIT 500
             """);
     }
 
     @Transactional
     public Created createProduct(Authentication auth, CreateProduct input) {
         User actor = authorization.require(auth, CommercePermission.PRODUCTS_MANAGE).user();
+        if (input.preferredSupplierId()!=null) {
+            requireExistsActive("commerce_suppliers",input.preferredSupplierId(),"Fornecedor");
+        }
         try {
             long id = insert("""
                 INSERT INTO commerce_products
-                    (sku,name,description,estimated_unit_cost,suggested_price,created_by_user_id)
-                VALUES (?,?,?,?,?,?)
+                    (sku,name,description,estimated_unit_cost,suggested_price,
+                     preferred_supplier_id,created_by_user_id)
+                VALUES (?,?,?,?,?,?,?)
                 """, text(input.sku(),80,"SKU"),text(input.name(),180,"Produto"),
                 optional(input.description(),5000),
                 money(input.estimatedUnitCost(),"Custo estimado"),
-                money(input.suggestedPrice(),"Preço sugerido"),actor.getId());
+                money(input.suggestedPrice(),"Preço sugerido"),
+                input.preferredSupplierId(),actor.getId());
             audit(actor,"PRODUCT",id,"CREATED");
             return new Created(id);
         } catch (DataIntegrityViolationException ex) {
