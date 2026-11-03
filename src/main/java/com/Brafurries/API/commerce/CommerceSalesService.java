@@ -42,7 +42,7 @@ public class CommerceSalesService {
         this.jdbc=jdbc;
     }
 
-    private record Batch(long id,long productId,int quantity,BigDecimal totalCost) {}
+    private record Batch(long id,long productId,int quantity,BigDecimal totalCost,LocalDate producedOn) {}
     private record Rights(
         long artworkId,int artistId,Long contractId,String method,
         BigDecimal rate,BigDecimal fixedUnit,BigDecimal allocation,
@@ -205,16 +205,19 @@ public class CommerceSalesService {
         for (SaleLine item:lines.values()) {
             long productId=batchProducts.get(item.batchId());
             List<Batch> matched=jdbc.query("""
-                SELECT id,product_id,quantity,total_cost
+                SELECT id,product_id,quantity,total_cost,produced_on
                   FROM commerce_production_batches WHERE id=? FOR UPDATE
                 """,(rs,index)->new Batch(
                     rs.getLong("id"),rs.getLong("product_id"),rs.getInt("quantity"),
-                    rs.getBigDecimal("total_cost")
+                    rs.getBigDecimal("total_cost"),rs.getObject("produced_on",LocalDate.class)
                 ),item.batchId());
             if (matched.isEmpty() || matched.get(0).productId()!=productId) {
                 throw conflict("Lote de produção alterado durante a operação");
             }
             Batch batch=matched.get(0);
+            if (batch.producedOn().isAfter(request.soldOn())) {
+                throw conflict("Não é possível vender unidades antes da produção do lote");
+            }
             Long sold=jdbc.queryForObject("""
                 SELECT COALESCE(SUM(si.quantity),0)
                   FROM commerce_sale_items si
@@ -347,6 +350,29 @@ public class CommerceSalesService {
              WHERE id=? AND status='CONFIRMED'
             """,actor,reasonText,saleId);
         support.audit(actor,"SALE",saleId,"CANCELLED");
+    }
+
+    @Transactional(readOnly=true)
+    public List<Map<String,Object>> sellableBatches(Authentication auth) {
+        authorization.require(auth,CommercePermission.SALES_MANAGE);
+        // No supplier contacts or production costs are exposed to sales staff.
+        return jdbc.queryForList("""
+            SELECT batch.id AS batchId,
+                   batch.product_id AS productId,product.name AS productName,
+                   product.sku,product.suggested_price AS suggestedPrice,
+                   batch.quantity-COALESCE(SUM(
+                       CASE WHEN sale.status='CONFIRMED' THEN item.quantity ELSE 0 END
+                   ),0) AS availableUnits
+              FROM commerce_production_batches batch
+              JOIN commerce_products product ON product.id=batch.product_id
+              LEFT JOIN commerce_sale_items item ON item.production_batch_id=batch.id
+              LEFT JOIN commerce_sales sale ON sale.id=item.sale_id
+             WHERE product.active=1
+             GROUP BY batch.id,batch.product_id,product.name,product.sku,
+                      product.suggested_price,batch.quantity
+            HAVING availableUnits > 0
+             ORDER BY product.name,batch.id LIMIT 500
+            """);
     }
 
     @Transactional(readOnly=true)
