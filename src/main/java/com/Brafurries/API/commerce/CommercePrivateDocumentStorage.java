@@ -25,6 +25,7 @@ import software.amazon.awssdk.services.s3.model.S3Exception;
 /**
  * Contract PDFs belong to an isolated PRIVATE bucket, never R2's public
  * image bucket. No public URL is returned, persisted or generated.
+ * Uses separately scoped R2 credentials, never the public media key pair.
  */
 @Service
 public class CommercePrivateDocumentStorage {
@@ -39,8 +40,8 @@ public class CommercePrivateDocumentStorage {
         @Value("${app.storage.r2.endpoint:}") String endpoint,
         @Value("${app.commerce.private-r2-bucket:}") String bucket,
         @Value("${app.storage.r2.bucket:}") String publicBucket,
-        @Value("${app.storage.r2.access-key:}") String accessKey,
-        @Value("${app.storage.r2.secret-key:}") String secretKey
+        @Value("${app.commerce.private-r2-access-key:}") String accessKey,
+        @Value("${app.commerce.private-r2-secret-key:}") String secretKey
     ) {
         this.endpoint = endpoint;
         this.bucket = bucket;
