@@ -65,7 +65,7 @@ public class CommerceSalesService {
         }
         String key=requestId(request.requestKey());
         String channel=request.channel();
-        if (!Set.of("EVENT","DIRECT","ONLINE","OTHER").contains(channel)) {
+        if (channel==null || !Set.of("EVENT","DIRECT","ONLINE","OTHER").contains(channel)) {
             throw invalid("Canal de venda inválido");
         }
         String reference=text(request.externalReference(),120,"Referência",false);
