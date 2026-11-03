@@ -90,7 +90,14 @@ public class CommerceCatalogService {
 
     @Transactional(readOnly = true)
     public List<Map<String,Object>> artworks(Authentication auth) {
-        authorization.require(auth, CommercePermission.ARTWORKS_MANAGE);
+        // Contract managers need to select an existing artwork even without
+        // the right to register or modify artworks.
+        var access = authorization.resolve(auth).access();
+        if (!access.has(CommercePermission.ARTWORKS_MANAGE)
+            && !access.has(CommercePermission.CONTRACTS_MANAGE)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                "Sem autorização para consultar as artes");
+        }
         return jdbc.queryForList("""
             SELECT art.id,art.title,art.description,art.artist_user_id AS artistUserId,
                    COALESCE(u.display_name,u.username,CONCAT('Usuário ',u.id)) AS artistName,
@@ -248,7 +255,7 @@ public class CommerceCatalogService {
         if (input.quantity()==null || input.quantity()<=0 || input.quantity()>10000000) {
             throw invalid("A quantidade do lote deve ser positiva e não exceder 10 milhões");
         }
-        if (input.producedOn()==null || input.producedOn().isAfter(LocalDate.now())) {
+        if (input.producedOn()==null || input.producedOn().isAfter(LocalDate.now(java.time.ZoneId.of("America/Sao_Paulo")))) {
             throw invalid("Informe uma data de produção válida, sem data futura");
         }
         BigDecimal unit=money(input.unitCost(),"Custo unitário");
