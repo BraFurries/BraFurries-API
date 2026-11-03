@@ -270,11 +270,8 @@ public class CommerceSalesService {
 
         // Processing fees reduce cash received, but do not silently alter
         // PERCENT_GROSS artist royalties or create duplicate expense postings.
-        BigDecimal fee=money(
-            gross.multiply(processingRate).divide(new BigDecimal("100"),2,RoundingMode.HALF_UP)
-                .add(processingFixed),
-            "Taxa da operadora");
-        if (fee.compareTo(gross)>0) throw invalid("Taxa não pode exceder a venda");
+        BigDecimal fee=CommerceProcessingFee.calculate(
+            gross,processingRate,processingFixed);
 
         long saleId;
         try {
