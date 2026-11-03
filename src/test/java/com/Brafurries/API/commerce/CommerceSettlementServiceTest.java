@@ -141,8 +141,9 @@ class CommerceSettlementServiceTest {
     @Test
     void paymentCannotExceedOutstandingStatementBalance() {
         givenStatement("APPROVED",new BigDecimal("100.00"));
-        when(jdbc.queryForObject(contains("FROM commerce_payments"),
-            eq(BigDecimal.class),eq(90L))).thenReturn(new BigDecimal("75.00"));
+        when(jdbc.queryForList(contains("SELECT amount FROM commerce_payments"),
+            eq(BigDecimal.class),eq(90L)))
+            .thenReturn(List.of(new BigDecimal("75.00")));
 
         assertEquals(HttpStatus.CONFLICT,
             assertThrows(ResponseStatusException.class,
