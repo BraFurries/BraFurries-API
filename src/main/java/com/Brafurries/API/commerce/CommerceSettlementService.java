@@ -1,0 +1,284 @@
+package com.Brafurries.API.commerce;
+
+import static com.Brafurries.API.commerce.CommerceFinanceSupport.*;
+import static com.Brafurries.API.commerce.CommerceFinanceDtos.*;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.YearMonth;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.core.Authentication;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+/**
+ * Monthly royalty statements are frozen per artist and São Paulo business month.
+ * Payments are manual ledger entries; this service NEVER initiates transfers.
+ */
+@Service
+public class CommerceSettlementService {
+    private final CommerceAuthorizationService authorization;
+    private final CommerceFinanceSupport support;
+    private final JdbcTemplate jdbc;
+
+    public CommerceSettlementService(
+        CommerceAuthorizationService authorization,
+        CommerceFinanceSupport support,
+        JdbcTemplate jdbc
+    ) {
+        this.authorization=authorization;
+        this.support=support;
+        this.jdbc=jdbc;
+    }
+
+    private record Statement(long id,int artistId,int year,int month,
+                             String status,BigDecimal total) {}
+
+    @Transactional
+    public Created createDraft(Authentication auth,CreateStatement input) {
+        int actor=authorization.require(auth,CommercePermission.SETTLEMENTS_MANAGE).user().getId();
+        authorization.require(auth,CommercePermission.FINANCE_VIEW);
+        if (input==null || input.artistUserId()==null ||
+            input.year()==null || input.month()==null) {
+            throw invalid("Artista e período obrigatórios");
+        }
+        int year=input.year(), month=input.month(), artist=input.artistUserId();
+        if (artist<1 || year<2000 || year>2200 || month<1 || month>12) {
+            throw invalid("Artista ou período inválido");
+        }
+        if (!YearMonth.of(year,month).isBefore(currentMonth())) {
+            throw conflict("Só é possível fechar um mês já encerrado");
+        }
+        support.lockPeriod(artist,year,month);
+        List<Map<String,Object>> existing=jdbc.queryForList("""
+            SELECT id,status FROM commerce_settlements
+             WHERE artist_user_id=? AND period_year=? AND period_month=?
+            """,artist,year,month);
+        if (!existing.isEmpty()) {
+            return new Created(((Number)existing.get(0).get("id")).longValue());
+        }
+        List<Map<String,Object>> events=jdbc.queryForList("""
+            SELECT id,amount FROM commerce_royalty_accruals
+             WHERE artist_user_id=? AND period_year=? AND period_month=?
+             ORDER BY id
+            """,artist,year,month);
+        if (events.isEmpty()) throw conflict("Nenhum royalty apurado para o artista neste mês");
+        BigDecimal total=BigDecimal.ZERO;
+        for (Map<String,Object> event:events) {
+            total=total.add((BigDecimal)event.get("amount"));
+        }
+        if (total.signum()<0) {
+            throw conflict("Saldo negativo requer análise antes do fechamento");
+        }
+        total=signedMoney(total,"Total do fechamento");
+        long id;
+        try {
+            id=support.insert("""
+                INSERT INTO commerce_settlements
+                    (artist_user_id,period_year,period_month,status,
+                     total_amount,created_by_user_id)
+                VALUES (?, ?, ?, 'DRAFT', ?, ?)
+                """,artist,year,month,total,actor);
+        } catch (DataIntegrityViolationException ex) {
+            throw conflict("Este artista já possui demonstrativo para o mês");
+        }
+        for (Map<String,Object> event:events) {
+            jdbc.update("""
+                INSERT INTO commerce_settlement_items
+                    (settlement_id,accrual_id,amount_snapshot) VALUES (?,?,?)
+                """,id,((Number)event.get("id")).longValue(),event.get("amount"));
+        }
+        support.audit(actor,"SETTLEMENT",id,"DRAFT_CREATED");
+        return new Created(id);
+    }
+
+    @Transactional
+    public void discardDraft(Authentication auth,long settlementId) {
+        int actor=authorization.require(auth,CommercePermission.SETTLEMENTS_MANAGE).user().getId();
+        authorization.require(auth,CommercePermission.FINANCE_VIEW);
+        Statement statement=loadStatement(settlementId,false);
+        support.lockPeriod(statement.artistId(),statement.year(),statement.month());
+        statement=loadStatement(settlementId,true);
+        if (!"DRAFT".equals(statement.status())) {
+            throw conflict("Somente rascunhos podem ser descartados");
+        }
+        jdbc.update("DELETE FROM commerce_settlement_items WHERE settlement_id=?",settlementId);
+        jdbc.update("DELETE FROM commerce_settlements WHERE id=?",settlementId);
+        support.audit(actor,"SETTLEMENT",settlementId,"DRAFT_DISCARDED");
+    }
+
+    @Transactional
+    public void approve(Authentication auth,long settlementId) {
+        int actor=authorization.require(auth,CommercePermission.SETTLEMENTS_MANAGE).user().getId();
+        authorization.require(auth,CommercePermission.FINANCE_VIEW);
+        Statement statement=loadStatement(settlementId,false);
+        support.lockPeriod(statement.artistId(),statement.year(),statement.month());
+        statement=loadStatement(settlementId,true);
+        if (!"DRAFT".equals(statement.status())) {
+            if (List.of("APPROVED","PARTIALLY_PAID","PAID").contains(statement.status())) {
+                return; // idempotent repeated approval
+            }
+            throw conflict("O demonstrativo não pode ser aprovado neste estado");
+        }
+        // Validate that every posted accrual is present exactly once, so a
+        // draft can never approve partial or stale royalty history.
+        Integer uncovered=jdbc.queryForObject("""
+            SELECT COUNT(*) FROM commerce_royalty_accruals a
+              LEFT JOIN commerce_settlement_items i
+                ON i.accrual_id=a.id AND i.settlement_id=?
+             WHERE a.artist_user_id=? AND a.period_year=? AND a.period_month=?
+               AND i.accrual_id IS NULL
+            """,Integer.class,statement.id(),statement.artistId(),
+            statement.year(),statement.month());
+        if (uncovered!=null && uncovered>0) {
+            throw conflict("Existem lançamentos não incluídos no rascunho");
+        }
+        BigDecimal total=jdbc.queryForObject("""
+            SELECT COALESCE(SUM(i.amount_snapshot),0)
+              FROM commerce_settlement_items i WHERE i.settlement_id=?
+            """,BigDecimal.class,statement.id());
+        if (total==null || total.compareTo(statement.total())!=0) {
+            throw conflict("A soma dos itens do demonstrativo não confere");
+        }
+        String status=total.signum()==0?"PAID":"APPROVED";
+        jdbc.update("""
+            UPDATE commerce_settlements SET status=?,
+                approved_by_user_id=?,approved_at=CURRENT_TIMESTAMP(6)
+             WHERE id=? AND status='DRAFT'
+            """,status,actor,settlementId);
+        support.audit(actor,"SETTLEMENT",settlementId,"APPROVED");
+    }
+
+    @Transactional
+    public Created recordPayment(Authentication auth,long settlementId,RecordPayment payment) {
+        int actor=authorization.require(auth,CommercePermission.PAYMENTS_RECORD).user().getId();
+        authorization.require(auth,CommercePermission.FINANCE_VIEW);
+        if (payment==null) throw invalid("Pagamento obrigatório");
+        String key=requestId(payment.requestKey());
+        BigDecimal amount=money(payment.amount(),"Valor do pagamento");
+        if (amount.signum()==0) throw invalid("O pagamento precisa ser maior que zero");
+        if (payment.paidOn()==null || payment.paidOn().isAfter(today())
+            || payment.paidOn().getYear()<2000) throw invalid("Data do pagamento inválida");
+        String reference=text(payment.externalReference(),120,"Referência da transferência",true);
+        String notes=text(payment.notes(),5000,"Observações",false);
+
+        List<Map<String,Object>> prior=jdbc.queryForList("""
+            SELECT id,settlement_id,amount,paid_on,external_reference,notes
+              FROM commerce_payments WHERE request_key=?
+            """,key);
+        if (!prior.isEmpty()) {
+            Map<String,Object> row=prior.get(0);
+            LocalDate paid=((java.sql.Date)row.get("paid_on")).toLocalDate();
+            if (((Number)row.get("settlement_id")).longValue()!=settlementId
+                || ((BigDecimal)row.get("amount")).compareTo(amount)!=0
+                || !paid.equals(payment.paidOn())
+                || !reference.equals(row.get("external_reference"))
+                || !java.util.Objects.equals(notes,row.get("notes"))) {
+                throw conflict("A chave do pagamento já foi usada com outros dados");
+            }
+            return new Created(((Number)row.get("id")).longValue());
+        }
+
+        Statement statement=loadStatement(settlementId,true);
+        if (!List.of("APPROVED","PARTIALLY_PAID").contains(statement.status())) {
+            throw conflict("O fechamento precisa estar aprovado e com saldo a pagar");
+        }
+        BigDecimal paid=jdbc.queryForObject("""
+            SELECT COALESCE(SUM(amount),0) FROM commerce_payments
+             WHERE settlement_id=?
+            """,BigDecimal.class,settlementId);
+        if (paid==null) paid=BigDecimal.ZERO;
+        BigDecimal remaining=statement.total().subtract(paid);
+        if (remaining.compareTo(amount)<0) {
+            throw conflict("Pagamento excede o saldo pendente do fechamento");
+        }
+        long id;
+        try {
+            id=support.insert("""
+                INSERT INTO commerce_payments
+                    (settlement_id,request_key,amount,paid_on,external_reference,
+                     notes,recorded_by_user_id)
+                VALUES (?,?,?,?,?,?,?)
+                """,settlementId,key,amount,payment.paidOn(),reference,notes,actor);
+        } catch (DataIntegrityViolationException ex) {
+            throw conflict("Transferência já registrada. Confira a referência ou repita o mesmo UUID.");
+        }
+        String newStatus=remaining.compareTo(amount)==0?"PAID":"PARTIALLY_PAID";
+        jdbc.update("""
+            UPDATE commerce_settlements SET status=? WHERE id=?
+            """,newStatus,settlementId);
+        support.audit(actor,"PAYMENT",id,"RECORDED");
+        return new Created(id);
+    }
+
+    @Transactional(readOnly=true)
+    public List<Map<String,Object>> listStatements(Authentication auth,int year,int month) {
+        authorization.require(auth,CommercePermission.FINANCE_VIEW);
+        if (year<2000 || year>2200 || month<1 || month>12) throw invalid("Período inválido");
+        return jdbc.queryForList("""
+            SELECT statement.id,statement.artist_user_id AS artistUserId,
+                   COALESCE(u.display_name,u.username,
+                       CONCAT('Usuário ',u.id)) AS artistName,
+                   statement.period_year AS periodYear,
+                   statement.period_month AS periodMonth,
+                   statement.status,statement.total_amount AS totalAmount,
+                   (SELECT COALESCE(SUM(payment.amount),0)
+                      FROM commerce_payments payment
+                     WHERE payment.settlement_id=statement.id) AS paidAmount,
+                   statement.created_at AS createdAt,
+                   statement.approved_at AS approvedAt
+              FROM commerce_settlements statement
+              JOIN users u ON u.id=statement.artist_user_id
+             WHERE statement.period_year=? AND statement.period_month=?
+             ORDER BY statement.artist_user_id LIMIT 500
+            """,year,month);
+    }
+
+    @Transactional(readOnly=true)
+    public List<Map<String,Object>> statementItems(Authentication auth,long settlementId) {
+        authorization.require(auth,CommercePermission.FINANCE_VIEW);
+        return jdbc.queryForList("""
+            SELECT item.accrual_id AS accrualId,item.amount_snapshot AS amount,
+                   royalty.artwork_id AS artworkId,
+                   royalty.contract_id AS contractId,
+                   royalty.royalty_method_snapshot AS royaltyMethod,
+                   royalty.event_kind AS eventKind,
+                   saleitem.sale_id AS saleId
+              FROM commerce_settlement_items item
+              JOIN commerce_royalty_accruals royalty ON royalty.id=item.accrual_id
+              JOIN commerce_sale_items saleitem ON saleitem.id=royalty.sale_item_id
+             WHERE item.settlement_id=? ORDER BY item.accrual_id
+            """,settlementId);
+    }
+
+    @Transactional(readOnly=true)
+    public List<Map<String,Object>> payments(Authentication auth,long settlementId) {
+        authorization.require(auth,CommercePermission.FINANCE_VIEW);
+        return jdbc.queryForList("""
+            SELECT id,amount,paid_on AS paidOn,external_reference AS externalReference,
+                   notes,created_at AS createdAt
+              FROM commerce_payments WHERE settlement_id=?
+             ORDER BY id
+            """,settlementId);
+    }
+
+    private Statement loadStatement(long id,boolean lock) {
+        List<Statement> records=jdbc.query("""
+            SELECT id,artist_user_id,period_year,period_month,status,total_amount
+              FROM commerce_settlements WHERE id=?
+            """+(lock?" FOR UPDATE":""),
+            (rs,index)->new Statement(
+                rs.getLong("id"),rs.getInt("artist_user_id"),rs.getInt("period_year"),
+                rs.getInt("period_month"),rs.getString("status"),
+                rs.getBigDecimal("total_amount")
+            ),id);
+        if(records.isEmpty()) throw missing("Demonstrativo não encontrado");
+        return records.get(0);
+    }
+}
