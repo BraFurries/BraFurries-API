@@ -107,8 +107,10 @@ class CommerceSalesServiceTest {
             assertThrows(ResponseStatusException.class,
                 () -> service.cancelSale(auth,23L,"Cliente desistiu")).getStatusCode());
         verify(support).lockPeriod(13,2025,12);
-        verify(jdbc,never()).update(contains("INSERT INTO commerce_royalty_accruals"),any());
-        verify(jdbc,never()).update(contains("UPDATE commerce_sales"),any(),any(),any());
+        verify(jdbc,never()).update(contains("INSERT INTO commerce_royalty_accruals"),
+            any(Object[].class));
+        verify(jdbc,never()).update(contains("UPDATE commerce_sales"),
+            any(Object[].class));
     }
 
     @Test
