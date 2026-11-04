@@ -350,21 +350,70 @@ public class AdminPartnersService {
     }
 
     private void replaceExternalLinks(Partner partner, List<PartnerExternalLinkItem> links) {
-        partner.getExternalLinks().clear();
-        if (links == null) {
-            return;
-        }
-        for (PartnerExternalLinkItem item : links) {
-            if (item == null || isBlank(item.url())) {
-                continue;
+        // Validate before mutating the managed entity. Database also enforces
+        // one selected homepage destination per partner through a unique key.
+        List<PartnerExternalLinkItem> normalized = new java.util.ArrayList<>();
+        int primaryCount = 0;
+        if (links != null) {
+            for (PartnerExternalLinkItem item : links) {
+                if (item == null) {
+                    continue;
+                }
+                if (isBlank(item.url())) {
+                    if (item.primary()) {
+                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Link principal precisa de uma URL");
+                    }
+                    continue; // Ignore blank rows from the form.
+                }
+                String url = validateHttpLink(item.url());
+                String type = defaultValue(item.type(), "website").trim().toLowerCase(Locale.ROOT);
+                String label = trimToNull(item.label());
+                if (type.isBlank() || type.length() > 32 || (label != null && label.length() > 128)) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tipo ou rótulo de link inválido");
+                }
+                if (item.primary()) {
+                    primaryCount++;
+                    if (primaryCount > 1) {
+                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Selecione apenas um link principal");
+                    }
+                }
+                normalized.add(new PartnerExternalLinkItem(type, label, url, item.primary()));
             }
+        }
+
+        partner.getExternalLinks().clear();
+        if (partner.getId() != null) {
+            // Hibernate inserts may precede orphan removals. Remove the old rows
+            // first so the generated unique index cannot reject a valid edit.
+            partnerRepository.flush();
+        }
+        for (PartnerExternalLinkItem item : normalized) {
             PartnerExternalLink link = new PartnerExternalLink();
             link.setPartner(partner);
-            link.setType(defaultValue(item.type(), "website").trim().toLowerCase(Locale.ROOT));
-            link.setLabel(trimToNull(item.label()));
-            link.setUrl(item.url().trim());
+            link.setType(item.type());
+            link.setLabel(item.label());
+            link.setUrl(item.url());
+            link.setPrimary(item.primary());
             partner.getExternalLinks().add(link);
         }
+    }
+
+    private String validateHttpLink(String rawUrl) {
+        String url = rawUrl.trim();
+        if (url.length() > 1024) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "URL de link muito longa");
+        }
+        try {
+            java.net.URI parsed = java.net.URI.create(url);
+            String scheme = parsed.getScheme();
+            if (scheme != null && ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
+                && parsed.getHost() != null && parsed.getUserInfo() == null) {
+                return url;
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Invalid external URLs must not become clickable public links.
+        }
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Link externo precisa de URL HTTP ou HTTPS válida");
     }
 
     private PartnerLinkedResource validateAndNormalizeTarget(String category, String type, PartnerLinkedResource resource) {
@@ -531,7 +580,7 @@ public class AdminPartnersService {
             ),
             partner.getExternalLinks().stream()
                 .sorted(Comparator.comparing(PartnerExternalLink::getId, Comparator.nullsLast(Integer::compareTo)))
-                .map(link -> new PartnerExternalLinkItem(link.getType(), link.getLabel(), link.getUrl()))
+                .map(link -> new PartnerExternalLinkItem(link.getType(), link.getLabel(), link.getUrl(), link.isPrimary()))
                 .toList(),
             metrics == null ? 0 : safeLong(metrics.getClicks()),
             metrics == null ? 0 : safeLong(metrics.getInvites()),

@@ -26,6 +26,14 @@ public interface PartnerRepository extends JpaRepository<Partner, Integer> {
     @Query("SELECT p FROM Partner p WHERE p.id = :id")
     Optional<Partner> findWithDetailsById(@Param("id") Integer id);
 
+    @EntityGraph(attributePaths = {"externalLinks"})
+    @Query("""
+        SELECT DISTINCT p FROM Partner p
+        WHERE LOWER(p.status) = 'active'
+        ORDER BY p.name ASC, p.id ASC
+        """)
+    List<Partner> findActivePublicPartners();
+
     boolean existsBySlug(String slug);
 
     long countByStatusIgnoreCase(String status);
