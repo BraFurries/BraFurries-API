@@ -1,5 +1,10 @@
 package com.Brafurries.API.commerce;
 
+import com.Brafurries.API.platform.PlatformAuthorizationService;
+import com.Brafurries.API.platform.PlatformAccessService;
+import com.Brafurries.API.platform.PlatformPermission;
+
+
 import static com.Brafurries.API.commerce.CommerceFinanceDtos.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -25,7 +30,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
 class CommerceSettlementServiceTest {
-    @Mock CommerceAuthorizationService authorization;
+    @Mock PlatformAuthorizationService authorization;
     @Mock CommerceFinanceSupport support;
     @Mock JdbcTemplate jdbc;
     @Mock Authentication auth;
@@ -37,8 +42,8 @@ class CommerceSettlementServiceTest {
         service=new CommerceSettlementService(authorization,support,jdbc);
         User owner=new User();owner.setId(2);
         lenient().when(authorization.require(eq(auth),any())).thenReturn(
-            new CommerceAuthorizationService.Actor(owner,
-                new CommerceAuthorizationService.Access(true,true,Set.of()))
+            new PlatformAuthorizationService.Actor(owner,
+                new PlatformAuthorizationService.Access(true,true,Set.of()))
         );
     }
 
@@ -89,7 +94,7 @@ class CommerceSettlementServiceTest {
 
     @Test
     void managerCannotCreateStatementWithoutFinanceView() {
-        when(authorization.require(auth,CommercePermission.FINANCE_VIEW))
+        when(authorization.require(auth,PlatformPermission.FINANCE_VIEW))
             .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
         assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
             ()->service.createDraft(auth,new CreateStatement(11,2025,12)))
@@ -168,7 +173,7 @@ class CommerceSettlementServiceTest {
 
     @Test
     void onlyFinanceViewMayReadStatementsAndSensitivePaymentHistory() {
-        when(authorization.require(auth,CommercePermission.FINANCE_VIEW))
+        when(authorization.require(auth,PlatformPermission.FINANCE_VIEW))
             .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
         assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
             ()->service.listStatements(auth,2025,12)).getStatusCode());
