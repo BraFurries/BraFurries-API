@@ -105,6 +105,10 @@ public class SecurityConfig {
                 .requestMatchers("/user/**").authenticated()
                 .requestMatchers("/events/**").authenticated()
                 .requestMatchers("/third-party/**").hasAnyAuthority("CLIENT_PARTNER", "CLIENT_BOT", "CLIENT_SERVICE", "CLIENT_INTERNAL")
+                // Partner access may be delegated independently of the global
+                // ADMIN role. The controller applies method-level authorization
+                // using the owner-approved official BraFurries permission grant.
+                .requestMatchers("/admin/partners", "/admin/partners/**").authenticated()
                 .requestMatchers("/admin/**").hasRole("ADMIN")
                 .anyRequest().authenticated()
             )
