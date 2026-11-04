@@ -139,6 +139,30 @@ public class AdminPartnersService {
         return toItem(partner, metrics, representativesByUser(List.of(partner)));
     }
 
+    /**
+     * Minimal directory for delegated partner managers. This does not return
+     * email, contact information, roles, ban status or other admin-only fields.
+     */
+    @Transactional(readOnly = true)
+    public List<PartnerRepresentative> findRepresentatives(String search) {
+        String normalized = search == null ? "" : search.trim()
+            .replace("%", "").replace("_", "");
+        if (normalized.length() > 80) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Busca muito longa");
+        }
+        if (normalized.length() < 2) return List.of();
+
+        return userRepository.searchPartnerRepresentatives(normalized, PageRequest.of(0, 20))
+            .getContent().stream()
+            .map(user -> new PartnerRepresentative(
+                user.getId(),
+                coalesce(user.getDisplayName(), user.getUsername(), "Usuário " + user.getId()),
+                user.getProfileImageUrl(),
+                null, null, null
+            ))
+            .toList();
+    }
+
     @Transactional(readOnly = true)
     public List<PartnerLinkCandidate> listLinkableResources(String category, String search, Integer limit) {
         String normalizedCategory = normalizeAndValidate(category, CATEGORIES, "Categoria invalida");
