@@ -230,6 +230,8 @@ jobs:
             "$moderation_dir/V20261029_003__allow_repeated_user_warnings.sql" \
             "$moderation_dir/V20261029_004__add_user_ban_reason_details.sql" \
             >> src/test/resources/recruitment_schema.sql
+          partner_migration=".ci/partner-database/flyway/sql/versioned/V20261104_001__partner_external_link_primary.sql"
+          test -s "$partner_migration"
           cat "$partner_migration" >> src/test/resources/recruitment_schema.sql
           ./mvnw -B -Dtest=RecruitmentDraftJdbcMariaDbIntegrationTest,RecruitmentStageEditorJdbcMariaDbIntegrationTest,RecruitmentPublicationJdbcMariaDbIntegrationTest,RecruitmentCandidateJdbcMariaDbIntegrationTest,RecruitmentTrackingJdbcMariaDbIntegrationTest,RecruitmentHumanReviewJdbcMariaDbIntegrationTest,RecruitmentStageDecisionJdbcMariaDbIntegrationTest,RecruitmentDecisionPolicyJdbcMariaDbIntegrationTest,RecruitmentDecisionDeskJdbcMariaDbIntegrationTest,RecruitmentStageVotingJdbcMariaDbIntegrationTest,RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest,RecruitmentObjectiveGradeJdbcMariaDbIntegrationTest test
 
