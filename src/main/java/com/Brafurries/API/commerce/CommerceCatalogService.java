@@ -1,5 +1,8 @@
 package com.Brafurries.API.commerce;
 
+import com.Brafurries.API.platform.PlatformAuthorizationService;
+import com.Brafurries.API.platform.PlatformPermission;
+
 import static com.Brafurries.API.commerce.CommerceCatalogDtos.*;
 
 import com.Brafurries.API.entity.user.User;
@@ -25,7 +28,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 /**
  * BRL catalog operations exclusive to BraFurries. All reads and writes verify
- * private CommercePermission, never CommunityCapability/CommunityAdmin.
+ * private PlatformPermission, never CommunityCapability/CommunityAdmin.
  */
 @Service
 public class CommerceCatalogService {
@@ -37,12 +40,12 @@ public class CommerceCatalogService {
         "NONE", "PERCENT_GROSS", "PERCENT_NET", "FIXED_UNIT", "FIXED_MONTH"
     );
 
-    private final CommerceAuthorizationService authorization;
+    private final PlatformAuthorizationService authorization;
     private final CommercePrivateDocumentStorage documents;
     private final JdbcTemplate jdbc;
 
     public CommerceCatalogService(
-        CommerceAuthorizationService authorization,
+        PlatformAuthorizationService authorization,
         CommercePrivateDocumentStorage documents,
         JdbcTemplate jdbc
     ) {
@@ -53,7 +56,7 @@ public class CommerceCatalogService {
 
     @Transactional(readOnly = true)
     public List<Map<String,Object>> templates(Authentication auth) {
-        authorization.require(auth, CommercePermission.CONTRACTS_MANAGE);
+        authorization.require(auth, PlatformPermission.CONTRACTS_MANAGE);
         return jdbc.queryForList("""
             SELECT id,name,description,modality,royalty_method AS royaltyMethod,
                    royalty_percent AS royaltyPercent,royalty_fixed_amount AS royaltyFixedAmount,
@@ -64,7 +67,7 @@ public class CommerceCatalogService {
 
     @Transactional
     public Created createTemplate(Authentication auth, CreateTemplate input) {
-        User actor = authorization.require(auth, CommercePermission.CONTRACTS_MANAGE).user();
+        User actor = authorization.require(auth, PlatformPermission.CONTRACTS_MANAGE).user();
         String modality = requireCode(input.modality(), MODALITIES, "Modalidade");
         String method = requireCode(input.royaltyMethod(), METHODS, "Método de repasse");
         BigDecimal percentage = input.royaltyPercent() == null
@@ -93,8 +96,8 @@ public class CommerceCatalogService {
         // Contract managers need to select an existing artwork even without
         // the right to register or modify artworks.
         var access = authorization.resolve(auth).access();
-        if (!access.has(CommercePermission.ARTWORKS_MANAGE)
-            && !access.has(CommercePermission.CONTRACTS_MANAGE)) {
+        if (!access.has(PlatformPermission.ARTWORKS_MANAGE)
+            && !access.has(PlatformPermission.CONTRACTS_MANAGE)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                 "Sem autorização para consultar as artes");
         }
@@ -109,7 +112,7 @@ public class CommerceCatalogService {
 
     @Transactional(readOnly = true)
     public List<Map<String,Object>> searchArtists(Authentication auth,String search) {
-        authorization.require(auth,CommercePermission.ARTWORKS_MANAGE);
+        authorization.require(auth,PlatformPermission.ARTWORKS_MANAGE);
         if (search == null || search.trim().length() < 2 || search.length() > 100) {
             throw invalid("Informe ao menos 2 caracteres para pesquisar artistas");
         }
@@ -132,7 +135,7 @@ public class CommerceCatalogService {
 
     @Transactional
     public Created createArtwork(Authentication auth, CreateArtwork input) {
-        User actor = authorization.require(auth, CommercePermission.ARTWORKS_MANAGE).user();
+        User actor = authorization.require(auth, PlatformPermission.ARTWORKS_MANAGE).user();
         requireExists("users", input.artistUserId(), "Artista");
         long id = insert("""
             INSERT INTO commerce_artworks
@@ -147,7 +150,7 @@ public class CommerceCatalogService {
 
     @Transactional(readOnly = true)
     public List<Map<String,Object>> suppliers(Authentication auth) {
-        authorization.require(auth, CommercePermission.SUPPLIERS_MANAGE);
+        authorization.require(auth, PlatformPermission.SUPPLIERS_MANAGE);
         return jdbc.queryForList("""
             SELECT id,name,contact_name AS contactName,email,phone,notes,active,
                    created_at AS createdAt
@@ -157,7 +160,7 @@ public class CommerceCatalogService {
 
     @Transactional
     public Created createSupplier(Authentication auth, CreateSupplier input) {
-        User actor = authorization.require(auth, CommercePermission.SUPPLIERS_MANAGE).user();
+        User actor = authorization.require(auth, PlatformPermission.SUPPLIERS_MANAGE).user();
         try {
             long id = insert("""
                 INSERT INTO commerce_suppliers
@@ -175,7 +178,7 @@ public class CommerceCatalogService {
 
     @Transactional(readOnly = true)
     public List<Map<String,Object>> supplierChoices(Authentication auth) {
-        authorization.require(auth,CommercePermission.PRODUCTS_MANAGE);
+        authorization.require(auth,PlatformPermission.PRODUCTS_MANAGE);
         return jdbc.queryForList("""
             SELECT id,name FROM commerce_suppliers WHERE active=1 ORDER BY name,id LIMIT 500
             """);
@@ -183,7 +186,7 @@ public class CommerceCatalogService {
 
     @Transactional(readOnly = true)
     public List<Map<String,Object>> products(Authentication auth) {
-        authorization.require(auth, CommercePermission.PRODUCTS_MANAGE);
+        authorization.require(auth, PlatformPermission.PRODUCTS_MANAGE);
         return jdbc.queryForList("""
             SELECT product.id,product.sku,product.name,product.description,
                    product.estimated_unit_cost AS estimatedUnitCost,
@@ -200,7 +203,7 @@ public class CommerceCatalogService {
 
     @Transactional
     public Created createProduct(Authentication auth, CreateProduct input) {
-        User actor = authorization.require(auth, CommercePermission.PRODUCTS_MANAGE).user();
+        User actor = authorization.require(auth, PlatformPermission.PRODUCTS_MANAGE).user();
         if (input.preferredSupplierId()!=null) {
             requireExistsActive("commerce_suppliers",input.preferredSupplierId(),"Fornecedor");
         }
@@ -224,7 +227,7 @@ public class CommerceCatalogService {
 
     @Transactional(readOnly = true)
     public List<Map<String,Object>> productArtworks(Authentication auth, long productId) {
-        authorization.require(auth,CommercePermission.PRODUCTS_MANAGE);
+        authorization.require(auth,PlatformPermission.PRODUCTS_MANAGE);
         requireExists("commerce_products",productId,"Produto");
         return jdbc.queryForList("""
             SELECT rel.artwork_id AS artworkId,art.title,
@@ -237,10 +240,10 @@ public class CommerceCatalogService {
 
     @Transactional
     public void linkArtwork(Authentication auth, long productId, long artworkId, LinkArtwork input) {
-        User actor = authorization.require(auth,CommercePermission.PRODUCTS_MANAGE).user();
+        User actor = authorization.require(auth,PlatformPermission.PRODUCTS_MANAGE).user();
         // Allocating royalties is a contractual decision, never an implicit
         // privilege of being able to add products.
-        authorization.require(auth,CommercePermission.CONTRACTS_MANAGE);
+        authorization.require(auth,PlatformPermission.CONTRACTS_MANAGE);
         lock("commerce_products",productId,"Produto");
         requireExists("commerce_artworks",artworkId,"Arte");
         BigDecimal rate = input.royaltyAllocationPercent()==null
@@ -274,8 +277,8 @@ public class CommerceCatalogService {
 
     @Transactional(readOnly = true)
     public List<Map<String,Object>> productionBatches(Authentication auth) {
-        authorization.require(auth,CommercePermission.PRODUCTS_MANAGE);
-        authorization.require(auth,CommercePermission.SUPPLIERS_MANAGE);
+        authorization.require(auth,PlatformPermission.PRODUCTS_MANAGE);
+        authorization.require(auth,PlatformPermission.SUPPLIERS_MANAGE);
         return jdbc.queryForList("""
             SELECT batch.id,batch.product_id AS productId,product.name AS productName,
                    batch.supplier_id AS supplierId,supplier.name AS supplierName,
@@ -291,8 +294,8 @@ public class CommerceCatalogService {
 
     @Transactional
     public Created createProductionBatch(Authentication auth, CreateProductionBatch input) {
-        User actor = authorization.require(auth,CommercePermission.PRODUCTS_MANAGE).user();
-        authorization.require(auth,CommercePermission.SUPPLIERS_MANAGE);
+        User actor = authorization.require(auth,PlatformPermission.PRODUCTS_MANAGE).user();
+        authorization.require(auth,PlatformPermission.SUPPLIERS_MANAGE);
         requireExistsActive("commerce_products",input.productId(),"Produto");
         requireExistsActive("commerce_suppliers",input.supplierId(),"Fornecedor");
         if (input.quantity()==null || input.quantity()<=0 || input.quantity()>10000000) {
@@ -320,7 +323,7 @@ public class CommerceCatalogService {
 
     @Transactional(readOnly = true)
     public List<Map<String,Object>> contracts(Authentication auth, long artworkId) {
-        authorization.require(auth,CommercePermission.CONTRACTS_MANAGE);
+        authorization.require(auth,PlatformPermission.CONTRACTS_MANAGE);
         requireExists("commerce_artworks",artworkId,"Arte");
         // Deliberately DO NOT expose private R2 object keys via the API.
         return jdbc.queryForList("""
@@ -342,7 +345,7 @@ public class CommerceCatalogService {
     public Created signContract(Authentication auth, long artworkId, long templateId,
                                 LocalDate effectiveFrom, LocalDate effectiveUntil,
                                 BigDecimal oneTimeAmount, MultipartFile pdf) {
-        User actor=authorization.require(auth,CommercePermission.CONTRACTS_MANAGE).user();
+        User actor=authorization.require(auth,PlatformPermission.CONTRACTS_MANAGE).user();
         lock("commerce_artworks",artworkId,"Arte");
         if (effectiveFrom==null || (effectiveUntil!=null && effectiveUntil.isBefore(effectiveFrom))) {
             throw invalid("Informe a vigência correta do contrato");
@@ -401,7 +404,7 @@ public class CommerceCatalogService {
 
     @Transactional
     public void terminateContract(Authentication auth,long artworkId,long contractId) {
-        User actor=authorization.require(auth,CommercePermission.CONTRACTS_MANAGE).user();
+        User actor=authorization.require(auth,PlatformPermission.CONTRACTS_MANAGE).user();
         lock("commerce_artworks",artworkId,"Arte");
         int changed=jdbc.update("""
             UPDATE commerce_artwork_contracts
@@ -417,7 +420,7 @@ public class CommerceCatalogService {
 
     @Transactional(readOnly = true)
     public byte[] downloadContract(Authentication auth,long artworkId,long contractId) {
-        authorization.require(auth,CommercePermission.CONTRACTS_MANAGE);
+        authorization.require(auth,PlatformPermission.CONTRACTS_MANAGE);
         Map<String,Object> agreement=requireContract(artworkId,contractId);
         return documents.read(artworkId,agreement.get("signed_storage_key").toString(),
             agreement.get("signed_sha256").toString());
