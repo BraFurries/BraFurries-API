@@ -51,6 +51,14 @@ public class AdminPartnersController {
         return adminPartnersService.get(id);
     }
 
+    @Operation(summary = "Pesquisa representantes para parcerias com dados públicos mínimos")
+    @GetMapping("/representatives")
+    public List<com.Brafurries.API.admin.dto.AdminDtos.PartnerRepresentative> representatives(
+        @RequestParam String search
+    ) {
+        return adminPartnersService.findRepresentatives(search);
+    }
+
     @Operation(summary = "Pesquisa recursos vinculaveis a parcerias")
     @GetMapping("/linkable-resources")
     public List<PartnerLinkCandidate> listLinkableResources(
