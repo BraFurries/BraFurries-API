@@ -1,5 +1,8 @@
 package com.Brafurries.API.commerce;
 
+import com.Brafurries.API.platform.PlatformAuthorizationService;
+import com.Brafurries.API.platform.PlatformPermission;
+
 import static com.Brafurries.API.commerce.CommerceFinanceSupport.*;
 import static com.Brafurries.API.commerce.CommerceFinanceDtos.*;
 
@@ -23,12 +26,12 @@ import org.springframework.web.server.ResponseStatusException;
  */
 @Service
 public class CommerceSettlementService {
-    private final CommerceAuthorizationService authorization;
+    private final PlatformAuthorizationService authorization;
     private final CommerceFinanceSupport support;
     private final JdbcTemplate jdbc;
 
     public CommerceSettlementService(
-        CommerceAuthorizationService authorization,
+        PlatformAuthorizationService authorization,
         CommerceFinanceSupport support,
         JdbcTemplate jdbc
     ) {
@@ -42,8 +45,8 @@ public class CommerceSettlementService {
 
     @Transactional
     public Created createDraft(Authentication auth,CreateStatement input) {
-        int actor=authorization.require(auth,CommercePermission.SETTLEMENTS_MANAGE).user().getId();
-        authorization.require(auth,CommercePermission.FINANCE_VIEW);
+        int actor=authorization.require(auth,PlatformPermission.SETTLEMENTS_MANAGE).user().getId();
+        authorization.require(auth,PlatformPermission.FINANCE_VIEW);
         if (input==null || input.artistUserId()==null ||
             input.year()==null || input.month()==null) {
             throw invalid("Artista e período obrigatórios");
@@ -101,8 +104,8 @@ public class CommerceSettlementService {
 
     @Transactional
     public void discardDraft(Authentication auth,long settlementId) {
-        int actor=authorization.require(auth,CommercePermission.SETTLEMENTS_MANAGE).user().getId();
-        authorization.require(auth,CommercePermission.FINANCE_VIEW);
+        int actor=authorization.require(auth,PlatformPermission.SETTLEMENTS_MANAGE).user().getId();
+        authorization.require(auth,PlatformPermission.FINANCE_VIEW);
         Statement statement=loadStatement(settlementId,false);
         support.lockPeriod(statement.artistId(),statement.year(),statement.month());
         statement=loadStatement(settlementId,true);
@@ -116,8 +119,8 @@ public class CommerceSettlementService {
 
     @Transactional
     public void approve(Authentication auth,long settlementId) {
-        int actor=authorization.require(auth,CommercePermission.SETTLEMENTS_MANAGE).user().getId();
-        authorization.require(auth,CommercePermission.FINANCE_VIEW);
+        int actor=authorization.require(auth,PlatformPermission.SETTLEMENTS_MANAGE).user().getId();
+        authorization.require(auth,PlatformPermission.FINANCE_VIEW);
         Statement statement=loadStatement(settlementId,false);
         support.lockPeriod(statement.artistId(),statement.year(),statement.month());
         statement=loadStatement(settlementId,true);
@@ -163,8 +166,8 @@ public class CommerceSettlementService {
 
     @Transactional
     public Created recordPayment(Authentication auth,long settlementId,RecordPayment payment) {
-        int actor=authorization.require(auth,CommercePermission.PAYMENTS_RECORD).user().getId();
-        authorization.require(auth,CommercePermission.FINANCE_VIEW);
+        int actor=authorization.require(auth,PlatformPermission.PAYMENTS_RECORD).user().getId();
+        authorization.require(auth,PlatformPermission.FINANCE_VIEW);
         if (payment==null) throw invalid("Pagamento obrigatório");
         String key=requestId(payment.requestKey());
         BigDecimal amount=money(payment.amount(),"Valor do pagamento");
@@ -226,7 +229,7 @@ public class CommerceSettlementService {
 
     @Transactional(readOnly=true)
     public List<Map<String,Object>> listStatements(Authentication auth,int year,int month) {
-        authorization.require(auth,CommercePermission.FINANCE_VIEW);
+        authorization.require(auth,PlatformPermission.FINANCE_VIEW);
         if (year<2000 || year>2200 || month<1 || month>12) throw invalid("Período inválido");
         return jdbc.queryForList("""
             SELECT statement.id,statement.artist_user_id AS artistUserId,
@@ -249,7 +252,7 @@ public class CommerceSettlementService {
 
     @Transactional(readOnly=true)
     public List<Map<String,Object>> statementItems(Authentication auth,long settlementId) {
-        authorization.require(auth,CommercePermission.FINANCE_VIEW);
+        authorization.require(auth,PlatformPermission.FINANCE_VIEW);
         return jdbc.queryForList("""
             SELECT item.accrual_id AS accrualId,item.amount_snapshot AS amount,
                    royalty.artwork_id AS artworkId,
@@ -266,7 +269,7 @@ public class CommerceSettlementService {
 
     @Transactional(readOnly=true)
     public List<Map<String,Object>> payments(Authentication auth,long settlementId) {
-        authorization.require(auth,CommercePermission.FINANCE_VIEW);
+        authorization.require(auth,PlatformPermission.FINANCE_VIEW);
         return jdbc.queryForList("""
             SELECT id,amount,paid_on AS paidOn,external_reference AS externalReference,
                    notes,created_at AS createdAt
