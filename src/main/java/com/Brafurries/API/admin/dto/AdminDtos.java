@@ -144,8 +144,13 @@ public class AdminDtos {
     public record PartnerExternalLinkItem(
         String type,
         String label,
-        String url
+        String url,
+        boolean primary
     ) {
+        // Compatibility for legacy callers and resources not specifying priority.
+        public PartnerExternalLinkItem(String type, String label, String url) {
+            this(type, label, url, false);
+        }
     }
 
     public record PartnerLinkCandidate(
