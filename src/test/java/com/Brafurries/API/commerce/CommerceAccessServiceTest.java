@@ -109,6 +109,19 @@ class PlatformAccessServiceTest {
     }
 
     @Test
+    void ownerCanRevokeEvenWhenPermissionIsDisabledInCatalog() {
+        when(jdbc.queryForList(startsWith("SELECT id FROM users"), eq(Integer.class), eq(35)))
+            .thenReturn(List.of(35));
+        when(jdbc.update(contains("DELETE FROM platform_user_permissions"), eq(35),
+            eq("FINANCE_VIEW"))).thenReturn(1);
+        service.revokePersonPermission(auth, 35, "FINANCE_VIEW");
+        verify(jdbc).update(contains("INSERT INTO platform_access_audit"),
+            eq(7), eq("PERSON_PERMISSION_REVOKED"), eq(35), isNull(), eq("FINANCE_VIEW"));
+        verify(jdbc, never()).queryForObject(contains("platform_permission_catalog"),
+            eq(Integer.class), anyString());
+    }
+
+    @Test
     void communityAdminCannotGrantByBeingAdminInAnotherDomain() {
         when(authorization.requireOwner(auth)).thenThrow(
             new ResponseStatusException(HttpStatus.FORBIDDEN, "Acesso exclusivo do proprietário")
