@@ -65,6 +65,8 @@ class PlatformAccessServiceTest {
 
     @Test
     void cannotGrantPersonPermissionWithoutExplicitOwnerApproval() {
+        when(jdbc.queryForObject(contains("platform_permission_catalog"), eq(Integer.class),
+            eq("FINANCE_VIEW"))).thenReturn(1);
         when(jdbc.queryForList(startsWith("SELECT id FROM users"), eq(Integer.class), eq(35)))
             .thenReturn(List.of(35));
         when(jdbc.queryForObject(contains("platform_authorized_users"), eq(Integer.class), eq(35)))
@@ -77,6 +79,8 @@ class PlatformAccessServiceTest {
 
     @Test
     void refusesPermissionsOnTeamRolesOutsideConfiguredBrafurries() {
+        when(jdbc.queryForObject(contains("platform_permission_catalog"), eq(Integer.class),
+            eq("PAYMENTS_RECORD"))).thenReturn(1);
         when(authorization.officialCommunityId()).thenReturn(99);
         when(jdbc.queryForList(contains("SELECT id FROM community_team_roles"), eq(Integer.class),
             eq(66), eq(99))).thenReturn(List.of());
@@ -91,6 +95,8 @@ class PlatformAccessServiceTest {
         when(authorization.officialCommunityId()).thenReturn(99);
         when(jdbc.queryForList(contains("SELECT id FROM community_team_roles"), eq(Integer.class),
             eq(66), eq(99))).thenReturn(List.of(66));
+        when(jdbc.queryForObject(contains("platform_permission_catalog"), eq(Integer.class),
+            eq("PRODUCTS_MANAGE"))).thenReturn(1);
         when(jdbc.queryForObject(contains("platform_role_permissions"), eq(Integer.class),
             eq(66), eq("PRODUCTS_MANAGE"))).thenReturn(0);
 
