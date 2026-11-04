@@ -37,6 +37,9 @@ public class PartnerExternalLink {
     @Column(nullable = false, length = 1024)
     private String url;
 
+    @Column(name = "is_primary", nullable = false)
+    private boolean primary;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
