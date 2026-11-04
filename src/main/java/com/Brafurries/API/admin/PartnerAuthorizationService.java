@@ -1,7 +1,7 @@
 package com.Brafurries.API.admin;
 
-import com.Brafurries.API.commerce.CommerceAuthorizationService;
-import com.Brafurries.API.commerce.CommercePermission;
+import com.Brafurries.API.platform.PlatformAuthorizationService;
+import com.Brafurries.API.platform.PlatformPermission;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 
@@ -11,9 +11,9 @@ import org.springframework.stereotype.Service;
  */
 @Service("partnerAuthorizationService")
 public class PartnerAuthorizationService {
-    private final CommerceAuthorizationService authorization;
+    private final PlatformAuthorizationService authorization;
 
-    public PartnerAuthorizationService(CommerceAuthorizationService authorization) {
+    public PartnerAuthorizationService(PlatformAuthorizationService authorization) {
         this.authorization = authorization;
     }
 
@@ -29,6 +29,6 @@ public class PartnerAuthorizationService {
         }
         // Resolver checks explicit owner-approved person AND an active role
         // assigned inside the configured official BraFurries Community.
-        return authorization.resolve(authentication).access().has(CommercePermission.PARTNERS_MANAGE);
+        return authorization.resolve(authentication).access().has(PlatformPermission.PARTNERS_MANAGE);
     }
 }
