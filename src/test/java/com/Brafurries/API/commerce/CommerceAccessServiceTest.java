@@ -1,5 +1,9 @@
 package com.Brafurries.API.commerce;
 
+import com.Brafurries.API.platform.PlatformAuthorizationService;
+import com.Brafurries.API.platform.PlatformAccessService;
+import com.Brafurries.API.platform.PlatformPermission;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -17,17 +21,17 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
-class CommerceAccessServiceTest {
-    @Mock CommerceAuthorizationService authorization;
+class PlatformAccessServiceTest {
+    @Mock PlatformAuthorizationService authorization;
     @Mock JdbcTemplate jdbc;
     @Mock Authentication auth;
 
-    private CommerceAccessService service;
+    private PlatformAccessService service;
     private User owner;
 
     @BeforeEach
     void setUp() {
-        service = new CommerceAccessService(authorization, jdbc);
+        service = new PlatformAccessService(authorization, jdbc);
         owner = new User();
         owner.setId(7);
         lenient().when(authorization.requireOwner(auth)).thenReturn(owner);
@@ -37,13 +41,13 @@ class CommerceAccessServiceTest {
     void ownerApprovalIsIdempotentAndAlwaysAuditedWhenNew() {
         when(jdbc.queryForList(startsWith("SELECT id FROM users"), eq(Integer.class), eq(35)))
             .thenReturn(List.of(35));
-        when(jdbc.queryForObject(contains("commerce_authorized_users"), eq(Integer.class), eq(35)))
+        when(jdbc.queryForObject(contains("platform_authorized_users"), eq(Integer.class), eq(35)))
             .thenReturn(0);
 
         service.approvePerson(auth, 35);
 
-        verify(jdbc).update(contains("INSERT INTO commerce_authorized_users"), eq(35), eq(7));
-        verify(jdbc).update(contains("INSERT INTO commerce_access_audit"),
+        verify(jdbc).update(contains("INSERT INTO platform_authorized_users"), eq(35), eq(7));
+        verify(jdbc).update(contains("INSERT INTO platform_access_audit"),
             eq(7), eq("PERSON_APPROVED"), eq(35), isNull(), isNull());
     }
 
@@ -51,7 +55,7 @@ class CommerceAccessServiceTest {
     void repeatedApprovalDoesNotDuplicateAudit() {
         when(jdbc.queryForList(startsWith("SELECT id FROM users"), eq(Integer.class), eq(35)))
             .thenReturn(List.of(35));
-        when(jdbc.queryForObject(contains("commerce_authorized_users"), eq(Integer.class), eq(35)))
+        when(jdbc.queryForObject(contains("platform_authorized_users"), eq(Integer.class), eq(35)))
             .thenReturn(1);
 
         service.approvePerson(auth, 35);
@@ -63,7 +67,7 @@ class CommerceAccessServiceTest {
     void cannotGrantPersonPermissionWithoutExplicitOwnerApproval() {
         when(jdbc.queryForList(startsWith("SELECT id FROM users"), eq(Integer.class), eq(35)))
             .thenReturn(List.of(35));
-        when(jdbc.queryForObject(contains("commerce_authorized_users"), eq(Integer.class), eq(35)))
+        when(jdbc.queryForObject(contains("platform_authorized_users"), eq(Integer.class), eq(35)))
             .thenReturn(0);
 
         assertEquals(HttpStatus.CONFLICT, assertThrows(ResponseStatusException.class,
@@ -87,14 +91,14 @@ class CommerceAccessServiceTest {
         when(authorization.officialCommunityId()).thenReturn(99);
         when(jdbc.queryForList(contains("SELECT id FROM community_team_roles"), eq(Integer.class),
             eq(66), eq(99))).thenReturn(List.of(66));
-        when(jdbc.queryForObject(contains("commerce_role_permissions"), eq(Integer.class),
+        when(jdbc.queryForObject(contains("platform_role_permissions"), eq(Integer.class),
             eq(66), eq("PRODUCTS_MANAGE"))).thenReturn(0);
 
         service.grantRolePermission(auth, 66, "PRODUCTS_MANAGE");
 
-        verify(jdbc).update(contains("INSERT INTO commerce_role_permissions"),
+        verify(jdbc).update(contains("INSERT INTO platform_role_permissions"),
             eq(66), eq("PRODUCTS_MANAGE"), eq(7));
-        verify(jdbc).update(contains("INSERT INTO commerce_access_audit"),
+        verify(jdbc).update(contains("INSERT INTO platform_access_audit"),
             eq(7), eq("ROLE_PERMISSION_GRANTED"), isNull(), eq(66), eq("PRODUCTS_MANAGE"));
     }
 
