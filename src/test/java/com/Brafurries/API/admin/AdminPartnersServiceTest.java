@@ -106,6 +106,35 @@ class AdminPartnersServiceTest {
     private AdminPartnersService service;
 
     @Test
+    void representativesSearchReturnsMinimalProfilesWithoutPrivateUserData() {
+        User matching = new User();
+        matching.setId(45);
+        matching.setDisplayName("Miray");
+        matching.setEmail("private@example.org");
+        matching.setProfileImageUrl("https://cdn.example/miray.webp");
+        when(userRepository.searchPartnerRepresentatives(
+            org.mockito.ArgumentMatchers.eq("Miray"),
+            org.mockito.ArgumentMatchers.any(org.springframework.data.domain.Pageable.class)
+        )).thenReturn(new PageImpl<>(List.of(matching)));
+
+        var results = service.findRepresentatives(" Miray ");
+        assertEquals(1, results.size());
+        assertEquals(45, results.getFirst().id());
+        assertEquals("Miray", results.getFirst().name());
+        assertEquals("https://cdn.example/miray.webp", results.getFirst().avatarUrl());
+        assertEquals(null, results.getFirst().email());
+        assertEquals(null, results.getFirst().discordUsername());
+    }
+
+    @Test
+    void representativesSearchRejectsOverlongInputAndIgnoresShortQueries() {
+        assertTrue(service.findRepresentatives("x").isEmpty());
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+            () -> service.findRepresentatives("x".repeat(81))).getStatusCode());
+        org.mockito.Mockito.verifyNoInteractions(userRepository);
+    }
+
+    @Test
     void getReturnsCompletePartnerWithLinksResourceAndAggregatedMetrics() {
         Partner partner = detailedPartner();
         PartnerMetricTotalsProjection totals = org.mockito.Mockito.mock(PartnerMetricTotalsProjection.class);
