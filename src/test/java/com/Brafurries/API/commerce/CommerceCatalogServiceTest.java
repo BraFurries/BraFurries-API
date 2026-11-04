@@ -1,5 +1,9 @@
 package com.Brafurries.API.commerce;
 
+import com.Brafurries.API.platform.PlatformAuthorizationService;
+import com.Brafurries.API.platform.PlatformAccessService;
+import com.Brafurries.API.platform.PlatformPermission;
+
 import static com.Brafurries.API.commerce.CommerceCatalogDtos.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -23,7 +27,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
 class CommerceCatalogServiceTest {
-    @Mock CommerceAuthorizationService authorization;
+    @Mock PlatformAuthorizationService authorization;
     @Mock CommercePrivateDocumentStorage documents;
     @Mock JdbcTemplate jdbc;
     @Mock Authentication auth;
@@ -37,16 +41,16 @@ class CommerceCatalogServiceTest {
         User owner = new User();
         owner.setId(7);
         lenient().when(authorization.require(eq(auth),any())).thenReturn(
-            new CommerceAuthorizationService.Actor(owner,
-                new CommerceAuthorizationService.Access(true,true,java.util.Set.of()))
+            new PlatformAuthorizationService.Actor(owner,
+                new PlatformAuthorizationService.Access(true,true,java.util.Set.of()))
         );
     }
 
     @Test
     void blocksArtistListWithoutPrivateArtworkPermission() {
         when(authorization.resolve(auth)).thenReturn(
-            new CommerceAuthorizationService.Actor(new User(),
-                new CommerceAuthorizationService.Access(false,true,java.util.Set.of()))
+            new PlatformAuthorizationService.Actor(new User(),
+                new PlatformAuthorizationService.Access(false,true,java.util.Set.of()))
         );
         assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
             ()->catalog.artworks(auth)).getStatusCode());
@@ -58,7 +62,7 @@ class CommerceCatalogServiceTest {
         when(jdbc.queryForObject(contains("commerce_artworks"),eq(Integer.class),eq(25L)))
             .thenReturn(1);
         catalog.contracts(auth,25L);
-        verify(authorization).require(auth,CommercePermission.CONTRACTS_MANAGE);
+        verify(authorization).require(auth,PlatformPermission.CONTRACTS_MANAGE);
         verify(jdbc).queryForList(argThat(sql ->
             sql.contains("commerce_artwork_contracts") &&
             !sql.contains("SELECT *") && !sql.contains("signed_storage_key")),
@@ -92,7 +96,7 @@ class CommerceCatalogServiceTest {
 
     @Test
     void batchRequiresBothProductAndSupplierAuthorization() {
-        when(authorization.require(auth,CommercePermission.SUPPLIERS_MANAGE))
+        when(authorization.require(auth,PlatformPermission.SUPPLIERS_MANAGE))
             .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
         assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
             ()->catalog.createProductionBatch(auth,new CreateProductionBatch(
@@ -114,8 +118,8 @@ class CommerceCatalogServiceTest {
         assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
             ()->catalog.linkArtwork(auth,12L,11L,new LinkArtwork(new BigDecimal("30.0000"))))
             .getStatusCode());
-        verify(authorization).require(auth,CommercePermission.PRODUCTS_MANAGE);
-        verify(authorization).require(auth,CommercePermission.CONTRACTS_MANAGE);
+        verify(authorization).require(auth,PlatformPermission.PRODUCTS_MANAGE);
+        verify(authorization).require(auth,PlatformPermission.CONTRACTS_MANAGE);
         verify(jdbc,never()).update(anyString(),any(Object[].class));
     }
 
@@ -134,7 +138,7 @@ class CommerceCatalogServiceTest {
 
     @Test
     void doesNotDownloadPrivateContractWithoutExplicitPermission() {
-        when(authorization.require(auth,CommercePermission.CONTRACTS_MANAGE))
+        when(authorization.require(auth,PlatformPermission.CONTRACTS_MANAGE))
             .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
         assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
             ()->catalog.downloadContract(auth,10L,11L)).getStatusCode());
