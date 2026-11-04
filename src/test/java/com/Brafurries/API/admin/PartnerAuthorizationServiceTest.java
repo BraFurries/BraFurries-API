@@ -3,8 +3,8 @@ package com.Brafurries.API.admin;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-import com.Brafurries.API.commerce.CommerceAuthorizationService;
-import com.Brafurries.API.commerce.CommercePermission;
+import com.Brafurries.API.platform.PlatformAuthorizationService;
+import com.Brafurries.API.platform.PlatformPermission;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -14,7 +14,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
 /** Verifies the server policy, not the sidebar's cosmetic visibility. */
 class PartnerAuthorizationServiceTest {
-    private final CommerceAuthorizationService authorization = mock(CommerceAuthorizationService.class);
+    private final PlatformAuthorizationService authorization = mock(PlatformAuthorizationService.class);
     private final PartnerAuthorizationService service = new PartnerAuthorizationService(authorization);
 
     @Test
@@ -36,7 +36,7 @@ class PartnerAuthorizationServiceTest {
     @Test
     void delegatedPartnerManagerNeedsEffectiveServerSideGrant() {
         Authentication user = auth("ROLE_USER");
-        when(authorization.resolve(user)).thenReturn(actor(false, CommercePermission.PARTNERS_MANAGE));
+        when(authorization.resolve(user)).thenReturn(actor(false, PlatformPermission.PARTNERS_MANAGE));
         assertTrue(service.canManage(user));
         verify(authorization).resolve(user);
     }
@@ -44,7 +44,7 @@ class PartnerAuthorizationServiceTest {
     @Test
     void financePermissionDoesNotGrantPartnerManagement() {
         Authentication user = auth("ROLE_USER");
-        when(authorization.resolve(user)).thenReturn(actor(false, CommercePermission.FINANCE_VIEW));
+        when(authorization.resolve(user)).thenReturn(actor(false, PlatformPermission.FINANCE_VIEW));
         assertFalse(service.canManage(user));
     }
 
@@ -70,8 +70,8 @@ class PartnerAuthorizationServiceTest {
         return auth;
     }
 
-    private CommerceAuthorizationService.Actor actor(boolean owner, CommercePermission... permissions) {
-        return new CommerceAuthorizationService.Actor(null,
-            new CommerceAuthorizationService.Access(owner, true, Set.of(permissions)));
+    private PlatformAuthorizationService.Actor actor(boolean owner, PlatformPermission... permissions) {
+        return new PlatformAuthorizationService.Actor(null,
+            new PlatformAuthorizationService.Access(owner, true, Set.of(permissions)));
     }
 }
