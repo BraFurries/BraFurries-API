@@ -90,6 +90,21 @@ class AdminPartnersControllerTest {
     }
 
     @Test
+    void delegatedRepresentativeLookupReturnsMinimalSafeContract() throws Exception {
+        when(service.findRepresentatives("Miray")).thenReturn(List.of(
+            new PartnerRepresentative(22, "Miray", "https://cdn.example/avatar.webp", null, null, null)
+        ));
+        mvc.perform(get("/admin/partners/representatives").param("search", "Miray"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].id").value(22))
+            .andExpect(jsonPath("$[0].name").value("Miray"))
+            .andExpect(jsonPath("$[0].avatarUrl").value("https://cdn.example/avatar.webp"))
+            .andExpect(jsonPath("$[0].email").value(org.hamcrest.Matchers.nullValue()))
+            .andExpect(jsonPath("$[0].passwordHash").doesNotExist())
+            .andExpect(jsonPath("$[0].roles").doesNotExist());
+    }
+
+    @Test
     void getMissingPartnerReturnsNotFound() throws Exception {
         when(service.get(99)).thenThrow(
             new ResponseStatusException(HttpStatus.NOT_FOUND, "Parceria nao encontrada")
