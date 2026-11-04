@@ -1,5 +1,8 @@
 package com.Brafurries.API.commerce;
 
+import com.Brafurries.API.platform.PlatformAuthorizationService;
+import com.Brafurries.API.platform.PlatformPermission;
+
 import static com.Brafurries.API.commerce.CommerceFinanceSupport.*;
 import static com.Brafurries.API.commerce.CommerceFinanceDtos.*;
 
@@ -28,12 +31,12 @@ import org.springframework.web.server.ResponseStatusException;
  */
 @Service
 public class CommerceSalesService {
-    private final CommerceAuthorizationService authorization;
+    private final PlatformAuthorizationService authorization;
     private final CommerceFinanceSupport support;
     private final JdbcTemplate jdbc;
 
     public CommerceSalesService(
-        CommerceAuthorizationService authorization,
+        PlatformAuthorizationService authorization,
         CommerceFinanceSupport support,
         JdbcTemplate jdbc
     ) {
@@ -56,7 +59,7 @@ public class CommerceSalesService {
 
     @Transactional
     public Created createSale(Authentication auth,CreateSale request) {
-        int actor=authorization.require(auth,CommercePermission.SALES_MANAGE).user().getId();
+        int actor=authorization.require(auth,PlatformPermission.SALES_MANAGE).user().getId();
         if (request==null || request.items()==null || request.items().isEmpty()
                 || request.items().size()>50) throw invalid("Venda precisa de 1 a 50 itens");
         if (request.soldOn()==null || request.soldOn().isAfter(today())
@@ -329,7 +332,7 @@ public class CommerceSalesService {
 
     @Transactional
     public void cancelSale(Authentication auth,long saleId,String reason) {
-        int actor=authorization.require(auth,CommercePermission.SALES_MANAGE).user().getId();
+        int actor=authorization.require(auth,PlatformPermission.SALES_MANAGE).user().getId();
         String reasonText=text(reason,500,"Motivo do cancelamento",true);
         List<Map<String,Object>> rows=jdbc.queryForList("""
             SELECT id,status FROM commerce_sales WHERE id=? FOR UPDATE
@@ -397,7 +400,7 @@ public class CommerceSalesService {
 
     @Transactional(readOnly=true)
     public List<Map<String,Object>> sellableBatches(Authentication auth) {
-        authorization.require(auth,CommercePermission.SALES_MANAGE);
+        authorization.require(auth,PlatformPermission.SALES_MANAGE);
         // No supplier contacts or production costs are exposed to sales staff.
         return jdbc.queryForList("""
             SELECT batch.id AS batchId,
@@ -414,8 +417,8 @@ public class CommerceSalesService {
     @Transactional(readOnly=true)
     public List<Map<String,Object>> listSales(Authentication auth) {
         var access=authorization.resolve(auth).access();
-        if (!access.has(CommercePermission.SALES_MANAGE)
-            && !access.has(CommercePermission.FINANCE_VIEW)) {
+        if (!access.has(PlatformPermission.SALES_MANAGE)
+            && !access.has(PlatformPermission.FINANCE_VIEW)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                 "Sem acesso ao histórico de vendas");
         }
@@ -437,8 +440,8 @@ public class CommerceSalesService {
     @Transactional(readOnly=true)
     public List<Map<String,Object>> saleItems(Authentication auth,long saleId) {
         var access=authorization.resolve(auth).access();
-        if (!access.has(CommercePermission.SALES_MANAGE)
-            && !access.has(CommercePermission.FINANCE_VIEW)) {
+        if (!access.has(PlatformPermission.SALES_MANAGE)
+            && !access.has(PlatformPermission.FINANCE_VIEW)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,"Sem acesso à venda");
         }
         return jdbc.queryForList("""
@@ -453,7 +456,7 @@ public class CommerceSalesService {
 
     @Transactional(readOnly=true)
     public List<Map<String,Object>> royalties(Authentication auth,int year,int month) {
-        authorization.require(auth,CommercePermission.FINANCE_VIEW);
+        authorization.require(auth,PlatformPermission.FINANCE_VIEW);
         if (year<2000 || year>2200 || month<1 || month>12) throw invalid("Mês inválido");
         return jdbc.queryForList("""
             SELECT acc.id,acc.artist_user_id AS artistUserId,
