@@ -176,9 +176,6 @@ public class PlatformAccessService {
     public void revokePersonPermission(Authentication auth, int userId, String code) {
         User owner = authorization.requireOwner(auth);
         PlatformPermission permission = PlatformPermission.parse(code);
-        if (!exists("SELECT COUNT(*) FROM platform_permission_catalog WHERE code = ? AND active = 1", permission.name())) {
-            throw invalid("Permissão desativada ou não cadastrada");
-        }
         lockUser(userId);
         if (jdbc.update("""
             DELETE FROM platform_user_permissions
@@ -209,9 +206,6 @@ public class PlatformAccessService {
     public void revokeRolePermission(Authentication auth, int roleId, String code) {
         User owner = authorization.requireOwner(auth);
         PlatformPermission permission = PlatformPermission.parse(code);
-        if (!exists("SELECT COUNT(*) FROM platform_permission_catalog WHERE code = ? AND active = 1", permission.name())) {
-            throw invalid("Permissão desativada ou não cadastrada");
-        }
         lockOfficialRole(roleId);
         if (jdbc.update("""
             DELETE FROM platform_role_permissions
