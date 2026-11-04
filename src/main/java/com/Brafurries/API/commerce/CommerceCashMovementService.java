@@ -1,5 +1,8 @@
 package com.Brafurries.API.commerce;
 
+import com.Brafurries.API.platform.PlatformAuthorizationService;
+import com.Brafurries.API.platform.PlatformPermission;
+
 import static com.Brafurries.API.commerce.CommerceFinanceSupport.*;
 import static com.Brafurries.API.commerce.CommerceCashMovementDtos.*;
 
@@ -35,12 +38,12 @@ public class CommerceCashMovementService {
         "CASH","PIX","CARD_DEBIT","CARD_CREDIT",
         "BANK_TRANSFER","BANK_SLIP","OTHER");
 
-    private final CommerceAuthorizationService authorization;
+    private final PlatformAuthorizationService authorization;
     private final CommerceFinanceSupport support;
     private final JdbcTemplate jdbc;
 
     public CommerceCashMovementService(
-        CommerceAuthorizationService authorization,
+        PlatformAuthorizationService authorization,
         CommerceFinanceSupport support,
         JdbcTemplate jdbc
     ) {
@@ -51,8 +54,8 @@ public class CommerceCashMovementService {
 
     @Transactional
     public Created create(Authentication auth,CreateMovement input) {
-        int actor=authorization.require(auth,CommercePermission.CASHFLOW_MANAGE).user().getId();
-        authorization.require(auth,CommercePermission.FINANCE_VIEW);
+        int actor=authorization.require(auth,PlatformPermission.CASHFLOW_MANAGE).user().getId();
+        authorization.require(auth,PlatformPermission.FINANCE_VIEW);
         if (input==null) throw invalid("Movimentação não informada");
         String key=requestId(input.requestKey());
         String type=input.movementType();
@@ -144,8 +147,8 @@ public class CommerceCashMovementService {
 
     @Transactional
     public Created reverse(Authentication auth,long movementId,String reason) {
-        int actor=authorization.require(auth,CommercePermission.CASHFLOW_MANAGE).user().getId();
-        authorization.require(auth,CommercePermission.FINANCE_VIEW);
+        int actor=authorization.require(auth,PlatformPermission.CASHFLOW_MANAGE).user().getId();
+        authorization.require(auth,PlatformPermission.FINANCE_VIEW);
         String why=text(reason,500,"Justificativa",true);
         List<Map<String,Object>> records=jdbc.queryForList("""
             SELECT id,request_sha256,movement_type,event_kind,amount,occurred_on,
@@ -193,7 +196,7 @@ public class CommerceCashMovementService {
 
     @Transactional(readOnly=true)
     public List<Map<String,Object>> list(Authentication auth,int year,int month) {
-        authorization.require(auth,CommercePermission.FINANCE_VIEW);
+        authorization.require(auth,PlatformPermission.FINANCE_VIEW);
         YearMonth ym=period(year,month);
         return jdbc.queryForList("""
             SELECT m.id,m.request_key AS requestKey,m.movement_type AS movementType,
@@ -216,7 +219,7 @@ public class CommerceCashMovementService {
 
     @Transactional(readOnly=true)
     public Map<String,Object> summary(Authentication auth,int year,int month) {
-        authorization.require(auth,CommercePermission.FINANCE_VIEW);
+        authorization.require(auth,PlatformPermission.FINANCE_VIEW);
         YearMonth ym=period(year,month);
         Date from=Date.valueOf(ym.atDay(1));
         Date until=Date.valueOf(ym.plusMonths(1).atDay(1));
