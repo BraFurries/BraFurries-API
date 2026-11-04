@@ -186,6 +186,40 @@ class AdminPartnersServiceTest {
     }
 
     @Test
+    void primaryLinkIsPersistedAndReturnedInAdministrativeDto() {
+        when(partnerRepository.save(any(Partner.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        AdminPartnerItem item = service.create(new CreatePartnerRequest(
+            "Marca", "marca", "brand", "active", null, null, null, null, null,
+            null, null, null, null,
+            List.of(new PartnerExternalLinkItem("discord", "Servidor", "https://discord.gg/indie", true))
+        ));
+        assertEquals(1, item.links().size());
+        assertTrue(item.links().getFirst().primary());
+        assertEquals("https://discord.gg/indie", item.links().getFirst().url());
+    }
+
+    @Test
+    void rejectTwoPrimaryLinksAndUnsafeUrlsBeforeSaving() {
+        ResponseStatusException duplicates = assertThrows(ResponseStatusException.class, () ->
+            service.create(new CreatePartnerRequest(
+                "Marca", "marca", "brand", "active", null, null, null, null, null,
+                null, null, null, null,
+                List.of(new PartnerExternalLinkItem("discord", "Servidor", "https://discord.gg/indie", true),
+                    new PartnerExternalLinkItem("website", "Site", "https://example.org", true))
+            )));
+        assertEquals(HttpStatus.BAD_REQUEST, duplicates.getStatusCode());
+
+        ResponseStatusException unsafe = assertThrows(ResponseStatusException.class, () ->
+            service.create(new CreatePartnerRequest(
+                "Marca", "marca", "brand", "active", null, null, null, null, null,
+                null, null, null, null,
+                List.of(new PartnerExternalLinkItem("website", null, "javascript:alert(1)", true))
+            )));
+        assertEquals(HttpStatus.BAD_REQUEST, unsafe.getStatusCode());
+        verify(partnerRepository, never()).save(any(Partner.class));
+    }
+
+    @Test
     void updateWithOmittedFieldsPreservesExistingValuesAndRelations() {
         Partner partner = detailedPartner();
         PartnerLink linkedResource = partner.getLinks().iterator().next();
