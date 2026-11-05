@@ -31,13 +31,14 @@ class DiscordSelfServiceLinkServiceTest {
     @Mock UserRepository users;
     @Mock UserDiscordRepository discord;
     @Mock UserCommunityStatusRepository memberships;
+    @Mock UserAccountReconciliationPreflightService preflight;
     @Mock UserIdentityLinkRepository links;
     @Mock UserDiscordLinkChallengeRepository challenges;
     @Mock IdentityBanPropagationService bans;
     @Mock TokenService tokens;
 
     private DiscordSelfServiceLinkService service() {
-        return new DiscordSelfServiceLinkService(users, discord, memberships, links, challenges, bans, tokens);
+        return new DiscordSelfServiceLinkService(users, discord, memberships, preflight, links, challenges, bans, tokens);
     }
 
     private Authentication auth() {
@@ -220,6 +221,9 @@ class DiscordSelfServiceLinkServiceTest {
         when(challenges.findByTicketHash(anyString())).thenReturn(Optional.of(verified(web)));
         when(discord.findByDiscordUserId(123456789L)).thenReturn(Optional.of(existing));
         when(links.findActiveLinksContainingUser(20)).thenReturn(List.of());
+        when(preflight.inspect(web, legacy)).thenReturn(
+            new UserAccountReconciliationPreflightService.Findings(
+                "PRECHECK_REQUIRED", List.of("CHECK_ACCOUNT_CONFLICTS"), List.of(), List.of()));
 
         var preview = service().preview(auth(), TICKET);
 
@@ -239,7 +243,9 @@ class DiscordSelfServiceLinkServiceTest {
         when(challenges.findByTicketHash(anyString())).thenReturn(Optional.of(verified(web)));
         when(discord.findByDiscordUserId(123456789L)).thenReturn(Optional.of(existing));
         when(links.findActiveLinksContainingUser(20)).thenReturn(List.of());
-        when(memberships.countByUserId(10)).thenReturn(1L);
+        when(preflight.inspect(web, legacy)).thenReturn(
+            new UserAccountReconciliationPreflightService.Findings(
+                "RESOLUTION_REQUIRED", List.of("RECONCILE_COMMUNITY_MEMBERSHIP"), List.of(), List.of()));
 
         var preview = service().preview(auth(), TICKET);
 
