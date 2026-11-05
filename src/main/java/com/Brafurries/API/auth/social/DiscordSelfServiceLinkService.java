@@ -59,7 +59,18 @@ public class DiscordSelfServiceLinkService {
     }
 
     public record Start(String ticket) {}
-    public record Preview(String discordUsername, boolean hasExistingHistory, String notice) {}
+    /**
+     * PRECHECK_REQUIRED is intentionally not MERGE_READY: grants, balances,
+     * moderation, and identity-owned rows still require a complete conflict scan.
+     * No preview response authorizes a transfer of data or permissions.
+     */
+    public record Preview(
+        String discordUsername,
+        boolean hasExistingHistory,
+        String status,
+        List<String> nextActions,
+        String notice
+    ) {}
     public record Confirmation(String status, String notice) {}
 
     @Transactional
@@ -105,13 +116,42 @@ public class DiscordSelfServiceLinkService {
     public Preview preview(Authentication authentication, String ticket) {
         User actor = requireAuthenticated(authentication);
         UserDiscordLinkChallenge challenge = requireVerifiedChallenge(actor, requireChallenge(ticket));
-        boolean legacy = discord.findByDiscordUserId(challenge.getDiscordUserId())
-            .filter(link -> !link.getUser().getId().equals(actor.getId()))
-            .isPresent();
-        return new Preview(challenge.getDiscordUsername(), legacy,
-            legacy
-                ? "Este Discord já tem um registro histórico. Ele será conectado à sua conta sem apagar nem misturar dados, permissões ou punições."
-                : "Você está prestes a conectar este Discord à sua conta BraFurries.");
+        UserDiscord existing = discord.findByDiscordUserId(challenge.getDiscordUserId()).orElse(null);
+        UserDiscord own = discord.findByUser(actor).orElse(null);
+        if (own != null && !own.getDiscordUserId().equals(challenge.getDiscordUserId())) {
+            return new Preview(challenge.getDiscordUsername(), existing != null,
+                "RESOLUTION_REQUIRED", List.of("REVIEW_EXISTING_DISCORD", "RETRY_WITH_CORRECT_ACCOUNT"),
+                "Esta conta já possui outro Discord. Nenhuma identidade será substituída automaticamente.");
+        }
+        if (existing == null || existing.getUser().getId().equals(actor.getId())) {
+            return new Preview(challenge.getDiscordUsername(), false,
+                "CONNECT_READY", List.of("CONFIRM_LINK"),
+                "A identidade Discord foi comprovada. A confirmação não altera dados de outras contas.");
+        }
+
+        Integer legacyId = existing.getUser().getId();
+        var related = links.findActiveLinksContainingUser(legacyId);
+        boolean claimedElsewhere = related.stream().anyMatch(link ->
+            link.getStatus() == UserIdentityLinkStatus.CONFIRMED
+                && link.getLinkSource() == UserIdentityLinkSource.SOCIAL
+                && !link.getUserA().getId().equals(actor.getId()));
+        boolean otherReview = related.stream().anyMatch(link ->
+            link.getStatus() != UserIdentityLinkStatus.CONFIRMED
+                || link.getLinkSource() != UserIdentityLinkSource.SOCIAL
+                || !link.getUserA().getId().equals(actor.getId()));
+        if (claimedElsewhere || otherReview) {
+            return new Preview(challenge.getDiscordUsername(), true,
+                "REVIEW_REQUIRED", List.of("VERIFY_OTHER_ACCOUNT", "REQUEST_IDENTITY_REVIEW"),
+                "Há outro vínculo ou revisão de identidade. É necessária uma comprovação adicional; nenhum dado será transferido.");
+        }
+        if (memberships.countByUserId(actor.getId()) > 0) {
+            return new Preview(challenge.getDiscordUsername(), true,
+                "RESOLUTION_REQUIRED", List.of("REVIEW_COMMUNITY_DATA", "REQUEST_IDENTITY_REVIEW"),
+                "As duas contas possuem contexto próprio. A consolidação exige verificar os dados e permissões por comunidade.");
+        }
+        return new Preview(challenge.getDiscordUsername(), true,
+            "PRECHECK_REQUIRED", List.of("CHECK_ACCOUNT_CONFLICTS"),
+            "Ambas as identidades estão comprovadas. Ainda é necessário verificar todos os dados, privilégios e restrições antes da fusão.");
     }
 
     @Transactional
