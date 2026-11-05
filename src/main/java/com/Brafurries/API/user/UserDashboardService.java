@@ -1,5 +1,6 @@
 package com.Brafurries.API.user;
 
+import com.Brafurries.API.auth.social.DiscordSelfServiceLinkService;
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.entity.user.UserDiscord;
 import com.Brafurries.API.event.EventPartnershipService;
@@ -29,17 +30,20 @@ import org.springframework.web.server.ResponseStatusException;
 public class UserDashboardService {
 
     private final UserRepository userRepository;
+    private final DiscordSelfServiceLinkService selfServiceLinks;
     private final UserDiscordRepository userDiscordRepository;
     private final UserDashboardCachedQueryService cachedQueryService;
     private final EventPartnershipService eventPartnershipService;
 
     public UserDashboardService(
             UserRepository userRepository,
+            DiscordSelfServiceLinkService selfServiceLinks,
             UserDiscordRepository userDiscordRepository,
             UserDashboardCachedQueryService cachedQueryService,
             EventPartnershipService eventPartnershipService
     ) {
         this.userRepository = userRepository;
+        this.selfServiceLinks = selfServiceLinks;
         this.userDiscordRepository = userDiscordRepository;
         this.cachedQueryService = cachedQueryService;
         this.eventPartnershipService = eventPartnershipService;
@@ -50,7 +54,8 @@ public class UserDashboardService {
         String normalizedEmail = authentication.getName().trim().toLowerCase();
         User user = userRepository.findByEmail(normalizedEmail)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuario autenticado nao encontrado"));
-        UserDiscord userDiscord = userDiscordRepository.findByUser(user).orElse(null);
+        User historyOwner = selfServiceLinks.legacyProfileFor(user);
+        UserDiscord userDiscord = userDiscordRepository.findByUser(historyOwner).orElse(null);
         long timeBucket = Instant.now().getEpochSecond() / 60;
 
         DashboardEventProjection nextManagedEvent = cachedQueryService.findNextManagedEvent(normalizedEmail, timeBucket);
@@ -63,7 +68,7 @@ public class UserDashboardService {
 
         return new UserDashboardResponse(
                 resolveDiscordStatus(userDiscord),
-                resolveMyStatus(user),
+                resolveMyStatus(historyOwner),
                 resolveServers(userDiscord),
                 resolveAnalytics(authentication),
                 toManagedEvent(nextManagedEvent),
