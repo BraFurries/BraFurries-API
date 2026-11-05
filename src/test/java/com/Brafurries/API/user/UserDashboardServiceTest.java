@@ -1,5 +1,6 @@
 package com.Brafurries.API.user;
 
+import com.Brafurries.API.auth.social.DiscordSelfServiceLinkService;
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.event.EventPartnershipService;
 import com.Brafurries.API.repository.community.CommunityDiscordRepository.GeneralDiscordMetricsProjection;
@@ -32,6 +33,9 @@ class UserDashboardServiceTest {
     private UserRepository userRepository;
 
     @Mock
+    private DiscordSelfServiceLinkService accountLinks;
+
+    @Mock
     private UserDiscordRepository userDiscordRepository;
 
     @Mock
@@ -60,8 +64,10 @@ class UserDashboardServiceTest {
         when(cachedQueryService.findDashboardEventsByType(eq(false), any(Long.class))).thenReturn(List.of(meetOne, meetTwo));
         when(eventPartnershipService.findActivePartnerEventIds(any())).thenReturn(Set.of(2));
 
+        when(accountLinks.legacyProfileFor(user)).thenReturn(user);
         UserDashboardService service = new UserDashboardService(
                 userRepository,
+                accountLinks,
                 userDiscordRepository,
                 cachedQueryService,
                 eventPartnershipService
