@@ -183,45 +183,8 @@ public class DiscordSelfServiceLinkService {
             outcome = "CONNECTED";
         } else if (existing.getUser().getId().equals(actor.getId())) {
             outcome = "ALREADY_CONNECTED";
-        } else {
-            Integer otherUserId = existing.getUser().getId();
-            // Lock both users in a deterministic order so concurrent claims
-            // cannot create different identity clusters or race deletion.
-            List<Integer> ordered = java.util.stream.Stream.of(actor.getId(), otherUserId).sorted().toList();
-            for (Integer userId : ordered) {
-                users.findByIdForUpdate(userId)
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "Conta alterada durante a vinculação"));
-            }
-            // Only one authenticated website account may claim the Discord
-            // profile through self-service. Existing ADMIN moderation evidence
-            // alone does not confer access to someone else's private data.
-            boolean claimedByAnother = links.findActiveLinksContainingUser(otherUserId).stream()
-                .anyMatch(link -> link.getStatus() == UserIdentityLinkStatus.CONFIRMED
-                    && link.getLinkSource() == UserIdentityLinkSource.SOCIAL
-                    && !link.getUserA().getId().equals(actor.getId()));
-            if (claimedByAnother) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Este Discord já foi recuperado por outra conta. Faça a recuperação a partir dessa conta.");
-            }
-            UserIdentityLink known = links.findActiveByPair(actor.getId(), otherUserId).orElse(null);
-            if (known != null && (known.getStatus() != UserIdentityLinkStatus.CONFIRMED
-                || known.getLinkSource() != UserIdentityLinkSource.SOCIAL)) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Existe uma revisão de identidade em aberto. Não é possível sobrepor esse vínculo automaticamente.");
-            }
-            if (known == null) {
-                UserIdentityLink link = new UserIdentityLink();
-                link.setUserA(actor);
-                link.setUserB(existing.getUser());
-                link.setStatus(UserIdentityLinkStatus.CONFIRMED);
-                link.setLinkSource(UserIdentityLinkSource.SOCIAL);
-                link.setReason("Vínculo confirmado por conta autenticada e OAuth Discord do titular");
-                link.setCreatedByUser(actor);
-                links.saveAndFlush(link);
-                afterCommitPropagate(actor.getId());
-            }
-            outcome = "HISTORY_CONNECTED";
         }
+
 
         challenge.setStatus("CONSUMED");
         challenge.setConsumedAt(now());
