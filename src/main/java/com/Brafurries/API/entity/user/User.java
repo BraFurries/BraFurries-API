@@ -15,6 +15,12 @@ public class User {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
+    @Column(name = "merged_into_user_id")
+    private Integer mergedIntoUserId;
+
+    @Column(name = "auth_version", nullable = false)
+    private long authVersion = 0;
+
     @Column(name = "display_name", length = 32)
     private String displayName;
 
