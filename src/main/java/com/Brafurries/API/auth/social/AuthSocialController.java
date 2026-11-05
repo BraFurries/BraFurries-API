@@ -30,6 +30,7 @@ public class AuthSocialController {
 
     private final AuthSocialService authSocialService;
     private final SocialFrontendOriginPolicy frontendOriginPolicy;
+    private final SocialAccountLinkService accountLinkService;
 
     @Operation(summary = "Inicia login OAuth2 via Discord")
     @GetMapping("/auth/oauth2/discord")
@@ -38,6 +39,20 @@ public class AuthSocialController {
         HttpServletRequest request
     ) {
         return startOAuth2Login("discord", frontendOrigin, request);
+    }
+
+    @Operation(summary = "Inicia uma vinculação Discord autorizada anteriormente pela sessão do site")
+    @GetMapping("/auth/oauth2/discord/link")
+    public RedirectView startVerifiedDiscordLink(
+        @RequestParam("challenge") String challenge,
+        @RequestParam(name = "frontend_origin", required = false) String frontendOrigin,
+        HttpServletRequest request,
+        jakarta.servlet.http.HttpServletResponse response
+    ) {
+        accountLinkService.begin(challenge, frontendOrigin, request);
+        response.setHeader("Referrer-Policy", "no-referrer");
+        response.setHeader("Cache-Control", "no-store");
+        return new RedirectView("/oauth2/authorization/discord");
     }
 
     @Operation(summary = "Inicia login OAuth2 via Google")
