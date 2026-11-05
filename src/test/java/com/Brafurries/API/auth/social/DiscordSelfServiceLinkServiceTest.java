@@ -127,7 +127,7 @@ class DiscordSelfServiceLinkServiceTest {
     }
 
     @Test
-    void legacyRecoveryOnlyCreatesAuditedIdentityEdgeAndNeverMovesDiscordRow() {
+    void crossUserConfirmationRequiresReconciliationWithoutMutatingIdentities() {
         User web = user(10);
         User legacy = user(20);
         UserDiscordLinkChallenge proof = verified(web);
@@ -137,25 +137,15 @@ class DiscordSelfServiceLinkServiceTest {
         when(users.findByEmail("person@example.com")).thenReturn(Optional.of(web));
         when(challenges.findByTicketHashForUpdate(anyString())).thenReturn(Optional.of(proof));
         when(discord.findByDiscordUserId(123456789L)).thenReturn(Optional.of(legacyDiscord));
-        when(discord.findByUser(web)).thenReturn(Optional.empty());
-        when(users.findByIdForUpdate(10)).thenReturn(Optional.of(web));
-        when(users.findByIdForUpdate(20)).thenReturn(Optional.of(legacy));
-        when(links.findActiveLinksContainingUser(20)).thenReturn(List.of());
-        when(links.findActiveByPair(10,20)).thenReturn(Optional.empty());
 
-        var result = service().confirm(auth(), TICKET);
-
-        assertEquals("HISTORY_CONNECTED", result.status());
-        ArgumentCaptor<UserIdentityLink> edge = ArgumentCaptor.forClass(UserIdentityLink.class);
-        verify(links).saveAndFlush(edge.capture());
-        assertEquals(UserIdentityLinkStatus.CONFIRMED, edge.getValue().getStatus());
-        assertEquals(UserIdentityLinkSource.SOCIAL, edge.getValue().getLinkSource());
-        assertEquals(10, edge.getValue().getUserA().getId());
-        assertEquals(20, edge.getValue().getUserB().getId());
+        var failure = assertThrows(ResponseStatusException.class,
+            () -> service().confirm(auth(), TICKET));
+        assertEquals(HttpStatus.CONFLICT, failure.getStatusCode());
+        assertTrue(failure.getReason().contains("ACCOUNT_RECONCILIATION_REQUIRED"));
+        verify(links, never()).saveAndFlush(any());
         verify(discord, never()).saveAndFlush(any());
-        verify(users, never()).delete(any());
         assertEquals(legacy, legacyDiscord.getUser());
-        assertEquals("CONSUMED", proof.getStatus());
+        assertEquals("VERIFIED", proof.getStatus());
     }
 
     @Test
