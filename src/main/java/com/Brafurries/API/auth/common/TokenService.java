@@ -41,6 +41,10 @@ public class TokenService {
     }
 
     public String generateAccessToken(String principal, Collection<String> roles, Collection<String> permissions) {
+        return generateAccessToken(principal, roles, permissions, 0);
+    }
+
+    public String generateAccessToken(String principal, Collection<String> roles, Collection<String> permissions, long authVersion) {
         try {
             String headerJson = objectMapper.writeValueAsString(java.util.Map.of("alg", "HS256", "typ", "JWT"));
             Instant expiresAt = accessExpiresAt();
