@@ -12,7 +12,6 @@ import java.time.ZoneOffset;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.core.Authentication;
@@ -237,11 +236,18 @@ public class DiscordSelfServiceLinkService {
     }
 
     private UserDiscordLinkChallenge requireChallenge(String ticket) {
-        return challenges.findByTicketHash(hash(ticket)).orElseThrow(this::invalidTicketChecked);
+        return ensureNotExpired(challenges.findByTicketHash(hash(ticket))
+            .orElseThrow(this::invalidTicketChecked));
     }
 
     private UserDiscordLinkChallenge requireLockedChallenge(String ticket) {
-        return challenges.findByTicketHashForUpdate(hash(ticket)).orElseThrow(this::invalidTicketChecked);
+        return ensureNotExpired(challenges.findByTicketHashForUpdate(hash(ticket))
+            .orElseThrow(this::invalidTicketChecked));
+    }
+
+    private UserDiscordLinkChallenge ensureNotExpired(UserDiscordLinkChallenge challenge) {
+        if (!challenge.getExpiresAt().isAfter(now())) throw invalidTicket();
+        return challenge;
     }
 
     private UserDiscordLinkChallenge requireVerifiedChallenge(User actor, UserDiscordLinkChallenge challenge) {
