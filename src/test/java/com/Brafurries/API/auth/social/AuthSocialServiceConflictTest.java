@@ -36,6 +36,7 @@ class AuthSocialServiceConflictTest {
     @Mock ApiRolePermissionRepository permissions;
     @Mock UserDiscordRepository discord;
     @Mock UserTokenRepository userTokens;
+    @Mock DiscordSelfServiceLinkService accountLinks;
     @Mock OAuth2AuthenticationToken authentication;
     @Mock OAuth2User principal;
 
@@ -57,7 +58,7 @@ class AuthSocialServiceConflictTest {
         when(discord.findByDiscordUserId(123456789L)).thenReturn(Optional.of(providerLink));
 
         AuthSocialService service = new AuthSocialService(
-            users, refreshTokens, tokens, accessTokens, roles, permissions, discord, userTokens
+            users, refreshTokens, tokens, accessTokens, roles, permissions, discord, userTokens, accountLinks
         );
 
         assertThrows(BadCredentialsException.class, () -> service.loginOAuth2(authentication));
@@ -87,7 +88,7 @@ class AuthSocialServiceConflictTest {
         when(discord.findByUser(emailUser)).thenReturn(Optional.of(oldLink));
 
         AuthSocialService service = new AuthSocialService(
-            users, refreshTokens, tokens, accessTokens, roles, permissions, discord, userTokens
+            users, refreshTokens, tokens, accessTokens, roles, permissions, discord, userTokens, accountLinks
         );
 
         assertThrows(BadCredentialsException.class, () -> service.loginOAuth2(authentication));
