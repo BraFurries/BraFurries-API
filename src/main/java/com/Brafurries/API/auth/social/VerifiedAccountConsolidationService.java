@@ -174,6 +174,11 @@ public class VerifiedAccountConsolidationService {
         // must first exist under the canonical user in each independent Community.
         transferCommunityMemberships(to, from);
         dedupeRoleGrants(to, from);
+        // Composite-FK dependents are not direct FKs to users and therefore
+        // must be moved explicitly before the old membership rows disappear.
+        jdbc.update("UPDATE community_team_role_assignments SET user_id=? WHERE user_id=?", to, from);
+        jdbc.update("UPDATE community_user_capability_grants SET user_id=? WHERE user_id=?", to, from);
+        jdbc.update("UPDATE community_member_notes SET user_id=? WHERE user_id=?", to, from);
 
         List<Map<String,Object>> refs = jdbc.queryForList("""
             SELECT TABLE_NAME AS table_name, COLUMN_NAME AS column_name
