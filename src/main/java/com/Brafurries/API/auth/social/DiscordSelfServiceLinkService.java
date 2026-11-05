@@ -34,6 +34,7 @@ public class DiscordSelfServiceLinkService {
 
     private final UserRepository users;
     private final UserDiscordRepository discord;
+    private final UserCommunityStatusRepository memberships;
     private final UserIdentityLinkRepository links;
     private final UserDiscordLinkChallengeRepository challenges;
     private final IdentityBanPropagationService banPropagation;
@@ -42,6 +43,7 @@ public class DiscordSelfServiceLinkService {
     public DiscordSelfServiceLinkService(
         UserRepository users,
         UserDiscordRepository discord,
+        UserCommunityStatusRepository memberships,
         UserIdentityLinkRepository links,
         UserDiscordLinkChallengeRepository challenges,
         IdentityBanPropagationService banPropagation,
@@ -49,6 +51,7 @@ public class DiscordSelfServiceLinkService {
     ) {
         this.users = users;
         this.discord = discord;
+        this.memberships = memberships;
         this.links = links;
         this.challenges = challenges;
         this.banPropagation = banPropagation;
@@ -187,7 +190,13 @@ public class DiscordSelfServiceLinkService {
      */
     @Transactional(readOnly = true)
     public User legacyProfileFor(User authenticated) {
-        if (discord.findByUser(authenticated).isPresent()) return authenticated;
+        if (discord.findByUser(authenticated).isPresent()
+            || memberships.countByUserId(authenticated.getId()) > 0) {
+            // A website account with its own Community data must never
+            // silently swap that history out. Multi-profile reconciliation
+            // needs a separate explicit choice instead of hidden replacement.
+            return authenticated;
+        }
         List<User> proven = links.findActiveLinksContainingUser(authenticated.getId()).stream()
             .filter(link -> link.getStatus() == UserIdentityLinkStatus.CONFIRMED
                 && link.getLinkSource() == UserIdentityLinkSource.SOCIAL
