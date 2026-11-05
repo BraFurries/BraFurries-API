@@ -46,6 +46,7 @@ public class AuthSocialService {
     private final ApiRolePermissionRepository apiRolePermissionRepository;
     private final UserDiscordRepository userDiscordRepository;
     private final UserTokenRepository userTokenRepository;
+    private final DiscordSelfServiceLinkService accountLinks;
     private final Map<String, PendingSocialRegistration> pendingRegistrations = new ConcurrentHashMap<>();
 
     @Value("${GOOGLE_CLIENT_ID:}")
@@ -61,7 +62,8 @@ public class AuthSocialService {
         ApiUserRoleRepository apiUserRoleRepository,
         ApiRolePermissionRepository apiRolePermissionRepository,
         UserDiscordRepository userDiscordRepository,
-        UserTokenRepository userTokenRepository
+        UserTokenRepository userTokenRepository,
+        DiscordSelfServiceLinkService accountLinks
     ) {
         this.userRepository = userRepository;
         this.userRefreshTokenRepository = userRefreshTokenRepository;
@@ -71,6 +73,7 @@ public class AuthSocialService {
         this.apiRolePermissionRepository = apiRolePermissionRepository;
         this.userDiscordRepository = userDiscordRepository;
         this.userTokenRepository = userTokenRepository;
+        this.accountLinks = accountLinks;
     }
 
     @Transactional
@@ -205,11 +208,17 @@ public class AuthSocialService {
         Optional<User> byEmail = userRepository.findByEmail(profile.email());
         Optional<User> byProviderId = findUserByProviderId(profile);
 
+        if ("discord".equals(profile.provider()) && byProviderId.isPresent()) {
+            // Only links created after website JWT + Discord OAuth proof may
+            // change where Discord login lands. Do not trust generic admin
+            // identity clusters or a matching email alone.
+            Optional<User> recovered = accountLinks.recoveredLoginFor(byProviderId.get());
+            if (recovered.isPresent()) return recovered;
+        }
+
         if (byEmail.isPresent() && byProviderId.isPresent()
                 && !byEmail.get().getId().equals(byProviderId.get().getId())) {
-            throw new BadCredentialsException(
-                "E-mail e provedor pertencem a contas distintas; regularização administrativa necessária"
-            );
+            throw new BadCredentialsException("ACCOUNT_LINK_REQUIRED");
         }
 
         return byEmail.or(() -> byProviderId);
@@ -395,7 +404,12 @@ public class AuthSocialService {
         if (existingByDiscordId.isPresent()) {
             UserDiscord link = existingByDiscordId.get();
             if (!link.getUser().getId().equals(user.getId())) {
-                throw new BadCredentialsException("Conta Discord ja vinculada a outro usuario");
+                if (accountLinks.isVerifiedLink(user, link.getUser())) {
+                    // Keep the original Discord row with its legacy account.
+                    // The two identities are authenticated but never merged.
+                    return;
+                }
+                throw new BadCredentialsException("ACCOUNT_LINK_REQUIRED");
             }
             updateDiscordLink(link, profile);
             return;
@@ -404,7 +418,7 @@ public class AuthSocialService {
         Optional<UserDiscord> existingForUser = userDiscordRepository.findByUser(user);
         if (existingForUser.isPresent()) {
             throw new BadCredentialsException(
-                "E-mail e provedor pertencem a contas distintas; regularização administrativa necessária"
+                "ACCOUNT_LINK_REQUIRED"
             );
         }
 
