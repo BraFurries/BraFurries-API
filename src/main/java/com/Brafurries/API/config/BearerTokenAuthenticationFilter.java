@@ -39,12 +39,16 @@ public class BearerTokenAuthenticationFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
-    private boolean isAccountAllowed(String principal) {
-        return userRepository.findByEmail(principal)
-            .map(user -> !userTokenRepository.existsByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(
-                user,
-                UserTokenType.EMAIL_VERIFICATION
-            ))
+    private boolean isAccountAllowed(Authentication authentication) {
+        Object details = authentication.getDetails();
+        if (!(details instanceof Long tokenVersion)) return false;
+        return userRepository.findByEmail(authentication.getName())
+            .map(user -> user.getMergedIntoUserId() == null
+                && user.getAuthVersion() == tokenVersion
+                && !userTokenRepository.existsByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(
+                    user,
+                    UserTokenType.EMAIL_VERIFICATION
+                ))
             .orElse(false);
     }
 }
