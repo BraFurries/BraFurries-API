@@ -168,6 +168,11 @@ public class DiscordSelfServiceLinkService {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                 "Sua conta já tem outro Discord conectado. Desconecte-o antes de tentar novamente.");
         }
+        // Until a complete per-Community consolidation plan exists, a proven
+        // Discord account owned by another User cannot be silently linked.
+        if (existing != null && !existing.getUser().getId().equals(actor.getId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "ACCOUNT_RECONCILIATION_REQUIRED");
+        }
         if (existing == null) {
             UserDiscord link = new UserDiscord();
             link.setUser(actor);
