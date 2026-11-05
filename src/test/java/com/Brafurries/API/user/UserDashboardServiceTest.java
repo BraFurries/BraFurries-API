@@ -107,8 +107,10 @@ class UserDashboardServiceTest {
         when(metrics.getActiveDiscordCommunities()).thenReturn(12L);
         when(metrics.getTotalMembersReachedActiveCommunities()).thenReturn(3456L);
 
+        when(accountLinks.legacyProfileFor(user)).thenReturn(user);
         UserDashboardService service = new UserDashboardService(
                 userRepository,
+                accountLinks,
                 userDiscordRepository,
                 cachedQueryService,
                 eventPartnershipService
