@@ -208,19 +208,35 @@ public class AuthSocialService {
         Optional<User> byEmail = userRepository.findByEmail(profile.email());
         Optional<User> byProviderId = findUserByProviderId(profile);
 
-        if ("discord".equals(profile.provider()) && byProviderId.isPresent()) {
-            // Only links created after website JWT + Discord OAuth proof may
-            // change where Discord login lands. Do not trust generic admin
-            // identity clusters or a matching email alone.
+        if ("discord".equals(profile.provider())) {
+            if (byProviderId.isEmpty()) {
+                // A verified Discord e-mail is NOT proof of possession of an
+                // existing BraFurries/Google account with the same address.
+                // The owner must sign in there and complete Discord OAuth proof.
+                if (byEmail.isPresent()) throw new BadCredentialsException("ACCOUNT_LINK_REQUIRED");
+                return Optional.empty();
+            }
+
+            // Only a pre-existing OAuth-proven SOCIAL link can redirect login
+            // away from the original Discord owner. Never infer this by e-mail.
             Optional<User> recovered = accountLinks.recoveredLoginFor(byProviderId.get());
-            if (recovered.isPresent()) return recovered;
+            if (recovered.isPresent()) {
+                if (byEmail.isPresent() && !byEmail.get().getId().equals(recovered.get().getId())
+                    && !byEmail.get().getId().equals(byProviderId.get().getId())) {
+                    throw new BadCredentialsException("ACCOUNT_LINK_REQUIRED");
+                }
+                return recovered;
+            }
+
+            if (byEmail.isPresent() && !byEmail.get().getId().equals(byProviderId.get().getId())) {
+                throw new BadCredentialsException("ACCOUNT_LINK_REQUIRED");
+            }
+            return byProviderId;
         }
 
-        if (byEmail.isPresent() && byProviderId.isPresent()
-                && !byEmail.get().getId().equals(byProviderId.get().getId())) {
-            throw new BadCredentialsException("ACCOUNT_LINK_REQUIRED");
-        }
-
+        // Google subject persistence and conflict handling require the
+        // upcoming user_social_identities migration. This legacy e-mail
+        // fallback MUST be removed before final account-consolidation rollout.
         return byEmail.or(() -> byProviderId);
     }
 
