@@ -31,7 +31,7 @@ public class BearerTokenAuthenticationFilter extends OncePerRequestFilter {
         if (authorizationHeader != null && authorizationHeader.startsWith("Bearer ")) {
             String token = authorizationHeader.substring(7).trim();
             Authentication authentication = tokenService.authenticateAccessToken(token);
-            if (authentication != null && isAccountAllowed(authentication.getName())) {
+            if (authentication != null && isAccountAllowed(authentication)) {
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             }
         }
