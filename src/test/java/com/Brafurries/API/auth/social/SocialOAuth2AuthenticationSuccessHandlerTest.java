@@ -25,9 +25,12 @@ class SocialOAuth2AuthenticationSuccessHandlerTest {
     @Mock
     private AuthSocialService authSocialService;
 
+    @Mock
+    private DiscordSelfServiceLinkService discordLinkService;
+
     @Test
     void redirectsToFrontendErrorWhenUnexpectedOauthCompletionErrorHappens() throws Exception {
-        SocialOAuth2AuthenticationSuccessHandler handler = new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy());
+        SocialOAuth2AuthenticationSuccessHandler handler = new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService);
         DefaultOAuth2User principal = new DefaultOAuth2User(
             java.util.List.of(),
             Map.of("id", "123456789"),
@@ -58,7 +61,7 @@ class SocialOAuth2AuthenticationSuccessHandlerTest {
         when(authSocialService.loginOAuth2(authentication)).thenReturn(new ExistingUserLogin(login));
 
         MockHttpServletResponse response = new MockHttpServletResponse();
-        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy())
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService)
             .onAuthenticationSuccess(new MockHttpServletRequest(), response, authentication);
 
         assertEquals(302, response.getStatus());
@@ -75,7 +78,7 @@ class SocialOAuth2AuthenticationSuccessHandlerTest {
         when(authSocialService.loginOAuth2(authentication)).thenReturn(new ExistingUserLogin(login));
 
         MockHttpServletResponse response = new MockHttpServletResponse();
-        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy())
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService)
             .onAuthenticationSuccess(new MockHttpServletRequest(), response, authentication);
 
         assertEquals(302, response.getStatus());
@@ -98,7 +101,7 @@ class SocialOAuth2AuthenticationSuccessHandlerTest {
         );
         MockHttpServletResponse response = new MockHttpServletResponse();
 
-        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy())
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService)
             .onAuthenticationSuccess(request, response, authentication);
 
         assertTrue(
@@ -124,7 +127,7 @@ class SocialOAuth2AuthenticationSuccessHandlerTest {
         );
         MockHttpServletResponse response = new MockHttpServletResponse();
 
-        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy())
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService)
             .onAuthenticationSuccess(request, response, authentication);
 
         assertTrue(
