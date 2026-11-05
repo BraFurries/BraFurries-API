@@ -70,13 +70,9 @@ class AuthSocialServiceConflictTest {
     }
 
     @Test
-    void existingUserDiscordIsNeverReassignedToANewProviderId() {
+    void matchingVerifiedEmailAloneNeverAuthorizesANewDiscordIdentity() {
         User emailUser = user(10, "person@example.com");
         emailUser.setDisplayName("Person");
-        UserDiscord oldLink = new UserDiscord();
-        oldLink.setUser(emailUser);
-        oldLink.setDiscordUserId(111L);
-
         when(authentication.getAuthorizedClientRegistrationId()).thenReturn("discord");
         when(authentication.getPrincipal()).thenReturn(principal);
         when(principal.getAttributes()).thenReturn(Map.of(
@@ -85,7 +81,6 @@ class AuthSocialServiceConflictTest {
         ));
         when(users.findByEmail("person@example.com")).thenReturn(Optional.of(emailUser));
         when(discord.findByDiscordUserId(222L)).thenReturn(Optional.empty());
-        when(discord.findByUser(emailUser)).thenReturn(Optional.of(oldLink));
 
         AuthSocialService service = new AuthSocialService(
             users, refreshTokens, tokens, accessTokens, roles, permissions, discord, userTokens, accountLinks
