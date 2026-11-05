@@ -250,7 +250,7 @@ class DiscordSelfServiceLinkServiceTest {
         var preview = service().preview(auth(), TICKET);
 
         assertEquals("RESOLUTION_REQUIRED", preview.status());
-        assertTrue(preview.nextActions().contains("REVIEW_COMMUNITY_DATA"));
+        assertTrue(preview.nextActions().contains("RECONCILE_COMMUNITY_MEMBERSHIP"));
     }
 
     @Test
