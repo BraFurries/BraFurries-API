@@ -29,13 +29,16 @@ public class SocialOAuth2AuthenticationSuccessHandler implements AuthenticationS
 
     private final AuthSocialService authSocialService;
     private final SocialFrontendOriginPolicy frontendOriginPolicy;
+    private final SocialAccountLinkService accountLinkService;
 
     public SocialOAuth2AuthenticationSuccessHandler(
         AuthSocialService authSocialService,
-        SocialFrontendOriginPolicy frontendOriginPolicy
+        SocialFrontendOriginPolicy frontendOriginPolicy,
+        SocialAccountLinkService accountLinkService
     ) {
         this.authSocialService = authSocialService;
         this.frontendOriginPolicy = frontendOriginPolicy;
+        this.accountLinkService = accountLinkService;
     }
 
     @Override
@@ -48,11 +51,25 @@ public class SocialOAuth2AuthenticationSuccessHandler implements AuthenticationS
             throw new ServletException("Autenticacao OAuth2 invalida");
         }
 
+        var session = request.getSession(false);
+        Object challenge = session == null ? null : session.getAttribute(SocialAccountLinkService.SESSION_CHALLENGE);
+        if (session != null) session.removeAttribute(SocialAccountLinkService.SESSION_CHALLENGE);
         String frontendOrigin = consumeFrontendOrigin(request);
 
         try {
+            if (challenge instanceof String hash) {
+                // This was a link operation, NOT a social login. Never switch
+                // accounts before proving both identities and consolidating.
+                LoginResponse linked = accountLinkService.complete(hash, oauth2Authentication);
+                response.sendRedirect(successRedirectUri(linked, frontendOrigin));
+                return;
+            }
             OAuth2LoginResult result = authSocialService.loginOAuth2(oauth2Authentication);
             response.sendRedirect(redirectUri(result, frontendOrigin));
+        } catch (org.springframework.web.server.ResponseStatusException conflict) {
+            String message = conflict.getReason() == null
+                ? "Não foi possível concluir a vinculação" : conflict.getReason();
+            response.sendRedirect(errorRedirectUri(message, frontendOrigin));
         } catch (BadCredentialsException | IllegalArgumentException ex) {
             response.sendRedirect(errorRedirectUri(ex.getMessage(), frontendOrigin));
         } catch (RuntimeException ex) {
@@ -67,6 +84,8 @@ public class SocialOAuth2AuthenticationSuccessHandler implements AuthenticationS
         HttpServletResponse response,
         org.springframework.security.core.AuthenticationException exception
     ) throws IOException {
+        var session = request.getSession(false);
+        if (session != null) session.removeAttribute(SocialAccountLinkService.SESSION_CHALLENGE);
         String frontendOrigin = consumeFrontendOrigin(request);
         response.sendRedirect(errorRedirectUri(exception.getMessage(), frontendOrigin));
     }
