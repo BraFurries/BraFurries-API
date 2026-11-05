@@ -162,7 +162,7 @@ public class DiscordSelfServiceLinkService {
 
         UserDiscord existing = discord.findByDiscordUserId(challenge.getDiscordUserId()).orElse(null);
         UserDiscord own = discord.findByUser(actor).orElse(null);
-        String outcome;
+        String outcome = "ALREADY_CONNECTED";
 
         if (own != null && !own.getDiscordUserId().equals(challenge.getDiscordUserId())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
