@@ -136,6 +136,49 @@ class SocialOAuth2AuthenticationSuccessHandlerTest {
         );
     }
 
+    @Test
+    void proofCallbackVerifiesDiscordWithoutSwitchingGoogleSessionOrIssuingTokens() throws Exception {
+        OAuth2AuthenticationToken auth = authentication();
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        String ticket = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH";
+        request.getSession(true).setAttribute(
+            DiscordSelfServiceLinkService.SESSION_TICKET, ticket
+        );
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService)
+            .onAuthenticationSuccess(request, response, auth);
+
+        org.mockito.Mockito.verify(discordLinkService).verifiedDiscordOAuth(ticket, auth);
+        org.mockito.Mockito.verifyNoInteractions(authSocialService);
+        assertEquals(302, response.getStatus());
+        assertTrue(response.getRedirectedUrl().startsWith(
+            "https://brafurries.com.br/painel/perfil#discord_link_ticket="));
+        assertTrue(response.getRedirectedUrl().contains(ticket));
+        assertNull(request.getSession(false).getAttribute(DiscordSelfServiceLinkService.SESSION_TICKET));
+        assertTrue(!response.getRedirectedUrl().contains("access_token="));
+    }
+
+    @Test
+    void failedDiscordProofDoesNotLeakProviderOrSessionToken() throws Exception {
+        OAuth2AuthenticationToken auth = authentication();
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        String ticket = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH";
+        request.getSession(true).setAttribute(DiscordSelfServiceLinkService.SESSION_TICKET, ticket);
+        org.mockito.Mockito.doThrow(new IllegalArgumentException("untrusted discord value"))
+            .when(discordLinkService).verifiedDiscordOAuth(ticket, auth);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService)
+            .onAuthenticationSuccess(request, response, auth);
+
+        org.mockito.Mockito.verifyNoInteractions(authSocialService);
+        assertTrue(response.getRedirectedUrl().startsWith(
+            "https://brafurries.com.br/painel/perfil?discord_link_error="));
+        assertTrue(!response.getRedirectedUrl().contains(ticket));
+        assertTrue(!response.getRedirectedUrl().contains("untrusted"));
+    }
+
     private SocialFrontendOriginPolicy policy() {
         return new SocialFrontendOriginPolicy("https://brafurries.com.br");
     }
