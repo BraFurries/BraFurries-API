@@ -28,13 +28,16 @@ public class SocialOAuth2AuthenticationSuccessHandler implements AuthenticationS
     private static final Logger LOGGER = LoggerFactory.getLogger(SocialOAuth2AuthenticationSuccessHandler.class);
 
     private final AuthSocialService authSocialService;
+    private final DiscordSelfServiceLinkService discordLinkService;
     private final SocialFrontendOriginPolicy frontendOriginPolicy;
 
     public SocialOAuth2AuthenticationSuccessHandler(
         AuthSocialService authSocialService,
-        SocialFrontendOriginPolicy frontendOriginPolicy
+        SocialFrontendOriginPolicy frontendOriginPolicy,
+        DiscordSelfServiceLinkService discordLinkService
     ) {
         this.authSocialService = authSocialService;
+        this.discordLinkService = discordLinkService;
         this.frontendOriginPolicy = frontendOriginPolicy;
     }
 
@@ -49,15 +52,27 @@ public class SocialOAuth2AuthenticationSuccessHandler implements AuthenticationS
         }
 
         String frontendOrigin = consumeFrontendOrigin(request);
+        String linkTicket = consumeDiscordLinkTicket(request);
 
         try {
+            if (linkTicket != null) {
+                // This is proof of Discord possession, not a new website login.
+                // Never issue replacement JWTs or switch the current Google session.
+                discordLinkService.verifiedDiscordOAuth(linkTicket, oauth2Authentication);
+                response.sendRedirect(linkConfirmationRedirectUri(linkTicket, frontendOrigin));
+                return;
+            }
             OAuth2LoginResult result = authSocialService.loginOAuth2(oauth2Authentication);
             response.sendRedirect(redirectUri(result, frontendOrigin));
-        } catch (BadCredentialsException | IllegalArgumentException ex) {
-            response.sendRedirect(errorRedirectUri(ex.getMessage(), frontendOrigin));
+        } catch (BadCredentialsException | IllegalArgumentException | org.springframework.web.server.ResponseStatusException ex) {
+            response.sendRedirect(linkTicket != null
+                ? linkErrorRedirectUri("Não foi possível confirmar esse Discord. Inicie novamente a vinculação.", frontendOrigin)
+                : errorRedirectUri(ex.getMessage(), frontendOrigin));
         } catch (RuntimeException ex) {
-            LOGGER.error("Erro inesperado ao finalizar login OAuth2", ex);
-            response.sendRedirect(errorRedirectUri("Falha inesperada ao finalizar login social", frontendOrigin));
+            LOGGER.error("Erro inesperado ao finalizar OAuth2", ex);
+            response.sendRedirect(linkTicket != null
+                ? linkErrorRedirectUri("Falha ao verificar Discord. Tente novamente.", frontendOrigin)
+                : errorRedirectUri("Falha inesperada ao finalizar login social", frontendOrigin));
         }
     }
 
@@ -68,7 +83,32 @@ public class SocialOAuth2AuthenticationSuccessHandler implements AuthenticationS
         org.springframework.security.core.AuthenticationException exception
     ) throws IOException {
         String frontendOrigin = consumeFrontendOrigin(request);
-        response.sendRedirect(errorRedirectUri(exception.getMessage(), frontendOrigin));
+        String linkTicket = consumeDiscordLinkTicket(request);
+        response.sendRedirect(linkTicket != null
+            ? linkErrorRedirectUri("Autorização Discord não concluída. Você pode tentar novamente.", frontendOrigin)
+            : errorRedirectUri(exception.getMessage(), frontendOrigin));
+    }
+
+    private String consumeDiscordLinkTicket(HttpServletRequest request) {
+        var session = request.getSession(false);
+        if (session == null) return null;
+        Object ticket = session.getAttribute(DiscordSelfServiceLinkService.SESSION_TICKET);
+        session.removeAttribute(DiscordSelfServiceLinkService.SESSION_TICKET);
+        return ticket instanceof String value && !value.isBlank() ? value : null;
+    }
+
+    private String linkConfirmationRedirectUri(String ticket, String frontendOrigin) {
+        return UriComponentsBuilder.fromUriString(frontendOrigin)
+            .path("/painel/perfil")
+            .fragment("discord_link_ticket=" + encode(ticket))
+            .build(true).toUriString();
+    }
+
+    private String linkErrorRedirectUri(String message, String frontendOrigin) {
+        return UriComponentsBuilder.fromUriString(frontendOrigin)
+            .path("/painel/perfil")
+            .queryParam("discord_link_error", encode(message))
+            .build(true).toUriString();
     }
 
     private String redirectUri(OAuth2LoginResult result, String frontendOrigin) {
