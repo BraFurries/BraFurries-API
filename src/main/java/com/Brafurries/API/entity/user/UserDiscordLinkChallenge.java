@@ -1,6 +1,8 @@
 package com.Brafurries.API.entity.user;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.LocalDateTime;
 import lombok.Getter;
 import lombok.Setter;
@@ -14,7 +16,8 @@ public class UserDiscordLinkChallenge {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "ticket_hash", nullable = false, unique = true, length = 64)
+    @JdbcTypeCode(SqlTypes.CHAR)
+    @Column(name = "ticket_hash", nullable = false, unique = true, length = 64, columnDefinition = "char(64)")
     private String ticketHash;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
