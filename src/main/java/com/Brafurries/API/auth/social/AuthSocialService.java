@@ -284,6 +284,18 @@ public class AuthSocialService {
         pendingRegistrations.entrySet().removeIf(entry -> entry.getValue().expiresAt().isBefore(now));
     }
 
+    /** Only used by the verified social-link OAuth callback after a committed
+     * canonical identity decision. Never expose this method as a public endpoint. */
+    @Transactional
+    public LoginResponse issueLinkedAccountLogin(Integer canonicalUserId) {
+        User canonical = userRepository.findById(canonicalUserId)
+            .orElseThrow(() -> new BadCredentialsException("Conta consolidada não encontrada"));
+        if (canonical.getMergedIntoUserId() != null) {
+            throw new BadCredentialsException("Esta identidade foi consolidada. Entre com a conta atual.");
+        }
+        return issueLoginResponse(canonical);
+    }
+
     private LoginResponse issueLoginResponse(User user) {
         if (userTokenRepository.existsByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(
                 user,
