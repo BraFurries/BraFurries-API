@@ -201,6 +201,7 @@ class DiscordSelfServiceLinkServiceTest {
         original.setUser(legacy);
         when(memberships.countByUserId(10)).thenReturn(0L);
         when(links.findActiveLinksContainingUser(10)).thenReturn(List.of(link(web, legacy, UserIdentityLinkSource.SOCIAL)));
+        when(discord.findByUser(web)).thenReturn(Optional.empty());
         when(discord.findByUser(legacy)).thenReturn(Optional.of(original));
         assertEquals(legacy, service().legacyProfileFor(web));
         when(links.findActiveLinksContainingUser(20)).thenReturn(List.of(link(web, legacy, UserIdentityLinkSource.SOCIAL)));
