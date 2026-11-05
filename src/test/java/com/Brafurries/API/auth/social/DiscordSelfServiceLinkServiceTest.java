@@ -219,6 +219,60 @@ class DiscordSelfServiceLinkServiceTest {
         assertTrue(service().isVerifiedLink(web, legacy));
     }
 
+    @Test
+    void previewRequiresFullPreflightForUnclaimedLegacyData() {
+        User web = user(10), legacy = user(20);
+        UserDiscord existing = new UserDiscord();
+        existing.setUser(legacy);
+        existing.setDiscordUserId(123456789L);
+        when(users.findByEmail("person@example.com")).thenReturn(Optional.of(web));
+        when(challenges.findByTicketHash(anyString())).thenReturn(Optional.of(verified(web)));
+        when(discord.findByDiscordUserId(123456789L)).thenReturn(Optional.of(existing));
+        when(links.findActiveLinksContainingUser(20)).thenReturn(List.of());
+
+        var preview = service().preview(auth(), TICKET);
+
+        assertEquals("PRECHECK_REQUIRED", preview.status());
+        assertEquals(List.of("CHECK_ACCOUNT_CONFLICTS"), preview.nextActions());
+        assertTrue(preview.hasExistingHistory());
+        verify(discord, never()).save(any());
+        verify(links, never()).save(any());
+    }
+
+    @Test
+    void previewOffersResolutionWhenWebsiteHasCommunityData() {
+        User web = user(10), legacy = user(20);
+        UserDiscord existing = new UserDiscord();
+        existing.setUser(legacy);
+        when(users.findByEmail("person@example.com")).thenReturn(Optional.of(web));
+        when(challenges.findByTicketHash(anyString())).thenReturn(Optional.of(verified(web)));
+        when(discord.findByDiscordUserId(123456789L)).thenReturn(Optional.of(existing));
+        when(links.findActiveLinksContainingUser(20)).thenReturn(List.of());
+        when(memberships.countByUserId(10)).thenReturn(1L);
+
+        var preview = service().preview(auth(), TICKET);
+
+        assertEquals("RESOLUTION_REQUIRED", preview.status());
+        assertTrue(preview.nextActions().contains("REVIEW_COMMUNITY_DATA"));
+    }
+
+    @Test
+    void previewDoesNotOfferMergeWhenLegacyIdentityIsClaimedElsewhere() {
+        User web = user(10), legacy = user(20), another = user(30);
+        UserDiscord existing = new UserDiscord();
+        existing.setUser(legacy);
+        when(users.findByEmail("person@example.com")).thenReturn(Optional.of(web));
+        when(challenges.findByTicketHash(anyString())).thenReturn(Optional.of(verified(web)));
+        when(discord.findByDiscordUserId(123456789L)).thenReturn(Optional.of(existing));
+        when(links.findActiveLinksContainingUser(20))
+            .thenReturn(List.of(link(another, legacy, UserIdentityLinkSource.SOCIAL)));
+
+        var preview = service().preview(auth(), TICKET);
+
+        assertEquals("REVIEW_REQUIRED", preview.status());
+        assertTrue(preview.nextActions().contains("VERIFY_OTHER_ACCOUNT"));
+    }
+
     private UserIdentityLink link(User a, User b, UserIdentityLinkSource source) {
         UserIdentityLink edge = new UserIdentityLink();
         edge.setUserA(a);
