@@ -1,5 +1,9 @@
 package com.Brafurries.API.commerce;
 
+import com.Brafurries.API.platform.PlatformAuthorizationService;
+import com.Brafurries.API.platform.PlatformAccessService;
+import com.Brafurries.API.platform.PlatformPermission;
+
 import static com.Brafurries.API.commerce.CommerceCashMovementDtos.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -26,7 +30,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
 class CommerceCashMovementServiceTest {
-    @Mock CommerceAuthorizationService authorization;
+    @Mock PlatformAuthorizationService authorization;
     @Mock CommerceFinanceSupport support;
     @Mock JdbcTemplate jdbc;
     @Mock Authentication auth;
@@ -48,13 +52,13 @@ class CommerceCashMovementServiceTest {
         service=new CommerceCashMovementService(authorization,support,jdbc);
         User owner=new User();owner.setId(2);
         lenient().when(authorization.require(eq(auth),any())).thenReturn(
-            new CommerceAuthorizationService.Actor(owner,
-                new CommerceAuthorizationService.Access(true,true,Set.of())));
+            new PlatformAuthorizationService.Actor(owner,
+                new PlatformAuthorizationService.Access(true,true,Set.of())));
     }
 
     @Test
     void noOneCanPostOrReadCashMovementsWithOnlySalesPermission() {
-        when(authorization.require(auth,CommercePermission.CASHFLOW_MANAGE))
+        when(authorization.require(auth,PlatformPermission.CASHFLOW_MANAGE))
             .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
         assertEquals(HttpStatus.FORBIDDEN,
             assertThrows(ResponseStatusException.class,()->
@@ -67,7 +71,7 @@ class CommerceCashMovementServiceTest {
 
     @Test
     void financeViewIsRequiredInAdditionToCashflowManagement() {
-        when(authorization.require(auth,CommercePermission.FINANCE_VIEW))
+        when(authorization.require(auth,PlatformPermission.FINANCE_VIEW))
             .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
         assertEquals(HttpStatus.FORBIDDEN,
             assertThrows(ResponseStatusException.class,()->
@@ -90,8 +94,8 @@ class CommerceCashMovementServiceTest {
             any(Object[].class))).thenReturn(45L);
         Created created=service.create(auth,posted("EXPENSE",null,null));
         assertEquals(45L,created.id());
-        verify(authorization).require(auth,CommercePermission.CASHFLOW_MANAGE);
-        verify(authorization).require(auth,CommercePermission.FINANCE_VIEW);
+        verify(authorization).require(auth,PlatformPermission.CASHFLOW_MANAGE);
+        verify(authorization).require(auth,PlatformPermission.FINANCE_VIEW);
         verify(support).audit(2,"CASH_MOVEMENT",45L,"POSTED");
     }
 
@@ -120,7 +124,7 @@ class CommerceCashMovementServiceTest {
 
     @Test
     void readersNeedFinanceViewForSummary() {
-        when(authorization.require(auth,CommercePermission.FINANCE_VIEW))
+        when(authorization.require(auth,PlatformPermission.FINANCE_VIEW))
             .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
         assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
             ()->service.summary(auth,2026,10)).getStatusCode());

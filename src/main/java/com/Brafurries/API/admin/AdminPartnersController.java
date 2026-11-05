@@ -8,6 +8,7 @@ import com.Brafurries.API.admin.dto.AdminDtos.PartnerLinkCandidate;
 import com.Brafurries.API.admin.dto.AdminDtos.UpdatePartnerRequest;
 import com.Brafurries.API.admin.dto.AdminDtos.UpdatePartnerStatusRequest;
 import io.swagger.v3.oas.annotations.Operation;
+import org.springframework.security.access.prepost.PreAuthorize;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -26,6 +27,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/admin/partners")
+@PreAuthorize("@partnerAuthorizationService.canManage(authentication)")
 public class AdminPartnersController {
 
     private final AdminPartnersService adminPartnersService;
@@ -47,6 +49,14 @@ public class AdminPartnersController {
     @GetMapping("/{id}")
     public AdminPartnerItem getPartner(@PathVariable Integer id) {
         return adminPartnersService.get(id);
+    }
+
+    @Operation(summary = "Pesquisa representantes para parcerias com dados públicos mínimos")
+    @GetMapping("/representatives")
+    public List<com.Brafurries.API.admin.dto.AdminDtos.PartnerRepresentative> representatives(
+        @RequestParam String search
+    ) {
+        return adminPartnersService.findRepresentatives(search);
     }
 
     @Operation(summary = "Pesquisa recursos vinculaveis a parcerias")

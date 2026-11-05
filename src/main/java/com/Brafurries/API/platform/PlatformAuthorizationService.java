@@ -1,4 +1,4 @@
-package com.Brafurries.API.commerce;
+package com.Brafurries.API.platform;
 
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.repository.user.UserRepository;
@@ -19,20 +19,20 @@ import org.springframework.web.server.ResponseStatusException;
  *
  * Community roles provide only a permission signal. An explicit owner-approved
  * person grant is also required; Community Admin never receives implicit access.
- * No commercial data is partitioned by Community.
+ * No platform administrative data is partitioned by Community.
  */
 @Service
-public class CommerceAuthorizationService {
+public class PlatformAuthorizationService {
     private final UserRepository users;
     private final JdbcTemplate jdbc;
     private final int ownerUserId;
     private final int officialCommunityId;
 
-    public CommerceAuthorizationService(
+    public PlatformAuthorizationService(
         UserRepository users,
         JdbcTemplate jdbc,
-        @Value("${app.commerce.owner-user-id:0}") int ownerUserId,
-        @Value("${app.commerce.official-community-id:0}") int officialCommunityId
+        @Value("${app.platform.owner-user-id:0}") int ownerUserId,
+        @Value("${app.platform.official-community-id:0}") int officialCommunityId
     ) {
         this.users = users;
         this.jdbc = jdbc;
@@ -40,8 +40,8 @@ public class CommerceAuthorizationService {
         this.officialCommunityId = officialCommunityId;
     }
 
-    public record Access(boolean owner, boolean enabled, Set<CommercePermission> permissions) {
-        public boolean has(CommercePermission permission) {
+    public record Access(boolean owner, boolean enabled, Set<PlatformPermission> permissions) {
+        public boolean has(PlatformPermission permission) {
             return owner || permissions.contains(permission);
         }
     }
@@ -55,7 +55,7 @@ public class CommerceAuthorizationService {
     public int officialCommunityId() {
         if (!isConfigured()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                "Gestão Comercial indisponível");
+                "Permissões administrativas indisponíveis");
         }
         return officialCommunityId;
     }
@@ -80,7 +80,7 @@ public class CommerceAuthorizationService {
         }
         if (user.getId().equals(ownerUserId)) {
             return new Actor(user, new Access(true, true,
-                Set.copyOf(EnumSet.allOf(CommercePermission.class))));
+                Set.copyOf(EnumSet.allOf(PlatformPermission.class))));
         }
 
         // Compute intersection at request time (never trust JWT roles/claims).
@@ -88,11 +88,13 @@ public class CommerceAuthorizationService {
         // Community, with an active membership. No other Community participates.
         List<String> codes = jdbc.queryForList("""
             SELECT DISTINCT personal.permission_code
-              FROM commerce_authorized_users approved
-              JOIN commerce_user_permissions personal
+              FROM platform_authorized_users approved
+              JOIN platform_user_permissions personal
                 ON personal.user_id = approved.user_id
-              JOIN commerce_role_permissions team_grant
+              JOIN platform_role_permissions team_grant
                 ON team_grant.permission_code = personal.permission_code
+              JOIN platform_permission_catalog catalog
+                ON catalog.code = personal.permission_code AND catalog.active = 1
               JOIN community_team_roles role
                 ON role.id = team_grant.role_id
                AND role.community_id = ?
@@ -111,20 +113,24 @@ public class CommerceAuthorizationService {
                     OR membership.approved = 1)
             """, String.class, officialCommunityId, user.getId());
 
-        EnumSet<CommercePermission> permissions = EnumSet.noneOf(CommercePermission.class);
+        EnumSet<PlatformPermission> permissions = EnumSet.noneOf(PlatformPermission.class);
         for (String code : codes) {
             // DB CHECK only allows canonical permission strings.
-            permissions.add(CommercePermission.valueOf(code));
+            try {
+                permissions.add(PlatformPermission.valueOf(code));
+            } catch (IllegalArgumentException unknownPermission) {
+                // Unknown catalog additions must fail closed until authorized in API.
+            }
         }
         return new Actor(user, new Access(false, true, Set.copyOf(permissions)));
     }
 
     @Transactional(readOnly = true)
-    public Actor require(Authentication auth, CommercePermission permission) {
+    public Actor require(Authentication auth, PlatformPermission permission) {
         Actor actor = resolve(auth);
         if (!actor.access().has(permission)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                "Sem acesso a esta funcionalidade da Gestão Comercial");
+                "Sem permissão para esta área da plataforma");
         }
         return actor;
     }
@@ -134,7 +140,7 @@ public class CommerceAuthorizationService {
         Actor actor = resolve(auth);
         if (!actor.access().owner()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                "Somente o responsável pela Gestão Comercial pode alterar os acessos");
+                "Somente o responsável pela BraFurries pode alterar as permissões");
         }
         return actor.user();
     }

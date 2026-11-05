@@ -1,4 +1,4 @@
-package com.Brafurries.API.commerce;
+package com.Brafurries.API.platform;
 
 import java.util.List;
 import org.springframework.security.core.Authentication;
@@ -17,33 +17,38 @@ import org.springframework.web.bind.annotation.ResponseStatus;
  * All grants and role listings are owner-only regardless of Community Admin role.
  */
 @RestController
-@RequestMapping("/user/me/brafurries-commerce/access")
-public class CommerceAccessController {
-    private final CommerceAccessService service;
+@RequestMapping({"/user/me/platform-access", "/user/me/brafurries-commerce/access"})
+public class PlatformAccessController {
+    private final PlatformAccessService service;
 
-    public CommerceAccessController(CommerceAccessService service) {
+    public PlatformAccessController(PlatformAccessService service) {
         this.service = service;
     }
 
     @GetMapping("/me")
-    public CommerceAccessService.AccessView me(Authentication auth) {
+    public PlatformAccessService.AccessView me(Authentication auth) {
         return service.myAccess(auth);
     }
 
+    @GetMapping("/permissions")
+    public List<PlatformAccessService.PermissionInfo> permissions(Authentication auth) {
+        return service.permissionsCatalog(auth);
+    }
+
     @GetMapping("/people")
-    public List<CommerceAccessService.PersonView> people(Authentication auth) {
+    public List<PlatformAccessService.PersonView> people(Authentication auth) {
         return service.listPeople(auth);
     }
 
     @GetMapping("/people/search")
-    public List<CommerceAccessService.PersonCandidate> searchPeople(
+    public List<PlatformAccessService.PersonCandidate> searchPeople(
         Authentication auth, @RequestParam(required = false) String search
     ) {
         return service.findEligiblePeople(auth, search);
     }
 
     @GetMapping("/team-roles")
-    public List<CommerceAccessService.RoleView> roles(Authentication auth) {
+    public List<PlatformAccessService.RoleView> roles(Authentication auth) {
         return service.listRoles(auth);
     }
 

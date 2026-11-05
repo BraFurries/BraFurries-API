@@ -1,5 +1,10 @@
 package com.Brafurries.API.commerce;
 
+import com.Brafurries.API.platform.PlatformAuthorizationService;
+import com.Brafurries.API.platform.PlatformAccessService;
+import com.Brafurries.API.platform.PlatformPermission;
+
+
 import static com.Brafurries.API.commerce.CommerceFinanceDtos.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -23,7 +28,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
 class CommerceSalesServiceTest {
-    @Mock CommerceAuthorizationService authorization;
+    @Mock PlatformAuthorizationService authorization;
     @Mock CommerceFinanceSupport support;
     @Mock JdbcTemplate jdbc;
     @Mock Authentication auth;
@@ -34,8 +39,8 @@ class CommerceSalesServiceTest {
         service=new CommerceSalesService(authorization,support,jdbc);
         User actor=new User();actor.setId(2);
         lenient().when(authorization.require(eq(auth),any())).thenReturn(
-            new CommerceAuthorizationService.Actor(
-                actor,new CommerceAuthorizationService.Access(true,true,Set.of())));
+            new PlatformAuthorizationService.Actor(
+                actor,new PlatformAuthorizationService.Access(true,true,Set.of())));
     }
 
     private CreateSale sale(String key,String channel,List<SaleLine> items) {
@@ -115,7 +120,7 @@ class CommerceSalesServiceTest {
 
     @Test
     void unauthorizedSaleManagerIsRejectedBeforeAnyBusinessQuery() {
-        when(authorization.require(auth,CommercePermission.SALES_MANAGE))
+        when(authorization.require(auth,PlatformPermission.SALES_MANAGE))
             .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
         assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
             ()->service.createSale(auth,sale(

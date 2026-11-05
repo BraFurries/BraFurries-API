@@ -1,4 +1,4 @@
-package com.Brafurries.API.commerce;
+package com.Brafurries.API.platform;
 
 import com.Brafurries.API.entity.user.User;
 import java.util.List;
@@ -10,16 +10,16 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Owner-controlled commercial allowlist and independent Time-role grants.
+ * Owner-controlled BraFurries platform allowlist and independent Time-role grants.
  * All writes and audits are transactional; no Community capabilities are changed.
  */
 @Service
-public class CommerceAccessService {
-    private final CommerceAuthorizationService authorization;
+public class PlatformAccessService {
+    private final PlatformAuthorizationService authorization;
     private final JdbcTemplate jdbc;
 
-    public CommerceAccessService(
-        CommerceAuthorizationService authorization,
+    public PlatformAccessService(
+        PlatformAuthorizationService authorization,
         JdbcTemplate jdbc
     ) {
         this.authorization = authorization;
@@ -33,11 +33,26 @@ public class CommerceAccessService {
 
     @Transactional(readOnly = true)
     public AccessView myAccess(Authentication auth) {
-        CommerceAuthorizationService.Access access = authorization.resolve(auth).access();
+        PlatformAuthorizationService.Access access = authorization.resolve(auth).access();
         return new AccessView(
             access.enabled(), access.owner(),
             access.permissions().stream().map(Enum::name).sorted().toList()
         );
+    }
+
+    public record PermissionInfo(String code, String area, String label, String description) {}
+
+    @Transactional(readOnly = true)
+    public List<PermissionInfo> permissionsCatalog(Authentication auth) {
+        authorization.requireOwner(auth);
+        return jdbc.query("""
+            SELECT code, area, label, description
+              FROM platform_permission_catalog
+             WHERE active = 1
+             ORDER BY area, code
+            """, (rs, i) -> new PermissionInfo(
+                rs.getString("code"), rs.getString("area"),
+                rs.getString("label"), rs.getString("description")));
     }
 
     @Transactional(readOnly = true)
@@ -47,9 +62,9 @@ public class CommerceAccessService {
             SELECT allowed.user_id, u.display_name, u.username,
                    GROUP_CONCAT(perm.permission_code ORDER BY perm.permission_code
                        SEPARATOR ',') AS permission_codes
-              FROM commerce_authorized_users allowed
+              FROM platform_authorized_users allowed
               JOIN users u ON u.id = allowed.user_id
-              LEFT JOIN commerce_user_permissions perm ON perm.user_id = allowed.user_id
+              LEFT JOIN platform_user_permissions perm ON perm.user_id = allowed.user_id
              GROUP BY allowed.user_id, u.display_name, u.username
              ORDER BY COALESCE(u.display_name, u.username, ''), allowed.user_id
             """, (rs, index) -> new PersonView(
@@ -95,7 +110,7 @@ public class CommerceAccessService {
                    GROUP_CONCAT(perm.permission_code ORDER BY perm.permission_code
                        SEPARATOR ',') AS permission_codes
               FROM community_team_roles role
-              LEFT JOIN commerce_role_permissions perm ON perm.role_id = role.id
+              LEFT JOIN platform_role_permissions perm ON perm.role_id = role.id
              WHERE role.community_id = ?
              GROUP BY role.id, role.name, role.active
              ORDER BY role.name, role.id
@@ -112,11 +127,11 @@ public class CommerceAccessService {
             throw invalid("O responsável já possui acesso integral");
         }
         lockUser(userId);
-        if (exists("SELECT COUNT(*) FROM commerce_authorized_users WHERE user_id = ?", userId)) {
+        if (exists("SELECT COUNT(*) FROM platform_authorized_users WHERE user_id = ?", userId)) {
             return;
         }
         jdbc.update("""
-            INSERT INTO commerce_authorized_users (user_id, approved_by_user_id)
+            INSERT INTO platform_authorized_users (user_id, approved_by_user_id)
             VALUES (?, ?)
             """, userId, owner.getId());
         audit(owner.getId(), "PERSON_APPROVED", userId, null, null);
@@ -129,7 +144,7 @@ public class CommerceAccessService {
             throw invalid("O responsável não pode revogar a própria autoridade");
         }
         lockUser(userId);
-        if (jdbc.update("DELETE FROM commerce_authorized_users WHERE user_id = ?", userId) > 0) {
+        if (jdbc.update("DELETE FROM platform_authorized_users WHERE user_id = ?", userId) > 0) {
             // ON DELETE CASCADE also erases personal permissions, so later
             // reapproval must explicitly grant rights again.
             audit(owner.getId(), "PERSON_REVOKED", userId, null, null);
@@ -139,16 +154,19 @@ public class CommerceAccessService {
     @Transactional
     public void grantPersonPermission(Authentication auth, int userId, String code) {
         User owner = authorization.requireOwner(auth);
-        CommercePermission permission = CommercePermission.parse(code);
+        PlatformPermission permission = PlatformPermission.parse(code);
+        if (!exists("SELECT COUNT(*) FROM platform_permission_catalog WHERE code = ? AND active = 1", permission.name())) {
+            throw invalid("Permissão desativada ou não cadastrada");
+        }
         if (owner.getId().equals(userId)) {
             throw invalid("O responsável não precisa de permissão delegada");
         }
         lockUser(userId);
         requireApproved(userId);
-        if (exists("SELECT COUNT(*) FROM commerce_user_permissions WHERE user_id = ? AND permission_code = ?",
+        if (exists("SELECT COUNT(*) FROM platform_user_permissions WHERE user_id = ? AND permission_code = ?",
                 userId, permission.name())) return;
         jdbc.update("""
-            INSERT INTO commerce_user_permissions (user_id, permission_code, granted_by_user_id)
+            INSERT INTO platform_user_permissions (user_id, permission_code, granted_by_user_id)
             VALUES (?, ?, ?)
             """, userId, permission.name(), owner.getId());
         audit(owner.getId(), "PERSON_PERMISSION_GRANTED", userId, null, permission.name());
@@ -157,10 +175,10 @@ public class CommerceAccessService {
     @Transactional
     public void revokePersonPermission(Authentication auth, int userId, String code) {
         User owner = authorization.requireOwner(auth);
-        CommercePermission permission = CommercePermission.parse(code);
+        PlatformPermission permission = PlatformPermission.parse(code);
         lockUser(userId);
         if (jdbc.update("""
-            DELETE FROM commerce_user_permissions
+            DELETE FROM platform_user_permissions
              WHERE user_id = ? AND permission_code = ?
             """, userId, permission.name()) > 0) {
             audit(owner.getId(), "PERSON_PERMISSION_REVOKED", userId, null, permission.name());
@@ -170,12 +188,15 @@ public class CommerceAccessService {
     @Transactional
     public void grantRolePermission(Authentication auth, int roleId, String code) {
         User owner = authorization.requireOwner(auth);
-        CommercePermission permission = CommercePermission.parse(code);
+        PlatformPermission permission = PlatformPermission.parse(code);
+        if (!exists("SELECT COUNT(*) FROM platform_permission_catalog WHERE code = ? AND active = 1", permission.name())) {
+            throw invalid("Permissão desativada ou não cadastrada");
+        }
         lockOfficialRole(roleId);
-        if (exists("SELECT COUNT(*) FROM commerce_role_permissions WHERE role_id = ? AND permission_code = ?",
+        if (exists("SELECT COUNT(*) FROM platform_role_permissions WHERE role_id = ? AND permission_code = ?",
                 roleId, permission.name())) return;
         jdbc.update("""
-            INSERT INTO commerce_role_permissions (role_id, permission_code, granted_by_user_id)
+            INSERT INTO platform_role_permissions (role_id, permission_code, granted_by_user_id)
             VALUES (?, ?, ?)
             """, roleId, permission.name(), owner.getId());
         audit(owner.getId(), "ROLE_PERMISSION_GRANTED", null, roleId, permission.name());
@@ -184,10 +205,10 @@ public class CommerceAccessService {
     @Transactional
     public void revokeRolePermission(Authentication auth, int roleId, String code) {
         User owner = authorization.requireOwner(auth);
-        CommercePermission permission = CommercePermission.parse(code);
+        PlatformPermission permission = PlatformPermission.parse(code);
         lockOfficialRole(roleId);
         if (jdbc.update("""
-            DELETE FROM commerce_role_permissions
+            DELETE FROM platform_role_permissions
              WHERE role_id = ? AND permission_code = ?
             """, roleId, permission.name()) > 0) {
             audit(owner.getId(), "ROLE_PERMISSION_REVOKED", null, roleId, permission.name());
@@ -220,16 +241,16 @@ public class CommerceAccessService {
     }
 
     private void requireApproved(int userId) {
-        if (!exists("SELECT COUNT(*) FROM commerce_authorized_users WHERE user_id = ?", userId)) {
+        if (!exists("SELECT COUNT(*) FROM platform_authorized_users WHERE user_id = ?", userId)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
-                "Primeiro aprove esta pessoa para a Gestão Comercial");
+                "Primeiro aprove esta pessoa para acessar a plataforma");
         }
     }
 
     private void audit(Integer actor, String action, Integer person,
                        Integer role, String permission) {
         jdbc.update("""
-            INSERT INTO commerce_access_audit
+            INSERT INTO platform_access_audit
                 (actor_user_id, action, subject_user_id, role_id, permission_code)
             VALUES (?, ?, ?, ?, ?)
             """, actor, action, person, role, permission);

@@ -1,5 +1,8 @@
 package com.Brafurries.API.commerce;
 
+import com.Brafurries.API.platform.PlatformAuthorizationService;
+import com.Brafurries.API.platform.PlatformPermission;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
@@ -20,7 +23,7 @@ import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
-/** Reused financial invariants; DB authorization remains CommerceAuthorizationService. */
+/** Reused financial invariants; DB authorization remains PlatformAuthorizationService. */
 @Component
 public class CommerceFinanceSupport {
     public static final ZoneId BUSINESS_ZONE = ZoneId.of("America/Sao_Paulo");

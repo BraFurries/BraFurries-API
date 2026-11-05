@@ -16,6 +16,16 @@ import org.springframework.stereotype.Repository;
 public interface UserRepository extends JpaRepository<User, Integer> {
     Optional<User> findByEmail(String email);
 
+    /** Partner representatives: name/username only, never search private emails. */
+    @Query("""
+        SELECT u FROM User u
+        WHERE LOWER(COALESCE(u.displayName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+           OR LOWER(COALESCE(u.username, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+        ORDER BY COALESCE(u.displayName, u.username, ''), u.id
+        """)
+    Page<User> searchPartnerRepresentatives(@Param("search") String search, Pageable pageable);
+
+
     @Modifying
     @Query("""
         UPDATE User user
