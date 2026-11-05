@@ -62,7 +62,7 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
             "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='BASE TABLE'",
             Integer.class
         );
-        assertEquals(107, count);
+        assertEquals(108, count);
 
         Community community = new Community();
         community.setName("Synthetic tenant");
