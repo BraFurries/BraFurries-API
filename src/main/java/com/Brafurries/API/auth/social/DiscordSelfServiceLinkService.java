@@ -35,6 +35,7 @@ public class DiscordSelfServiceLinkService {
     private final UserRepository users;
     private final UserDiscordRepository discord;
     private final UserCommunityStatusRepository memberships;
+    private final UserAccountReconciliationPreflightService preflight;
     private final UserIdentityLinkRepository links;
     private final UserDiscordLinkChallengeRepository challenges;
     private final IdentityBanPropagationService banPropagation;
@@ -44,6 +45,7 @@ public class DiscordSelfServiceLinkService {
         UserRepository users,
         UserDiscordRepository discord,
         UserCommunityStatusRepository memberships,
+        UserAccountReconciliationPreflightService preflight,
         UserIdentityLinkRepository links,
         UserDiscordLinkChallengeRepository challenges,
         IdentityBanPropagationService banPropagation,
@@ -52,6 +54,7 @@ public class DiscordSelfServiceLinkService {
         this.users = users;
         this.discord = discord;
         this.memberships = memberships;
+        this.preflight = preflight;
         this.links = links;
         this.challenges = challenges;
         this.banPropagation = banPropagation;
@@ -69,7 +72,8 @@ public class DiscordSelfServiceLinkService {
         boolean hasExistingHistory,
         String status,
         List<String> nextActions,
-        String notice
+        String notice,
+        UserAccountReconciliationPreflightService.Findings assessment
     ) {}
     public record Confirmation(String status, String notice) {}
 
@@ -121,12 +125,12 @@ public class DiscordSelfServiceLinkService {
         if (own != null && !own.getDiscordUserId().equals(challenge.getDiscordUserId())) {
             return new Preview(challenge.getDiscordUsername(), existing != null,
                 "RESOLUTION_REQUIRED", List.of("REVIEW_EXISTING_DISCORD", "RETRY_WITH_CORRECT_ACCOUNT"),
-                "Esta conta já possui outro Discord. Nenhuma identidade será substituída automaticamente.");
+                "Esta conta já possui outro Discord. Nenhuma identidade será substituída automaticamente.", null);
         }
         if (existing == null || existing.getUser().getId().equals(actor.getId())) {
             return new Preview(challenge.getDiscordUsername(), false,
                 "CONNECT_READY", List.of("CONFIRM_LINK"),
-                "A identidade Discord foi comprovada. A confirmação não altera dados de outras contas.");
+                "A identidade Discord foi comprovada. A confirmação não altera dados de outras contas.", null);
         }
 
         Integer legacyId = existing.getUser().getId();
@@ -142,16 +146,19 @@ public class DiscordSelfServiceLinkService {
         if (claimedElsewhere || otherReview) {
             return new Preview(challenge.getDiscordUsername(), true,
                 "REVIEW_REQUIRED", List.of("VERIFY_OTHER_ACCOUNT", "REQUEST_IDENTITY_REVIEW"),
-                "Há outro vínculo ou revisão de identidade. É necessária uma comprovação adicional; nenhum dado será transferido.");
+                "Há outro vínculo ou revisão de identidade. É necessária uma comprovação adicional; nenhum dado será transferido.", null);
         }
-        if (memberships.countByUserId(actor.getId()) > 0) {
-            return new Preview(challenge.getDiscordUsername(), true,
-                "RESOLUTION_REQUIRED", List.of("REVIEW_COMMUNITY_DATA", "REQUEST_IDENTITY_REVIEW"),
-                "As duas contas possuem contexto próprio. A consolidação exige verificar os dados e permissões por comunidade.");
-        }
+        var assessment = preflight.inspect(actor, existing.getUser());
+        String notice = switch (assessment.status()) {
+            case "REVIEW_REQUIRED" ->
+                "Há restrições, privilégios ou referências ainda não verificadas. A identidade está comprovada, mas a fusão exige revisão segura.";
+            case "RESOLUTION_REQUIRED" ->
+                "Encontramos dados em ambas as contas que precisam de reconciliação. Vamos preservar todos eles e apresentar as alternativas disponíveis.";
+            default ->
+                "As identidades estão comprovadas e não foram encontrados conflitos nesta triagem. Falta validar as políticas de transferência antes da fusão.";
+        };
         return new Preview(challenge.getDiscordUsername(), true,
-            "PRECHECK_REQUIRED", List.of("CHECK_ACCOUNT_CONFLICTS"),
-            "Ambas as identidades estão comprovadas. Ainda é necessário verificar todos os dados, privilégios e restrições antes da fusão.");
+            assessment.status(), assessment.nextActions(), notice, assessment);
     }
 
     @Transactional
