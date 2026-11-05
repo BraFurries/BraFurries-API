@@ -52,6 +52,7 @@ public class TokenService {
                 "sub", principal,
                 "roles", roles,
                 "permissions", permissions,
+                "uv", authVersion,
                 "exp", expiresAt.getEpochSecond()
             ));
 
@@ -87,7 +88,12 @@ public class TokenService {
             String principal = (String) payload.get("sub");
             List<String> roles = (List<String>) payload.getOrDefault("roles", List.of());
             List<String> permissions = (List<String>) payload.getOrDefault("permissions", List.of());
-            return new UsernamePasswordAuthenticationToken(principal, token, toAuthorities(roles, permissions));
+            Object rawVersion = payload.getOrDefault("uv", 0);
+            long version = rawVersion instanceof Number number ? number.longValue() : -1;
+            UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
+                principal, token, toAuthorities(roles, permissions));
+            auth.setDetails(version);
+            return auth;
         } catch (Exception ex) {
             return null;
         }
