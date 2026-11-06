@@ -6,7 +6,9 @@ import com.Brafurries.API.entity.user.UserDiscord;
 import com.Brafurries.API.entity.user.UserDiscordLinkChallenge;
 import com.Brafurries.API.entity.user.UserSocialIdentity;
 import com.Brafurries.API.entity.user.UserCommunityStatus;
+import com.Brafurries.API.entity.user.UserCommunityMembershipTransfer;
 import com.Brafurries.API.repository.user.UserAccountConsolidationRepository;
+import com.Brafurries.API.repository.user.UserCommunityMembershipTransferRepository;
 import com.Brafurries.API.repository.user.UserDiscordRepository;
 import com.Brafurries.API.repository.user.UserIdentityLinkRepository;
 import com.Brafurries.API.repository.user.UserRefreshTokenRepository;
@@ -46,13 +48,15 @@ public class SparseAccountConsolidationExecutor {
     private final UserAccountConsolidationRepository audit;
     private final SparseAccountOwnershipGuard ownership;
     private final CommunityMembershipReconciliationService communityReconciliation;
+    private final UserCommunityMembershipTransferRepository membershipAudit;
 
     public SparseAccountConsolidationExecutor(UserRepository users,
         UserDiscordRepository discord, UserIdentityLinkRepository links,
         UserSocialIdentityRepository identities, UserRefreshTokenRepository refreshTokens,
         UserTokenRepository recoveryTokens, UserAccountConsolidationRepository audit,
         SparseAccountOwnershipGuard ownership,
-        CommunityMembershipReconciliationService communityReconciliation) {
+        CommunityMembershipReconciliationService communityReconciliation,
+        UserCommunityMembershipTransferRepository membershipAudit) {
         this.users = users;
         this.discord = discord;
         this.links = links;
@@ -62,6 +66,7 @@ public class SparseAccountConsolidationExecutor {
         this.audit = audit;
         this.ownership = ownership;
         this.communityReconciliation = communityReconciliation;
+        this.membershipAudit = membershipAudit;
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -189,21 +194,33 @@ public class SparseAccountConsolidationExecutor {
         }
         identities.flush();
 
-        // Transfer only one-sided neutral Community membership rows, keeping
-        // their original PKs, join/leave records, approval and portaria state.
-        // Any composite foreign-key conflict aborts the entire transaction.
-        communityReconciliation.transferPrepared(membershipsToTransfer, web, canonical);
-
-        // Preserve the historical website row and every audit actor FK.
-        web.setMergedIntoUser(canonical);
-        users.saveAndFlush(web);
-
+        // The immutable event is the parent of each transferred membership
+        // audit record. All of these writes belong to the SAME transaction.
         UserAccountConsolidation event = new UserAccountConsolidation();
         event.setCanonicalUser(canonical);
         event.setAbsorbedUser(web);
         event.setInitiatedByUser(web);
         event.setProvedDiscordUserId(challenge.getDiscordUserId());
         audit.saveAndFlush(event);
+
+        // Transfer only one-sided neutral Community membership rows, keeping
+        // their original PKs, join/leave records, approval and portaria state.
+        // Any composite foreign-key conflict aborts the whole transaction.
+        communityReconciliation.transferPrepared(membershipsToTransfer, web, canonical);
+        for (UserCommunityStatus row : membershipsToTransfer) {
+            UserCommunityMembershipTransfer transfer = new UserCommunityMembershipTransfer();
+            transfer.setConsolidation(event);
+            transfer.setCommunityStatus(row);
+            transfer.setCommunity(row.getCommunity());
+            transfer.setFromUser(web);
+            transfer.setToUser(canonical);
+            membershipAudit.save(transfer);
+        }
+        membershipAudit.flush();
+
+        // Preserve the historical website row and every audit actor FK.
+        web.setMergedIntoUser(canonical);
+        users.saveAndFlush(web);
         return canonical.getId();
     }
 
