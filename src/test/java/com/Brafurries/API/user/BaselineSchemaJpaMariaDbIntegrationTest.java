@@ -305,6 +305,7 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
 
         assertEquals(canonical, oldSite.getMergedIntoUser().getId());
         assertNull(oldSite.getEmail());
+        assertNull(oldSite.getPasswordHash());
         assertEquals("synthetic-google-localonly@example.invalid", current.getEmail());
         assertEquals("local-password-hash", current.getPasswordHash());
         assertEquals(1L, current.getAuthVersion());
