@@ -189,6 +189,82 @@ class AuthServiceTest {
     }
 
     @Test
+    void socialOnlyAccountCanRecoverSiteAccessByExistingEmailResetFlow() {
+        User originalGoogle = new User();
+        originalGoogle.setId(10);
+        originalGoogle.setEmail("google@example.com");
+        originalGoogle.setPasswordHash(null);
+        when(userRepository.findByEmail("google@example.com")).thenReturn(Optional.of(originalGoogle));
+        when(tokenService.generateToken(48)).thenReturn("recovery-token");
+        when(userTokenRepository.save(any(UserToken.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        var resetRequest = new com.Brafurries.API.auth.common.dto.AuthDtos.ForgotPasswordRequest(
+            "GOOGLE@EXAMPLE.COM");
+
+        authService.forgotPassword(resetRequest);
+
+        ArgumentCaptor<UserToken> created = ArgumentCaptor.forClass(UserToken.class);
+        verify(userTokenRepository).save(created.capture());
+        assertEquals(UserTokenType.PASSWORD_RESET, created.getValue().getType());
+        assertEquals(originalGoogle, created.getValue().getUser());
+        assertEquals("recovery-token", created.getValue().getToken());
+        assertTrue(created.getValue().getExpiresAt().isAfter(Instant.now()));
+        ArgumentCaptor<SimpleMailMessage> sent = ArgumentCaptor.forClass(SimpleMailMessage.class);
+        verify(mailSender).send(sent.capture());
+        assertTrue(sent.getValue().getText().contains("/reset-password?token=recovery-token"));
+
+        when(userTokenRepository.findByTokenAndType("recovery-token", UserTokenType.PASSWORD_RESET))
+            .thenReturn(Optional.of(created.getValue()));
+        when(passwordEncoder.encode("new-secure-password")).thenReturn("new-password-hash");
+        authService.resetPassword(
+            new com.Brafurries.API.auth.common.dto.AuthDtos.ResetPasswordRequest(
+                "recovery-token", "new-secure-password"));
+
+        assertEquals("new-password-hash", originalGoogle.getPasswordHash());
+        assertTrue(created.getValue().getUsedAt() != null);
+        verify(userRepository).save(originalGoogle);
+    }
+
+    @Test
+    void previouslyMergedAccountCannotAuthenticateWithOldPassword() {
+        User absorbed = new User();
+        absorbed.setId(10);
+        absorbed.setEmail("absorbed@example.com");
+        absorbed.setPasswordHash("legacy-hash");
+        User canonical = new User();
+        canonical.setId(20);
+        absorbed.setMergedIntoUser(canonical);
+        when(userRepository.findByEmail("absorbed@example.com"))
+            .thenReturn(Optional.of(absorbed));
+        when(passwordEncoder.matches("secret", "legacy-hash")).thenReturn(true);
+
+        assertThrows(BadCredentialsException.class, () ->
+            authService.loginCommon(new LoginRequest("absorbed@example.com", "secret", true)));
+        verify(userRefreshTokenRepository, never()).deleteByUser(absorbed);
+    }
+
+    @Test
+    void passwordResetCannotReactivateHistoricalAbsorbedIdentity() {
+        User absorbed = new User();
+        absorbed.setId(10);
+        User canonical = new User();
+        canonical.setId(20);
+        absorbed.setMergedIntoUser(canonical);
+        UserToken oldRecovery = new UserToken();
+        oldRecovery.setUser(absorbed);
+        oldRecovery.setType(UserTokenType.PASSWORD_RESET);
+        oldRecovery.setExpiresAt(Instant.now().plusSeconds(60));
+        when(userTokenRepository.findByTokenAndType("old-token", UserTokenType.PASSWORD_RESET))
+            .thenReturn(Optional.of(oldRecovery));
+
+        assertThrows(BadCredentialsException.class, () ->
+            authService.resetPassword(
+                new com.Brafurries.API.auth.common.dto.AuthDtos.ResetPasswordRequest(
+                    "old-token", "new-password")));
+        verify(userRepository, never()).save(absorbed);
+    }
+
+    @Test
     void confirmEmailConsumesTokenAndAllowsAccountActivation() {
         User user = new User();
         user.setId(10);

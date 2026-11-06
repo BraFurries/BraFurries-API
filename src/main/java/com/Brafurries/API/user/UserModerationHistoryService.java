@@ -1,6 +1,7 @@
 package com.Brafurries.API.user;
 
 import static com.Brafurries.API.user.dto.UserModerationDtos.*;
+import com.Brafurries.API.auth.social.DiscordSelfServiceLinkService;
 
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.repository.user.UserCommunityStatusRepository;
@@ -19,22 +20,25 @@ import org.springframework.web.server.ResponseStatusException;
 public class UserModerationHistoryService {
     private static final String CONTEXT_NOT_FOUND = "Contexto comunitário não encontrado";
     private final UserRepository userRepository;
+    private final DiscordSelfServiceLinkService selfServiceLinks;
     private final UserCommunityStatusRepository userCommunityStatusRepository;
     private final UserWarningRepository userWarningRepository;
 
     public UserModerationHistoryService(
         UserRepository userRepository,
+        DiscordSelfServiceLinkService selfServiceLinks,
         UserCommunityStatusRepository userCommunityStatusRepository,
         UserWarningRepository userWarningRepository
     ) {
         this.userRepository = userRepository;
+        this.selfServiceLinks = selfServiceLinks;
         this.userCommunityStatusRepository = userCommunityStatusRepository;
         this.userWarningRepository = userWarningRepository;
     }
 
     @Transactional(readOnly = true)
     public MemberModerationPage getLoggedUserModeration(String principal, Integer communityId, int page, int pageSize) {
-        User user = findAuthenticatedUser(principal);
+        User user = selfServiceLinks.legacyProfileFor(findAuthenticatedUser(principal));
         var memberships = userCommunityStatusRepository
             .findAllByUserIdAndCommunityIdOrderByMemberSinceAscIdAsc(user.getId(), communityId);
         if (memberships.isEmpty()

@@ -11,7 +11,7 @@ class AuthSocialControllerTest {
     private final SocialFrontendOriginPolicy policy =
         new SocialFrontendOriginPolicy("https://brafurries.com.br");
     private final AuthSocialController controller =
-        new AuthSocialController(mock(AuthSocialService.class), policy);
+        new AuthSocialController(mock(AuthSocialService.class), mock(DiscordSelfServiceLinkService.class), policy);
 
     @Test
     void storesTrustedPreviewOriginBeforeStartingDiscordOauth() {
@@ -19,6 +19,7 @@ class AuthSocialControllerTest {
 
         var redirect = controller.startDiscordOAuth2Login(
             "https://brafurries--pr94-example.web.app",
+            null,
             request
         );
 

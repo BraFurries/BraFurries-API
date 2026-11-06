@@ -101,7 +101,7 @@ public class AuthService {
 
         List<String> roles = apiUserRoleRepository.findRoleNamesByUserId(user.getId());
         List<String> permissions = apiRolePermissionRepository.findPermissionNamesByUserId(user.getId());
-        String accessToken = tokenService.generateAccessToken(user.getEmail(), roles, permissions);
+        String accessToken = tokenService.generateAccessToken(user.getEmail(), roles, permissions, user.getAuthVersion());
 
         String refreshToken = null;
         if (request.rememberMe() == null || request.rememberMe()) {
@@ -193,7 +193,7 @@ public class AuthService {
         String normalizedEmail = request.email().trim().toLowerCase();
 
         userRepository.findByEmail(normalizedEmail).ifPresent(user -> {
-            if (isEmailVerificationPending(user)) {
+            if (user.getMergedIntoUser() != null || isEmailVerificationPending(user)) {
                 return;
             }
 
@@ -224,6 +224,7 @@ public class AuthService {
         }
 
         User user = resetToken.getUser();
+        ensureNotMerged(user);
         user.setPasswordHash(passwordEncoder.encode(request.password()));
         userRepository.save(user);
 
@@ -249,7 +250,7 @@ public class AuthService {
         String newRefreshToken = tokenService.generateToken(64);
         List<String> roles = apiUserRoleRepository.findRoleNamesByUserId(savedToken.getUser().getId());
         List<String> permissions = apiRolePermissionRepository.findPermissionNamesByUserId(savedToken.getUser().getId());
-        String newAccessToken = tokenService.generateAccessToken(savedToken.getUser().getEmail(), roles, permissions);
+        String newAccessToken = tokenService.generateAccessToken(savedToken.getUser().getEmail(), roles, permissions, savedToken.getUser().getAuthVersion());
         UserRefreshToken rotatedToken = new UserRefreshToken();
         rotatedToken.setUser(savedToken.getUser());
         rotatedToken.setToken(newRefreshToken);
@@ -345,8 +346,15 @@ public class AuthService {
     }
 
     private void ensureAccountConfirmed(User user) {
+        ensureNotMerged(user);
         if (isEmailVerificationPending(user)) {
             throw new BadCredentialsException("Confirme seu e-mail antes de acessar a conta");
+        }
+    }
+
+    private void ensureNotMerged(User user) {
+        if (user.getMergedIntoUser() != null) {
+            throw new BadCredentialsException("ACCOUNT_CONSOLIDATED");
         }
     }
 
@@ -369,6 +377,12 @@ public class AuthService {
 
         for (UserToken expiredToken : expiredTokens) {
             User user = expiredToken.getUser();
+            if (user.getMergedIntoUser() != null) {
+                // Retain the immutable absorbed user as historical provenance;
+                // deleting it would break audit and related foreign keys.
+                userTokenRepository.delete(expiredToken);
+                continue;
+            }
             userTokenRepository.deleteByUser(user);
             userRefreshTokenRepository.deleteByUser(user);
             userRepository.delete(user);

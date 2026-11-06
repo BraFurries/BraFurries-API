@@ -30,6 +30,9 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.Authentication;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.stereotype.Service;
@@ -46,6 +49,8 @@ public class AuthSocialService {
     private final ApiRolePermissionRepository apiRolePermissionRepository;
     private final UserDiscordRepository userDiscordRepository;
     private final UserTokenRepository userTokenRepository;
+    private final DiscordSelfServiceLinkService accountLinks;
+    private final VerifiedSocialIdentityService verifiedIdentities;
     private final Map<String, PendingSocialRegistration> pendingRegistrations = new ConcurrentHashMap<>();
 
     @Value("${GOOGLE_CLIENT_ID:}")
@@ -61,7 +66,9 @@ public class AuthSocialService {
         ApiUserRoleRepository apiUserRoleRepository,
         ApiRolePermissionRepository apiRolePermissionRepository,
         UserDiscordRepository userDiscordRepository,
-        UserTokenRepository userTokenRepository
+        UserTokenRepository userTokenRepository,
+        DiscordSelfServiceLinkService accountLinks,
+        VerifiedSocialIdentityService verifiedIdentities
     ) {
         this.userRepository = userRepository;
         this.userRefreshTokenRepository = userRefreshTokenRepository;
@@ -71,6 +78,8 @@ public class AuthSocialService {
         this.apiRolePermissionRepository = apiRolePermissionRepository;
         this.userDiscordRepository = userDiscordRepository;
         this.userTokenRepository = userTokenRepository;
+        this.accountLinks = accountLinks;
+        this.verifiedIdentities = verifiedIdentities;
     }
 
     @Transactional
@@ -97,6 +106,39 @@ public class AuthSocialService {
         validateTermsAgreement(request.termsAgreement());
         ProviderProfile profile = validateDiscordToken(request.providerToken(), request.email(), request.displayName());
         return registerSocial(profile);
+    }
+
+    /**
+     * Two independent proofs: a valid BraFurries site session and a Google
+     * ID token verified for this application's configured client ID.
+     * Does not change the current session or merge any other users.
+     */
+    @Transactional
+    public String linkGoogleToAuthenticatedAccount(Authentication authentication, String googleIdToken) {
+        if (authentication == null || !authentication.isAuthenticated()
+            || authentication.getName() == null || authentication.getName().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Faça login antes de vincular o Google");
+        }
+        if (googleClientId == null || googleClientId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                "A vinculação Google está temporariamente indisponível");
+        }
+
+        // Verify OAuth first; never treat a supplied e-mail or subject as proof.
+        ProviderProfile verifiedGoogle = validateGoogleToken(googleIdToken, null, null);
+        User actor = userRepository.findByEmail(authentication.getName().trim().toLowerCase(Locale.ROOT))
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão não reconhecida"));
+        User canonical = userRepository.findByIdForUpdate(actor.getId())
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "Conta alterada"));
+
+        Optional<User> emailOwner = userRepository.findByEmail(verifiedGoogle.email());
+        if (emailOwner.isPresent() && !emailOwner.get().getId().equals(canonical.getId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "ACCOUNT_RECONCILIATION_REQUIRED");
+        }
+
+        verifiedIdentities.bindProvenSubject(canonical, "google",
+            verifiedGoogle.providerUserId(), verifiedGoogle.email());
+        return "VERIFIED";
     }
 
     @Transactional
@@ -129,6 +171,7 @@ public class AuthSocialService {
 
         User user = createSocialUser(pending.email(), request.displayName());
         linkProviderAccount(user, profile);
+        verifiedIdentities.bindProvenSubject(user, profile.provider(), profile.providerUserId(), profile.email());
         return issueLoginResponse(user);
     }
 
@@ -151,8 +194,8 @@ public class AuthSocialService {
     }
 
     private User findOrCreateSocialUser(ProviderProfile profile) {
-        User user = findExistingSocialUser(profile)
-            .orElseGet(() -> createSocialUser(profile.email(), profile.displayName()));
+        Optional<User> existing = findExistingSocialUser(profile);
+        User user = existing.orElseGet(() -> createSocialUser(profile.email(), profile.displayName()));
 
         boolean changed = false;
         if ((user.getDisplayName() == null || user.getDisplayName().isBlank())
@@ -175,11 +218,17 @@ public class AuthSocialService {
 
         activateVerifiedProviderAccount(user);
         linkProviderAccount(user, profile);
+        if (existing.isEmpty()) {
+            verifiedIdentities.bindProvenSubject(user, profile.provider(), profile.providerUserId(), profile.email());
+        }
 
         return user;
     }
 
     private User updateExistingSocialUser(User user, ProviderProfile profile) {
+        if (user.getMergedIntoUser() != null) {
+            throw new BadCredentialsException("ACCOUNT_CONSOLIDATED");
+        }
         boolean changed = false;
         if ((user.getEmail() == null || user.getEmail().isBlank()) && profile.email() != null && !profile.email().isBlank()) {
             user.setEmail(profile.email());
@@ -202,21 +251,57 @@ public class AuthSocialService {
     }
 
     private Optional<User> findExistingSocialUser(ProviderProfile profile) {
-        Optional<User> byEmail = userRepository.findByEmail(profile.email());
+        // Provider subject is the immutable authentication key; e-mail is
+        // profile metadata and must never justify silently joining two users.
         Optional<User> byProviderId = findUserByProviderId(profile);
+        Optional<User> byEmail = userRepository.findByEmail(profile.email());
 
-        if (byEmail.isPresent() && byProviderId.isPresent()
-                && !byEmail.get().getId().equals(byProviderId.get().getId())) {
-            throw new BadCredentialsException(
-                "E-mail e provedor pertencem a contas distintas; regularização administrativa necessária"
-            );
+        if ("google".equals(profile.provider())) {
+            if (byProviderId.isPresent()) {
+                if (byEmail.isPresent()
+                    && !byEmail.get().getId().equals(byProviderId.get().getId())) {
+                    throw new BadCredentialsException("ACCOUNT_RECONCILIATION_REQUIRED");
+                }
+                return byProviderId;
+            }
+            // Existing Google users created before immutable subjects were
+            // recorded need authenticated recovery, not e-mail-only claiming.
+            // The new Google-link endpoint will require an existing site
+            // session and a separately verified Google ID token.
+            if (byEmail.isPresent()) throw new BadCredentialsException("ACCOUNT_LINK_REQUIRED");
+            return Optional.empty();
         }
 
-        return byEmail.or(() -> byProviderId);
+        if ("discord".equals(profile.provider())) {
+            if (byProviderId.isEmpty()) {
+                if (byEmail.isPresent()) throw new BadCredentialsException("ACCOUNT_LINK_REQUIRED");
+                return Optional.empty();
+            }
+
+            Optional<User> recovered = accountLinks.recoveredLoginFor(byProviderId.get());
+            if (recovered.isPresent()) {
+                if (byEmail.isPresent() && !byEmail.get().getId().equals(recovered.get().getId())
+                    && !byEmail.get().getId().equals(byProviderId.get().getId())) {
+                    throw new BadCredentialsException("ACCOUNT_RECONCILIATION_REQUIRED");
+                }
+                return recovered;
+            }
+
+            if (byEmail.isPresent() && !byEmail.get().getId().equals(byProviderId.get().getId())) {
+                throw new BadCredentialsException("ACCOUNT_LINK_REQUIRED");
+            }
+            return byProviderId;
+        }
+
+        throw new BadCredentialsException("Unsupported provider");
     }
 
     private Optional<User> findUserByProviderId(ProviderProfile profile) {
-        if (!"discord".equals(profile.provider()) || profile.providerUserId() == null || profile.providerUserId().isBlank()) {
+        if ("google".equals(profile.provider())) {
+            return verifiedIdentities.ownerOf("google", profile.providerUserId());
+        }
+        if (!"discord".equals(profile.provider()) || profile.providerUserId() == null
+            || profile.providerUserId().isBlank()) {
             return Optional.empty();
         }
 
@@ -227,8 +312,7 @@ public class AuthSocialService {
             return Optional.empty();
         }
 
-        return userDiscordRepository.findByDiscordUserId(discordUserId)
-            .map(UserDiscord::getUser);
+        return userDiscordRepository.findByDiscordUserId(discordUserId).map(UserDiscord::getUser);
     }
 
     private User createSocialUser(String email, String displayName) {
@@ -285,6 +369,9 @@ public class AuthSocialService {
     }
 
     private LoginResponse issueLoginResponse(User user) {
+        if (user.getMergedIntoUser() != null) {
+            throw new BadCredentialsException("ACCOUNT_CONSOLIDATED");
+        }
         if (userTokenRepository.existsByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(
                 user,
                 UserTokenType.EMAIL_VERIFICATION
@@ -296,7 +383,7 @@ public class AuthSocialService {
 
         List<String> roles = apiUserRoleRepository.findRoleNamesByUserId(user.getId());
         List<String> permissions = apiRolePermissionRepository.findPermissionNamesByUserId(user.getId());
-        String accessToken = tokenService.generateAccessToken(user.getEmail(), roles, permissions);
+        String accessToken = tokenService.generateAccessToken(user.getEmail(), roles, permissions, user.getAuthVersion());
         String refreshToken = tokenService.generateToken(64);
 
         UserRefreshToken refreshEntity = new UserRefreshToken();
@@ -395,7 +482,12 @@ public class AuthSocialService {
         if (existingByDiscordId.isPresent()) {
             UserDiscord link = existingByDiscordId.get();
             if (!link.getUser().getId().equals(user.getId())) {
-                throw new BadCredentialsException("Conta Discord ja vinculada a outro usuario");
+                if (accountLinks.isVerifiedLink(user, link.getUser())) {
+                    // Keep the original Discord row with its legacy account.
+                    // The two identities are authenticated but never merged.
+                    return;
+                }
+                throw new BadCredentialsException("ACCOUNT_LINK_REQUIRED");
             }
             updateDiscordLink(link, profile);
             return;
@@ -404,7 +496,7 @@ public class AuthSocialService {
         Optional<UserDiscord> existingForUser = userDiscordRepository.findByUser(user);
         if (existingForUser.isPresent()) {
             throw new BadCredentialsException(
-                "E-mail e provedor pertencem a contas distintas; regularização administrativa necessária"
+                "ACCOUNT_LINK_REQUIRED"
             );
         }
 
@@ -425,6 +517,13 @@ public class AuthSocialService {
         if ("discord".equals(profile.provider()) && profile.providerUserId() != null) {
             linkDiscordAccount(user, profile);
         }
+        // Refresh an already-proven provider subject, or a newly connected
+        // Discord that is now owned by this user. Never bootstrap a Google
+        // subject from a matching e-mail alone.
+        findUserByProviderId(profile)
+            .filter(known -> known.getId().equals(user.getId()))
+            .ifPresent(known -> verifiedIdentities.bindProvenSubject(
+                user, profile.provider(), profile.providerUserId(), profile.email()));
     }
 
     private ProviderProfile validateGoogleToken(String providerToken, String requestedEmail, String requestedDisplayName) {
@@ -443,8 +542,12 @@ public class AuthSocialService {
             throw new BadCredentialsException("Token Google invalido");
         }
 
-        if (!response.email().equalsIgnoreCase(requestedEmail)) {
+        if (requestedEmail != null && !response.email().equalsIgnoreCase(requestedEmail)) {
             throw new BadCredentialsException("E-mail nao confere com o token Google");
+        }
+        if (response.subject() == null || response.subject().isBlank()
+            || response.subject().length() > 128 || !response.email().contains("@")) {
+            throw new BadCredentialsException("Identidade Google incompleta");
         }
 
         if (!googleClientId.isBlank() && !googleClientId.equals(response.audience())) {

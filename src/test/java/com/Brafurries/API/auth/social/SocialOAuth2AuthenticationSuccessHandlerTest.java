@@ -25,9 +25,12 @@ class SocialOAuth2AuthenticationSuccessHandlerTest {
     @Mock
     private AuthSocialService authSocialService;
 
+    @Mock
+    private DiscordSelfServiceLinkService discordLinkService;
+
     @Test
     void redirectsToFrontendErrorWhenUnexpectedOauthCompletionErrorHappens() throws Exception {
-        SocialOAuth2AuthenticationSuccessHandler handler = new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy());
+        SocialOAuth2AuthenticationSuccessHandler handler = new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService);
         DefaultOAuth2User principal = new DefaultOAuth2User(
             java.util.List.of(),
             Map.of("id", "123456789"),
@@ -58,7 +61,7 @@ class SocialOAuth2AuthenticationSuccessHandlerTest {
         when(authSocialService.loginOAuth2(authentication)).thenReturn(new ExistingUserLogin(login));
 
         MockHttpServletResponse response = new MockHttpServletResponse();
-        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy())
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService)
             .onAuthenticationSuccess(new MockHttpServletRequest(), response, authentication);
 
         assertEquals(302, response.getStatus());
@@ -75,7 +78,7 @@ class SocialOAuth2AuthenticationSuccessHandlerTest {
         when(authSocialService.loginOAuth2(authentication)).thenReturn(new ExistingUserLogin(login));
 
         MockHttpServletResponse response = new MockHttpServletResponse();
-        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy())
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService)
             .onAuthenticationSuccess(new MockHttpServletRequest(), response, authentication);
 
         assertEquals(302, response.getStatus());
@@ -98,7 +101,7 @@ class SocialOAuth2AuthenticationSuccessHandlerTest {
         );
         MockHttpServletResponse response = new MockHttpServletResponse();
 
-        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy())
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService)
             .onAuthenticationSuccess(request, response, authentication);
 
         assertTrue(
@@ -124,13 +127,56 @@ class SocialOAuth2AuthenticationSuccessHandlerTest {
         );
         MockHttpServletResponse response = new MockHttpServletResponse();
 
-        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy())
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService)
             .onAuthenticationSuccess(request, response, authentication);
 
         assertTrue(
             response.getRedirectedUrl().startsWith("https://brafurries.com.br/social-login#"),
             response.getRedirectedUrl()
         );
+    }
+
+    @Test
+    void proofCallbackVerifiesDiscordWithoutSwitchingGoogleSessionOrIssuingTokens() throws Exception {
+        OAuth2AuthenticationToken auth = authentication();
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        String ticket = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH";
+        request.getSession(true).setAttribute(
+            DiscordSelfServiceLinkService.SESSION_TICKET, ticket
+        );
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService)
+            .onAuthenticationSuccess(request, response, auth);
+
+        org.mockito.Mockito.verify(discordLinkService).verifiedDiscordOAuth(ticket, auth);
+        org.mockito.Mockito.verifyNoInteractions(authSocialService);
+        assertEquals(302, response.getStatus());
+        assertTrue(response.getRedirectedUrl().startsWith(
+            "https://brafurries.com.br/painel/perfil#discord_link_ticket="));
+        assertTrue(response.getRedirectedUrl().contains(ticket));
+        assertNull(request.getSession(false).getAttribute(DiscordSelfServiceLinkService.SESSION_TICKET));
+        assertTrue(!response.getRedirectedUrl().contains("access_token="));
+    }
+
+    @Test
+    void failedDiscordProofDoesNotLeakProviderOrSessionToken() throws Exception {
+        OAuth2AuthenticationToken auth = authentication();
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        String ticket = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH";
+        request.getSession(true).setAttribute(DiscordSelfServiceLinkService.SESSION_TICKET, ticket);
+        org.mockito.Mockito.doThrow(new IllegalArgumentException("untrusted discord value"))
+            .when(discordLinkService).verifiedDiscordOAuth(ticket, auth);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService)
+            .onAuthenticationSuccess(request, response, auth);
+
+        org.mockito.Mockito.verifyNoInteractions(authSocialService);
+        assertTrue(response.getRedirectedUrl().startsWith(
+            "https://brafurries.com.br/painel/perfil?discord_link_error="));
+        assertTrue(!response.getRedirectedUrl().contains(ticket));
+        assertTrue(!response.getRedirectedUrl().contains("untrusted"));
     }
 
     private SocialFrontendOriginPolicy policy() {

@@ -1,5 +1,6 @@
 package com.Brafurries.API.user;
 
+import com.Brafurries.API.auth.social.DiscordSelfServiceLinkService;
 import com.Brafurries.API.entity.community.Community;
 import com.Brafurries.API.entity.community.CommunityDiscord;
 import com.Brafurries.API.entity.user.User;
@@ -29,6 +30,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class UserModerationHistoryServiceTest {
     @Mock UserRepository users;
+    @Mock DiscordSelfServiceLinkService links;
     @Mock UserCommunityStatusRepository memberships;
     @Mock UserWarningRepository warnings;
 
@@ -122,6 +124,8 @@ class UserModerationHistoryServiceTest {
     }
 
     private UserModerationHistoryService service() {
-        return new UserModerationHistoryService(users, memberships, warnings);
+        org.mockito.Mockito.lenient().when(links.legacyProfileFor(org.mockito.ArgumentMatchers.any(User.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        return new UserModerationHistoryService(users, links, memberships, warnings);
     }
 }

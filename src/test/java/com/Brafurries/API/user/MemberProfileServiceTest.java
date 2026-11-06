@@ -1,5 +1,6 @@
 package com.Brafurries.API.user;
 
+import com.Brafurries.API.auth.social.DiscordSelfServiceLinkService;
 import com.Brafurries.API.entity.community.Community;
 import com.Brafurries.API.entity.community.CommunityDiscord;
 import com.Brafurries.API.entity.user.User;
@@ -27,6 +28,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class MemberProfileServiceTest {
     @Mock UserRepository users;
+    @Mock DiscordSelfServiceLinkService links;
     @Mock UserBirthdayRepository birthdays;
     @Mock UserDiscordRepository discords;
     @Mock UserTelegramRepository telegrams;
@@ -166,7 +168,9 @@ class MemberProfileServiceTest {
     }
 
     private MemberProfileService service() {
-        return new MemberProfileService(users, birthdays, discords, telegrams, memberships);
+        org.mockito.Mockito.lenient().when(links.legacyProfileFor(org.mockito.ArgumentMatchers.any(User.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        return new MemberProfileService(users, links, birthdays, discords, telegrams, memberships);
     }
 
     private User user(int id) { User user = new User(); user.setId(id); return user; }

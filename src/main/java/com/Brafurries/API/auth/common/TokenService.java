@@ -41,6 +41,12 @@ public class TokenService {
     }
 
     public String generateAccessToken(String principal, Collection<String> roles, Collection<String> permissions) {
+        return generateAccessToken(principal, roles, permissions, 0L);
+    }
+
+    public String generateAccessToken(String principal, Collection<String> roles,
+                                      Collection<String> permissions, long authVersion) {
+        if (authVersion < 0) throw new IllegalArgumentException("authVersion cannot be negative");
         try {
             String headerJson = objectMapper.writeValueAsString(java.util.Map.of("alg", "HS256", "typ", "JWT"));
             Instant expiresAt = accessExpiresAt();
@@ -48,6 +54,7 @@ public class TokenService {
                 "sub", principal,
                 "roles", roles,
                 "permissions", permissions,
+                "auth_version", authVersion,
                 "exp", expiresAt.getEpochSecond()
             ));
 
@@ -83,7 +90,14 @@ public class TokenService {
             String principal = (String) payload.get("sub");
             List<String> roles = (List<String>) payload.getOrDefault("roles", List.of());
             List<String> permissions = (List<String>) payload.getOrDefault("permissions", List.of());
-            return new UsernamePasswordAuthenticationToken(principal, token, toAuthorities(roles, permissions));
+            Object rawVersion = payload.getOrDefault("auth_version", 0);
+            if (!(rawVersion instanceof Number version) || version.longValue() < 0) {
+                return null;
+            }
+            UsernamePasswordAuthenticationToken authenticated =
+                new UsernamePasswordAuthenticationToken(principal, token, toAuthorities(roles, permissions));
+            authenticated.setDetails(version.longValue());
+            return authenticated;
         } catch (Exception ex) {
             return null;
         }
