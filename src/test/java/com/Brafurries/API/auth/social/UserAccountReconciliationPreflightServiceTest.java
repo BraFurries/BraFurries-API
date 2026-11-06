@@ -80,7 +80,7 @@ class UserAccountReconciliationPreflightServiceTest {
     }
 
     @Test
-    void anyCommunityRestrictionOrPartnerGrantIsFlaggedForSafePreservation() {
+    void websiteRestrictionTriggersReviewWhileCanonicalDiscordGrantIsPreserved() {
         User website = user(10), legacy = user(20);
         when(memberships.findByUser(website)).thenReturn(List.of(membership(1, true, false)));
         when(memberships.findByUser(legacy)).thenReturn(List.of(membership(1, false, true)));
@@ -90,7 +90,9 @@ class UserAccountReconciliationPreflightServiceTest {
 
         assertEquals("REVIEW_REQUIRED", result.status());
         assertTrue(result.nextActions().contains("PRESERVE_COMMUNITY_RESTRICTIONS"));
-        assertTrue(result.nextActions().contains("REVIEW_ACCESS_GRANTS"));
+        assertFalse(result.nextActions().contains("REVIEW_ACCESS_GRANTS"));
+        // Only the website ban needs reconciliation. The Discord partner
+        // privilege already belongs to the canonical user and never moves.
         assertTrue(result.communities().getFirst().containsRestriction());
         assertTrue(result.communities().getFirst().containsSpecialRole());
     }
