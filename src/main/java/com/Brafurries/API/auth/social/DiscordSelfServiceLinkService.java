@@ -36,6 +36,7 @@ public class DiscordSelfServiceLinkService {
     private final UserDiscordRepository discord;
     private final UserCommunityStatusRepository memberships;
     private final UserAccountReconciliationPreflightService preflight;
+    private final UserAccountConsolidationPlanner planner;
     private final VerifiedSocialIdentityService verifiedIdentities;
     private final UserIdentityLinkRepository links;
     private final UserDiscordLinkChallengeRepository challenges;
@@ -47,6 +48,7 @@ public class DiscordSelfServiceLinkService {
         UserDiscordRepository discord,
         UserCommunityStatusRepository memberships,
         UserAccountReconciliationPreflightService preflight,
+        UserAccountConsolidationPlanner planner,
         VerifiedSocialIdentityService verifiedIdentities,
         UserIdentityLinkRepository links,
         UserDiscordLinkChallengeRepository challenges,
@@ -57,6 +59,7 @@ public class DiscordSelfServiceLinkService {
         this.discord = discord;
         this.memberships = memberships;
         this.preflight = preflight;
+        this.planner = planner;
         this.verifiedIdentities = verifiedIdentities;
         this.links = links;
         this.challenges = challenges;
@@ -76,7 +79,8 @@ public class DiscordSelfServiceLinkService {
         String status,
         List<String> nextActions,
         String notice,
-        UserAccountReconciliationPreflightService.Findings assessment
+        UserAccountReconciliationPreflightService.Findings assessment,
+        UserAccountConsolidationPlanner.Plan consolidationPlan
     ) {}
     public record Confirmation(String status, String notice) {}
 
@@ -128,12 +132,12 @@ public class DiscordSelfServiceLinkService {
         if (own != null && !own.getDiscordUserId().equals(challenge.getDiscordUserId())) {
             return new Preview(challenge.getDiscordUsername(), existing != null,
                 "RESOLUTION_REQUIRED", List.of("REVIEW_EXISTING_DISCORD", "RETRY_WITH_CORRECT_ACCOUNT"),
-                "Esta conta já possui outro Discord. Nenhuma identidade será substituída automaticamente.", null);
+                "Esta conta já possui outro Discord. Nenhuma identidade será substituída automaticamente.", null, null);
         }
         if (existing == null || existing.getUser().getId().equals(actor.getId())) {
             return new Preview(challenge.getDiscordUsername(), false,
                 "CONNECT_READY", List.of("CONFIRM_LINK"),
-                "A identidade Discord foi comprovada. A confirmação não altera dados de outras contas.", null);
+                "A identidade Discord foi comprovada. A confirmação não altera dados de outras contas.", null, null);
         }
 
         Integer legacyId = existing.getUser().getId();
@@ -149,9 +153,10 @@ public class DiscordSelfServiceLinkService {
         if (claimedElsewhere || otherReview) {
             return new Preview(challenge.getDiscordUsername(), true,
                 "REVIEW_REQUIRED", List.of("VERIFY_OTHER_ACCOUNT", "REQUEST_IDENTITY_REVIEW"),
-                "Há outro vínculo ou revisão de identidade. É necessária uma comprovação adicional; nenhum dado será transferido.", null);
+                "Há outro vínculo ou revisão de identidade. É necessária uma comprovação adicional; nenhum dado será transferido.", null, null);
         }
         var assessment = preflight.inspect(actor, existing.getUser());
+        var plan = planner.propose(assessment);
         String notice = switch (assessment.status()) {
             case "REVIEW_REQUIRED" ->
                 "Há restrições, privilégios ou referências ainda não verificadas. A identidade está comprovada, mas a fusão exige revisão segura.";
@@ -161,7 +166,7 @@ public class DiscordSelfServiceLinkService {
                 "As identidades estão comprovadas e não foram encontrados conflitos nesta triagem. Falta validar as políticas de transferência antes da fusão.";
         };
         return new Preview(challenge.getDiscordUsername(), true,
-            assessment.status(), assessment.nextActions(), notice, assessment);
+            assessment.status(), assessment.nextActions(), notice, assessment, plan);
     }
 
     @Transactional
