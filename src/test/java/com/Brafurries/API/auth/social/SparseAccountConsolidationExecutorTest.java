@@ -6,6 +6,7 @@ import com.Brafurries.API.entity.user.UserDiscordLinkChallenge;
 import com.Brafurries.API.entity.user.UserSocialIdentity;
 import com.Brafurries.API.entity.user.UserAccountConsolidation;
 import com.Brafurries.API.repository.user.UserAccountConsolidationRepository;
+import com.Brafurries.API.repository.user.UserCommunityMembershipTransferRepository;
 import com.Brafurries.API.repository.user.UserDiscordRepository;
 import com.Brafurries.API.repository.user.UserIdentityLinkRepository;
 import com.Brafurries.API.repository.user.UserRefreshTokenRepository;
@@ -37,6 +38,7 @@ class SparseAccountConsolidationExecutorTest {
     @Mock UserAccountConsolidationRepository audit;
     @Mock SparseAccountOwnershipGuard ownership;
     @Mock CommunityMembershipReconciliationService communityReconciliation;
+    @Mock UserCommunityMembershipTransferRepository membershipAudit;
 
     private SparseAccountConsolidationExecutor service;
     private User website;
@@ -46,7 +48,8 @@ class SparseAccountConsolidationExecutorTest {
     @BeforeEach
     void setup() {
         service = new SparseAccountConsolidationExecutor(users, discord, links,
-            identities, refresh, tokens, audit, ownership, communityReconciliation);
+            identities, refresh, tokens, audit, ownership, communityReconciliation,
+            membershipAudit);
         website = new User();
         website.setId(10);
         website.setEmail("google@example.com");
@@ -105,6 +108,7 @@ class SparseAccountConsolidationExecutorTest {
         ArgumentCaptor<UserAccountConsolidation> auditEntry =
             ArgumentCaptor.forClass(UserAccountConsolidation.class);
         verify(audit).saveAndFlush(auditEntry.capture());
+        verify(membershipAudit).flush();
         assertEquals(website, auditEntry.getValue().getAbsorbedUser());
         assertEquals(legacy, auditEntry.getValue().getCanonicalUser());
         assertEquals(website, auditEntry.getValue().getInitiatedByUser());
