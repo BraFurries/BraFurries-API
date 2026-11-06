@@ -366,6 +366,9 @@ public class AuthSocialService {
     }
 
     private LoginResponse issueLoginResponse(User user) {
+        if (user.getMergedIntoUser() != null) {
+            throw new BadCredentialsException("ACCOUNT_CONSOLIDATED");
+        }
         if (userTokenRepository.existsByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(
                 user,
                 UserTokenType.EMAIL_VERIFICATION
