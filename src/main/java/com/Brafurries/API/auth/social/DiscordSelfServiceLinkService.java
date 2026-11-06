@@ -38,6 +38,7 @@ public class DiscordSelfServiceLinkService {
     private final UserAccountReconciliationPreflightService preflight;
     private final UserAccountConsolidationPlanner planner;
     private final VerifiedSocialIdentityService verifiedIdentities;
+    private final SparseAccountConsolidationExecutor consolidation;
     private final UserIdentityLinkRepository links;
     private final UserDiscordLinkChallengeRepository challenges;
     private final IdentityBanPropagationService banPropagation;
@@ -50,6 +51,7 @@ public class DiscordSelfServiceLinkService {
         UserAccountReconciliationPreflightService preflight,
         UserAccountConsolidationPlanner planner,
         VerifiedSocialIdentityService verifiedIdentities,
+        SparseAccountConsolidationExecutor consolidation,
         UserIdentityLinkRepository links,
         UserDiscordLinkChallengeRepository challenges,
         IdentityBanPropagationService banPropagation,
@@ -61,6 +63,7 @@ public class DiscordSelfServiceLinkService {
         this.preflight = preflight;
         this.planner = planner;
         this.verifiedIdentities = verifiedIdentities;
+        this.consolidation = consolidation;
         this.links = links;
         this.challenges = challenges;
         this.banPropagation = banPropagation;
@@ -83,6 +86,7 @@ public class DiscordSelfServiceLinkService {
         UserAccountConsolidationPlanner.Plan consolidationPlan
     ) {}
     public record Confirmation(String status, String notice) {}
+    public record ConsolidationResult(String status, Integer canonicalUserId, String notice) {}
 
     @Transactional
     public Start start(Authentication authentication) {
@@ -210,6 +214,29 @@ public class DiscordSelfServiceLinkService {
         challenge.setConsumedAt(now());
         challenges.save(challenge);
         return new Confirmation(outcome, "Discord confirmado. Os registros anteriores foram preservados.");
+    }
+
+    /**
+     * An explicit second confirmation is mandatory because the current JWT
+     * must be revoked. Caller re-authenticates as the surviving Discord
+     * history owner after the transaction commits.
+     */
+    @Transactional
+    public ConsolidationResult consolidate(Authentication authentication, String ticket,
+                                           boolean acknowledgeDiscordHistoryOwner) {
+        if (!acknowledgeDiscordHistoryOwner) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "CONFIRM_CANONICAL_OWNER_REQUIRED");
+        }
+        User requester = requireAuthenticated(authentication);
+        UserDiscordLinkChallenge challenge = requireLockedChallenge(ticket);
+        requireVerifiedChallenge(requester, challenge);
+
+        Integer canonicalId = consolidation.consolidate(requester, challenge);
+        challenge.setStatus("CONSUMED");
+        challenge.setConsumedAt(now());
+        challenges.saveAndFlush(challenge);
+        return new ConsolidationResult("CONSOLIDATED_RELOGIN_REQUIRED", canonicalId,
+            "As identidades foram consolidadas. Entre novamente usando seu Discord ou os dados da conta.");
     }
 
     /**
