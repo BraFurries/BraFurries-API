@@ -592,17 +592,17 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
 
     @Test
     @Transactional(isolation = Isolation.SERIALIZABLE)
-    void sparseMergeCannotAbsorbOtherCommunityRecordsOnRealMariaDb() {
+    void websiteVipMembershipCannotBeAutoTransferredToCanonicalDiscordOnRealMariaDb() {
         SparseFixture f = sparseFixture("block", 992224440002L);
         Community community = new Community();
-        community.setName("Synthetic website restriction");
+        community.setName("Synthetic site VIP approval conflict");
         community = communities.saveAndFlush(community);
         UserCommunityStatus membership = new UserCommunityStatus();
         membership.setUser(f.website());
         membership.setCommunity(community);
         membership.setMemberSince(LocalDateTime.now());
         membership.setApproved(true);
-        membership.setIsVip(false);
+        membership.setIsVip(true);
         membership.setIsPartner(false);
         membership.setBanned(false);
         membership.setBirthdayMentionable(false);
@@ -613,6 +613,8 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
         assertEquals("synthetic-google-block@example.invalid", f.website().getEmail());
         assertNull(f.website().getMergedIntoUser());
         assertFalse(consolidationAudit.existsByAbsorbedUserId(f.website().getId()));
+        assertTrue(Boolean.TRUE.equals(memberships.findById(membership.getId())
+            .orElseThrow().getIsVip()));
     }
 
 }
