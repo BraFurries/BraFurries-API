@@ -383,7 +383,7 @@ public class AuthSocialService {
 
         List<String> roles = apiUserRoleRepository.findRoleNamesByUserId(user.getId());
         List<String> permissions = apiRolePermissionRepository.findPermissionNamesByUserId(user.getId());
-        String accessToken = tokenService.generateAccessToken(user.getEmail(), roles, permissions);
+        String accessToken = tokenService.generateAccessToken(user.getEmail(), roles, permissions, user.getAuthVersion());
         String refreshToken = tokenService.generateToken(64);
 
         UserRefreshToken refreshEntity = new UserRefreshToken();
