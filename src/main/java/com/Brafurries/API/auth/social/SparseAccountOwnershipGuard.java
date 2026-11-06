@@ -76,6 +76,19 @@ public class SparseAccountOwnershipGuard {
     }
 
     public void assertOnlyTransferableReferences(Integer absorbedUserId) {
+        check(absorbedUserId, false);
+    }
+
+    /**
+     * Extension allowed only after CommunityMembershipReconciliationService
+     * has locked and validated all one-sided, unprivileged membership rows.
+     * Other tenants, money, roles, XP, moderation and history remain blocked.
+     */
+    public void assertOnlyTransferableReferencesWithCommunityMemberships(Integer absorbedUserId) {
+        check(absorbedUserId, true);
+    }
+
+    private void check(Integer absorbedUserId, boolean allowMemberships) {
         if (absorbedUserId == null || absorbedUserId <= 0) {
             throw new IllegalArgumentException("Invalid absorbed user");
         }
@@ -99,9 +112,11 @@ public class SparseAccountOwnershipGuard {
             }
 
             String name = table + "." + column;
-            if (ALLOWED.contains(name)) {
-                // Only known, Database-FK-backed references may be transferred
-                // or revoked by the executor.
+            if (ALLOWED.contains(name)
+                || (allowMemberships && "user_community_status.user_id".equals(name))) {
+                // Membership is allowed only when the executor has locked and
+                // reviewed its exact rows. Its composite child-FK references
+                // are NOT allowlisted; populated children fail this scan.
                 if (!hasParentFk(ref.get("has_user_fk"))) throw blocked();
                 continue;
             }
