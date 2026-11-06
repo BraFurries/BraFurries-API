@@ -23,12 +23,14 @@ import org.springframework.web.server.ResponseStatusException;
 /**
  * Single, intentionally narrow automatic merge:
  * authenticated website user with no operating data -> proven Discord
- * history owner. The ownership guard verifies every known live users FK
+ * history owner. The website user may have a LOCAL password, a verified
+ * Google subject, or both; no specific OAuth provider is mandatory. The ownership guard verifies every known live users FK
  * before any write, including foreign keys introduced by later migrations.
  *
  * Caller MUST lock the verified one-time OAuth challenge in the transaction.
  * This service locks both user IDs in deterministic order, checks again under
- * lock, and only then moves verified Google subjects and login credentials.
+ * lock, and only then moves independently verified provider subjects and
+ * compatible local login credentials.
  * Discord and Community/XP/assets/moderation data NEVER change owner here.
  */
 @Service
@@ -106,11 +108,14 @@ public class SparseAccountConsolidationExecutor {
         if (!identities.findByUserIdAndProvider(websiteId, "discord").isEmpty()) {
             throw blocked("MULTIPLE_DISCORD_REVIEW_REQUIRED");
         }
-        if (google.isEmpty()) {
-            // A local password does not prove the Google provider subject.
-            // Do not absorb the site account until the Google identity is
-            // independently verified and preserved on the canonical account.
-            throw blocked("VERIFY_GOOGLE_BEFORE_MERGE");
+        if (google.isEmpty() && (web.getPasswordHash() == null
+            || web.getPasswordHash().isBlank())) {
+            // Accounts created with local e-mail/password do NOT need Google
+            // OAuth: the authenticated site session and independently proven
+            // Discord OAuth are the two required ownership proofs.
+            // But never absorb a Google-only/no-password account without
+            // preserving at least one way to log in to the canonical user.
+            throw blocked("VERIFY_GOOGLE_OR_RECOVER_LOCAL_LOGIN");
         }
 
         if (web.getEmail() == null || web.getEmail().isBlank()
