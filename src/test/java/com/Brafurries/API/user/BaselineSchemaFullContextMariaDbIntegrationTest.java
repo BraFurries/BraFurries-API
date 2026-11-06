@@ -58,7 +58,7 @@ class BaselineSchemaFullContextMariaDbIntegrationTest {
             "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='BASE TABLE'",
             Integer.class
         );
-        assertEquals(108, tables);
+        assertEquals(110, tables);
         mvc.perform(get("/meta/locales")).andExpect(status().isOk());
     }
 }
