@@ -90,6 +90,7 @@ class SparseAccountConsolidationExecutorTest {
         verify(ownership).assertOnlyTransferableReferences(10);
         assertEquals("google@example.com", legacy.getEmail());
         assertNull(website.getEmail());
+        assertNull(website.getPasswordHash());
         assertEquals(legacy, website.getMergedIntoUser());
         assertEquals(legacy, verifiedGoogle.getUser());
         assertEquals(1L, website.getAuthVersion());
