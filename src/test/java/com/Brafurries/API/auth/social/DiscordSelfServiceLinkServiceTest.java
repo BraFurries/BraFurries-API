@@ -32,6 +32,7 @@ class DiscordSelfServiceLinkServiceTest {
     @Mock UserDiscordRepository discord;
     @Mock UserCommunityStatusRepository memberships;
     @Mock UserAccountReconciliationPreflightService preflight;
+    @Mock UserAccountConsolidationPlanner planner;
     @Mock VerifiedSocialIdentityService verifiedIdentities;
     @Mock UserIdentityLinkRepository links;
     @Mock UserDiscordLinkChallengeRepository challenges;
@@ -39,7 +40,7 @@ class DiscordSelfServiceLinkServiceTest {
     @Mock TokenService tokens;
 
     private DiscordSelfServiceLinkService service() {
-        return new DiscordSelfServiceLinkService(users, discord, memberships, preflight, verifiedIdentities, links, challenges, bans, tokens);
+        return new DiscordSelfServiceLinkService(users, discord, memberships, preflight, planner, verifiedIdentities, links, challenges, bans, tokens);
     }
 
     private Authentication auth() {
