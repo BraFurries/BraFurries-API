@@ -47,7 +47,7 @@ class UserAccountReconciliationPreflightServiceTest {
     }
 
     @Test
-    void noOverlapIsStillPrecheckNotAutomaticMergeAuthorization() {
+    void websiteOnlyCommunityMembershipStillNeedsTransferPolicyEvenWithoutOverlap() {
         User website = user(10), legacy = user(20);
         when(memberships.findByUser(website)).thenReturn(List.of(membership(1, false, false)));
         when(memberships.findByUser(legacy)).thenReturn(List.of(membership(2, false, false)));
@@ -55,11 +55,11 @@ class UserAccountReconciliationPreflightServiceTest {
 
         var result = service().inspect(website, legacy);
 
-        assertEquals("PRECHECK_REQUIRED", result.status());
+        assertEquals("RESOLUTION_REQUIRED", result.status());
         assertEquals(2, result.communities().size());
         assertTrue(result.communities().stream().noneMatch(
             scope -> scope.websiteMembership() && scope.discordMembership()));
-        assertEquals(List.of("CHECK_ACCOUNT_CONFLICTS"), result.nextActions());
+        assertTrue(result.nextActions().contains("TRANSFER_WEBSITE_COMMUNITY_DATA"));
         verify(jdbc, never()).update(anyString(), any(Object[].class));
     }
 
@@ -93,6 +93,43 @@ class UserAccountReconciliationPreflightServiceTest {
         assertTrue(result.nextActions().contains("REVIEW_ACCESS_GRANTS"));
         assertTrue(result.communities().getFirst().containsRestriction());
         assertTrue(result.communities().getFirst().containsSpecialRole());
+    }
+
+    @Test
+    void discordOnlyVipOrBanIsPreservedWithoutArtificialConflict() {
+        User website = user(10), legacy = user(20);
+        when(memberships.findByUser(website)).thenReturn(List.of());
+        when(memberships.findByUser(legacy))
+            .thenReturn(List.of(membership(1, true, true)));
+        when(jdbc.queryForList(anyString())).thenReturn(List.of(
+            reference("api_user_roles", "user_id", 1)));
+        when(jdbc.queryForObject(anyString(), eq(Number.class), eq(10), eq(20)))
+            .thenReturn(2);
+
+        var result = service().inspect(website, legacy);
+
+        assertEquals("PRECHECK_REQUIRED", result.status());
+        assertTrue(result.communities().getFirst().containsRestriction());
+        assertTrue(result.communities().getFirst().containsSpecialRole());
+        assertEquals("AUTHORIZATION", result.domains().getFirst().domain());
+        assertFalse(result.domains().getFirst().websiteHasRecords());
+        assertFalse(result.nextActions().contains("REVIEW_ACCESS_GRANTS"));
+        assertFalse(result.nextActions().contains("PRESERVE_COMMUNITY_RESTRICTIONS"));
+    }
+
+    @Test
+    void websiteOnlyVipOrBanStillRequiresReviewAndIsNotSilentlyTransferred() {
+        User website = user(10), legacy = user(20);
+        when(memberships.findByUser(website))
+            .thenReturn(List.of(membership(1, true, true)));
+        when(memberships.findByUser(legacy)).thenReturn(List.of());
+        when(jdbc.queryForList(anyString())).thenReturn(List.of());
+
+        var result = service().inspect(website, legacy);
+
+        assertEquals("REVIEW_REQUIRED", result.status());
+        assertTrue(result.nextActions().contains("REVIEW_ACCESS_GRANTS"));
+        assertTrue(result.nextActions().contains("PRESERVE_COMMUNITY_RESTRICTIONS"));
     }
 
     @Test
