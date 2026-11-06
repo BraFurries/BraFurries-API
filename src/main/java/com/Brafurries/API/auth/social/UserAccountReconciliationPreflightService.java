@@ -181,15 +181,20 @@ public class UserAccountReconciliationPreflightService {
                 entry.getValue().discord, entry.getValue().both, entry.getValue().historical))
             .toList();
 
-        boolean restricted = communities.stream().anyMatch(CommunityImpact::containsRestriction);
+        // The Discord owner is the proposed canonical account. Its existing
+        // restrictions and special roles stay attached to the SAME user ID;
+        // they are not conflicts by themselves. Website-owned grants or
+        // restrictions cannot be silently transferred to that account.
+        boolean restricted = scopes.values().stream().anyMatch(scope -> scope.websiteRestricted);
         // A domain not yet classified by a migration policy is never
         // implicitly safe, even when populated on only one account.
         boolean unknownDomain = domains.containsKey("OTHER");
         if (unknownDomain) unscanned = true;
-        boolean privileged = communities.stream().anyMatch(CommunityImpact::containsSpecialRole)
-            || domains.containsKey("AUTHORIZATION");
+        boolean privileged = scopes.values().stream().anyMatch(scope -> scope.websiteSpecial)
+            || (domains.containsKey("AUTHORIZATION") && domains.get("AUTHORIZATION").webOwned);
         boolean overlap = communities.stream().anyMatch(impact ->
             (impact.websiteMembership() && impact.discordMembership()) || impact.needsDuplicateReview());
+        boolean websiteMembership = communities.stream().anyMatch(CommunityImpact::websiteMembership);
         boolean dualDomain = domains.values().stream().anyMatch(acc -> acc.both);
         boolean websiteOperationalData = domains.entrySet().stream().anyMatch(entry ->
             entry.getValue().webOwned && !Set.of("IDENTITY", "CREDENTIALS", "PROVENANCE")
@@ -202,9 +207,10 @@ public class UserAccountReconciliationPreflightService {
             if (restricted) actions.add("PRESERVE_COMMUNITY_RESTRICTIONS");
             if (privileged) actions.add("REVIEW_ACCESS_GRANTS");
             actions.add("REQUEST_IDENTITY_REVIEW");
-        } else if (overlap || dualDomain || websiteOperationalData) {
+        } else if (overlap || websiteMembership || dualDomain || websiteOperationalData) {
             status = "RESOLUTION_REQUIRED";
             if (overlap) actions.add("RECONCILE_COMMUNITY_MEMBERSHIP");
+            else if (websiteMembership) actions.add("TRANSFER_WEBSITE_COMMUNITY_DATA");
             if (dualDomain || websiteOperationalData) actions.add("RECONCILE_DOMAIN_DATA");
             actions.add("CHECK_ACCOUNT_CONFLICTS");
         } else {
@@ -231,9 +237,15 @@ public class UserAccountReconciliationPreflightService {
                 if (scope.discord) scope.duplicates = true;
                 scope.discord = true;
             }
-            scope.restricted |= Boolean.TRUE.equals(row.getBanned());
-            scope.special |= Boolean.TRUE.equals(row.getIsVip())
+            boolean banned = Boolean.TRUE.equals(row.getBanned());
+            boolean elevated = Boolean.TRUE.equals(row.getIsVip())
                 || Boolean.TRUE.equals(row.getIsPartner());
+            scope.restricted |= banned;
+            scope.special |= elevated;
+            if (website) {
+                scope.websiteRestricted |= banned;
+                scope.websiteSpecial |= elevated;
+            }
         }
     }
 
@@ -276,6 +288,8 @@ public class UserAccountReconciliationPreflightService {
         boolean discord;
         boolean restricted;
         boolean special;
+        boolean websiteRestricted;
+        boolean websiteSpecial;
         boolean duplicates;
     }
 
