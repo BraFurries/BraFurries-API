@@ -167,6 +167,7 @@ public class UserAccountReconciliationPreflightService {
             if (unknownRelationship) unscanned = true;
             DomainAccumulator acc = domains.computeIfAbsent(category, key -> new DomainAccumulator());
             acc.web |= (presence & 1) != 0;
+            acc.webOwned |= (presence & 1) != 0 && !historical;
             acc.discord |= (presence & 2) != 0;
             acc.historical |= historical;
             // Same reference column on both users means a reconciliation policy
@@ -191,7 +192,7 @@ public class UserAccountReconciliationPreflightService {
             (impact.websiteMembership() && impact.discordMembership()) || impact.needsDuplicateReview());
         boolean dualDomain = domains.values().stream().anyMatch(acc -> acc.both);
         boolean websiteOperationalData = domains.entrySet().stream().anyMatch(entry ->
-            entry.getValue().web && !Set.of("IDENTITY", "CREDENTIALS", "PROVENANCE")
+            entry.getValue().webOwned && !Set.of("IDENTITY", "CREDENTIALS", "PROVENANCE")
                 .contains(entry.getKey()));
         Set<String> actions = new LinkedHashSet<>();
         String status;
@@ -254,7 +255,7 @@ public class UserAccountReconciliationPreflightService {
         }
         if (name.equals("user_community_status") || name.contains("membership")) return "COMMUNITY";
         if (name.contains("ban") || name.contains("warn") || name.contains("moderation")
-            || name.contains("user_notes")) return "MODERATION";
+            || name.contains("user_notes") || name.contains("member_notes")) return "MODERATION";
         if (name.contains("role") || name.contains("permission") || name.contains("access")
             || name.contains("staff") || name.contains("team_assignment")) return "AUTHORIZATION";
         if (name.contains("token") || name.contains("credential") || name.contains("session")) {
@@ -280,6 +281,7 @@ public class UserAccountReconciliationPreflightService {
 
     private static final class DomainAccumulator {
         boolean web;
+        boolean webOwned;
         boolean discord;
         boolean both;
         boolean historical;
