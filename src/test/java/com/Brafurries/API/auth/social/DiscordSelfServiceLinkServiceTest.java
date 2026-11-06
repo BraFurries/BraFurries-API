@@ -34,13 +34,14 @@ class DiscordSelfServiceLinkServiceTest {
     @Mock UserAccountReconciliationPreflightService preflight;
     @Mock UserAccountConsolidationPlanner planner;
     @Mock VerifiedSocialIdentityService verifiedIdentities;
+    @Mock SparseAccountConsolidationExecutor consolidation;
     @Mock UserIdentityLinkRepository links;
     @Mock UserDiscordLinkChallengeRepository challenges;
     @Mock IdentityBanPropagationService bans;
     @Mock TokenService tokens;
 
     private DiscordSelfServiceLinkService service() {
-        return new DiscordSelfServiceLinkService(users, discord, memberships, preflight, planner, verifiedIdentities, links, challenges, bans, tokens);
+        return new DiscordSelfServiceLinkService(users, discord, memberships, preflight, planner, verifiedIdentities, consolidation, links, challenges, bans, tokens);
     }
 
     private Authentication auth() {
@@ -272,6 +273,33 @@ class DiscordSelfServiceLinkServiceTest {
 
         assertEquals("REVIEW_REQUIRED", preview.status());
         assertTrue(preview.nextActions().contains("VERIFY_OTHER_ACCOUNT"));
+    }
+
+    @Test
+    void explicitSparseMergeRequiresCanonicalOwnershipAcknowledgement() {
+        var failure = assertThrows(ResponseStatusException.class,
+            () -> service().consolidate(auth(), TICKET, false));
+        assertEquals(HttpStatus.BAD_REQUEST, failure.getStatusCode());
+        verifyNoInteractions(consolidation, challenges);
+    }
+
+    @Test
+    void explicitSparseMergeRequiresOneTimeOAuthProofFromSameSiteUser() {
+        User web = user(10);
+        User legacy = user(20);
+        var proof = verified(web);
+        when(users.findByEmail("person@example.com")).thenReturn(Optional.of(web));
+        when(challenges.findByTicketHashForUpdate(anyString())).thenReturn(Optional.of(proof));
+        when(consolidation.consolidate(web, proof)).thenReturn(20);
+
+        var outcome = service().consolidate(auth(), TICKET, true);
+
+        assertEquals("CONSOLIDATED_RELOGIN_REQUIRED", outcome.status());
+        assertEquals(20, outcome.canonicalUserId());
+        assertEquals("CONSUMED", proof.getStatus());
+        assertNotNull(proof.getConsumedAt());
+        verify(challenges).saveAndFlush(proof);
+        verify(consolidation).consolidate(web, proof);
     }
 
     private UserIdentityLink link(User a, User b, UserIdentityLinkSource source) {
