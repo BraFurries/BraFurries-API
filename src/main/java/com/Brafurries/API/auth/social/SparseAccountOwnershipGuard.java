@@ -79,7 +79,7 @@ public class SparseAccountOwnershipGuard {
             if (ALLOWED.contains(name)) {
                 // Whitelisted write paths are serialized by the locked users
                 // parent rows through their Database-owned foreign keys.
-                if (!(ref.get("has_user_fk") instanceof Number fk) || fk.intValue() != 1) {
+                if (!hasParentFk(ref.get("has_user_fk"))) {
                     throw blocked();
                 }
                 continue;
@@ -93,11 +93,13 @@ public class SparseAccountOwnershipGuard {
             // Tables that accept ownership IDs without any users FK cannot
             // be locked by the users row. Any concurrent insert could make
             // the snapshot stale, so refuse the merge rather than guess.
-            if (!(ref.get("has_user_fk") instanceof Number fk) || fk.intValue() != 1) {
+            if (!hasParentFk(ref.get("has_user_fk"))) {
                 throw blocked();
             }
         }
     }
+
+    private boolean hasParentFk(Object raw) { return Boolean.TRUE.equals(raw) || (raw instanceof Number n && n.intValue() == 1); }
 
     private ResponseStatusException blocked() {
         return new ResponseStatusException(HttpStatus.CONFLICT,
