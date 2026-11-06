@@ -73,6 +73,47 @@ class UserAccountConsolidationPlannerTest {
     }
 
     @Test
+    void existingDiscordVipAndBanAreRetainedWithoutCopyingRoles() {
+        var scan = new Findings("PRECHECK_REQUIRED", List.of("CHECK_ACCOUNT_CONFLICTS"),
+            List.of(new CommunityImpact(1, false, true, true, true, false)),
+            List.of(domain("COMMUNITY", false, true, false),
+                domain("AUTHORIZATION", false, true, false),
+                domain("MODERATION", false, true, false)));
+
+        var proposal = planner.propose(scan);
+
+        assertEquals("AUTO_MERGE_CANDIDATE", proposal.status());
+        assertEquals("DISCORD_HISTORY_OWNER", proposal.preferredCanonicalAccount());
+        assertTrue(proposal.preservationPolicies().contains("PRESERVE_DISCORD_AUTHORIZATION_IN_PLACE"));
+        assertTrue(proposal.preservationPolicies().contains("PRESERVE_DISCORD_MODERATION_IN_PLACE"));
+    }
+
+    @Test
+    void preflightConflictCanNeverBecomeAutoMergeJustBecauseDomainsAreEmpty() {
+        var scan = new Findings("RESOLUTION_REQUIRED",
+            List.of("TRANSFER_WEBSITE_COMMUNITY_DATA"),
+            List.of(new CommunityImpact(42, true, false, false, false, false)),
+            List.of());
+
+        var proposal = planner.propose(scan);
+
+        assertEquals("RESOLUTION_REQUIRED", proposal.status());
+        assertEquals("UNDECIDED", proposal.preferredCanonicalAccount());
+        assertTrue(proposal.nextActions().contains("TRANSFER_WEBSITE_COMMUNITY_DATA"));
+    }
+
+    @Test
+    void unknownPreflightStateRequiresReviewInsteadOfOptimisticMerge() {
+        var scan = new Findings("UNEXPECTED_STATE", List.of("REQUEST_IDENTITY_REVIEW"),
+            List.of(), List.of());
+
+        var proposal = planner.propose(scan);
+
+        assertEquals("REVIEW_REQUIRED", proposal.status());
+        assertEquals("UNDECIDED", proposal.preferredCanonicalAccount());
+    }
+
+    @Test
     void missingVerifiedPreflightIsNeverAnImplicitApproval() {
         assertThrows(IllegalArgumentException.class, () -> planner.propose(null));
     }
