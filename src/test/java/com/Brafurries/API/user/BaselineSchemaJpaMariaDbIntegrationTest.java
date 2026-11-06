@@ -472,6 +472,59 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
 
     @Test
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void postWriteFailureRollsBackBothUserMergeAndOneSidedCommunityTransfer() {
+        TransactionTemplate setup = new TransactionTemplate(transactionManager);
+        Object[] fixture = setup.execute(status -> {
+            SparseFixture f = sparseFixture("commrollback", 992224440010L, false);
+            Community community = new Community();
+            community.setName("Synthetic tenant rollback");
+            community = communities.saveAndFlush(community);
+
+            UserCommunityStatus membership = new UserCommunityStatus();
+            membership.setUser(f.website());
+            membership.setCommunity(community);
+            membership.setMemberSince(LocalDateTime.of(2024, 1, 1, 10, 0));
+            membership.setApproved(true);
+            membership.setIsVip(false);
+            membership.setIsPartner(false);
+            membership.setBanned(false);
+            membership.setBirthdayMentionable(false);
+            membership = memberships.saveAndFlush(membership);
+            return new Object[] { f, membership.getId() };
+        });
+        assertNotNull(fixture);
+        SparseFixture f = (SparseFixture) fixture[0];
+        Integer membershipId = (Integer) fixture[1];
+
+        TransactionTemplate atomic = new TransactionTemplate(transactionManager);
+        atomic.setIsolationLevel(TransactionDefinition.ISOLATION_SERIALIZABLE);
+        assertThrows(IllegalStateException.class, () ->
+            atomic.execute(status -> {
+                sparseMerge.consolidate(f.website(), f.proof());
+                throw new IllegalStateException("synthetic failure after Community transfer");
+            }));
+
+        TransactionTemplate check = new TransactionTemplate(transactionManager);
+        check.execute(status -> {
+            User website = users.findById(f.website().getId()).orElseThrow();
+            User canonical = users.findById(f.legacy().getId()).orElseThrow();
+            UserCommunityStatus membership = memberships.findById(membershipId).orElseThrow();
+
+            assertEquals(website.getId(), membership.getUser().getId());
+            assertEquals(LocalDateTime.of(2024, 1, 1, 10, 0), membership.getMemberSince());
+            assertEquals("local-password-hash", website.getPasswordHash());
+            assertNotNull(website.getEmail());
+            assertNull(website.getMergedIntoUser());
+            assertNull(canonical.getEmail());
+            assertEquals(0L, website.getAuthVersion());
+            assertEquals(0L, canonical.getAuthVersion());
+            assertFalse(consolidationAudit.existsByAbsorbedUserId(website.getId()));
+            return null;
+        });
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void sparseMergeRollbackRestoresBothAccountsAfterPostWriteFailure() {
         TransactionTemplate seed = new TransactionTemplate(transactionManager);
         SparseFixture f = seed.execute(status -> sparseFixture("rollback", 992224440003L));
