@@ -3,8 +3,6 @@ package com.Brafurries.API.auth.social;
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.entity.user.UserCommunityStatus;
 import com.Brafurries.API.repository.user.UserCommunityStatusRepository;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -128,7 +126,13 @@ public class UserAccountReconciliationPreflightService {
                 continue;
             }
             String category = category(table);
-            boolean historical = !"user_id".equalsIgnoreCase(column);
+            String normalizedColumn = column.toLowerCase(Locale.ROOT);
+            // Only explicit authorship/audit columns are historical; arbitrary
+            // *owner_user_id or *recipient_user_id references may carry grants,
+            // ownership or balances and must not be silently ignored.
+            boolean historical = historicalActorColumn(normalizedColumn);
+            boolean unknownRelationship = !"user_id".equals(normalizedColumn) && !historical;
+            if (unknownRelationship) unscanned = true;
             String query = "SELECT (EXISTS(SELECT 1 FROM `" + table + "` WHERE `" + column
                 + "` = ? LIMIT 1)) + 2 * (EXISTS(SELECT 1 FROM `" + table
                 + "` WHERE `" + column + "` = ? LIMIT 1))";
@@ -159,6 +163,10 @@ public class UserAccountReconciliationPreflightService {
             .toList();
 
         boolean restricted = communities.stream().anyMatch(CommunityImpact::containsRestriction);
+        // A domain not yet classified by a migration policy is never
+        // implicitly safe, even when populated on only one account.
+        boolean unknownDomain = domains.containsKey("OTHER");
+        if (unknownDomain) unscanned = true;
         boolean privileged = communities.stream().anyMatch(CommunityImpact::containsSpecialRole)
             || domains.containsKey("AUTHORIZATION");
         boolean overlap = communities.stream().anyMatch(impact ->
@@ -205,6 +213,14 @@ public class UserAccountReconciliationPreflightService {
             scope.special |= Boolean.TRUE.equals(row.getIsVip())
                 || Boolean.TRUE.equals(row.getIsPartner());
         }
+    }
+
+    private static boolean historicalActorColumn(String column) {
+        return Set.of("applied_by", "revoked_by", "created_by", "updated_by",
+            "reviewed_by", "approved_by", "deleted_by", "initiated_by_user_id",
+            "created_by_user_id", "updated_by_user_id", "approved_by_user_id",
+            "revoked_by_user_id", "applied_by_user_id", "performed_by_user_id",
+            "actor_user_id").contains(column);
     }
 
     private static String category(String table) {
