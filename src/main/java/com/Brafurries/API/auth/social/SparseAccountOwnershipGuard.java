@@ -50,6 +50,13 @@ public class SparseAccountOwnershipGuard {
                            AND fk.REFERENCED_TABLE_SCHEMA=DATABASE()
                            AND fk.REFERENCED_TABLE_NAME='users'
                            AND fk.REFERENCED_COLUMN_NAME='id'))
+          -- OAuth account IDs are INT users.id. These columns store IDs from
+          -- external networks (or user_discord.id), not users.id.
+          AND c.COLUMN_NAME NOT IN ('discord_user_id', 'patreon_user_id',
+                  'telegram_user_id', 'disc_user_id')
+          AND RIGHT(c.COLUMN_NAME, 16) <> '_discord_user_id'
+          AND NOT (c.TABLE_NAME IN ('form_submissions', 'portaria_account_release')
+                   AND c.COLUMN_NAME='user_id')
         ORDER BY c.TABLE_NAME, c.COLUMN_NAME
         """;
 
@@ -63,6 +70,13 @@ public class SparseAccountOwnershipGuard {
         if (absorbedUserId == null || absorbedUserId <= 0) {
             throw new IllegalArgumentException("Invalid absorbed user");
         }
+        // This assertion is transaction-scoped. SERIALIZABLE + FOR UPDATE
+        // locking reads also protect FK-less legacy references from a phantom
+        // insert while the user row is being absorbed. If the caller has a
+        // weaker isolation level, no ownership transfer is allowed.
+        String isolation = jdbc.queryForObject("SELECT @@tx_isolation", String.class);
+        if (!"SERIALIZABLE".equalsIgnoreCase(isolation)) throw blocked();
+
         List<Map<String, Object>> refs = jdbc.queryForList(REFERENCES);
         if (refs.isEmpty() || refs.size() > MAX_REFERENCE_COLUMNS) {
             throw blocked();
@@ -77,23 +91,18 @@ public class SparseAccountOwnershipGuard {
 
             String name = table + "." + column;
             if (ALLOWED.contains(name)) {
-                // Whitelisted write paths are serialized by the locked users
-                // parent rows through their Database-owned foreign keys.
-                if (!hasParentFk(ref.get("has_user_fk"))) {
-                    throw blocked();
-                }
+                // Only known, Database-FK-backed references may be transferred
+                // or revoked by the executor.
+                if (!hasParentFk(ref.get("has_user_fk"))) throw blocked();
                 continue;
             }
-            String sql = "SELECT EXISTS(SELECT 1 FROM `" + table + "` WHERE `"
-                + column + "`=? LIMIT 1)";
-            Integer present = jdbc.queryForObject(sql, Integer.class, absorbedUserId);
-            if (present == null || present != 0) {
-                throw blocked();
-            }
-            // Tables that accept ownership IDs without any users FK cannot
-            // be locked by the users row. Any concurrent insert could make
-            // the snapshot stale, so refuse the merge rather than guess.
-            if (!hasParentFk(ref.get("has_user_fk"))) {
+            // An indexed equality query only locks its narrow key range.
+            // FK-less unindexed legacy fields can need wider locks; this
+            // remains an explicit user-initiated operation, not background DML.
+            String sql = "SELECT COUNT(*) FROM `" + table + "` WHERE `"
+                + column + "`=? FOR UPDATE";
+            Long present = jdbc.queryForObject(sql, Long.class, absorbedUserId);
+            if (present == null || present != 0L) {
                 throw blocked();
             }
         }
