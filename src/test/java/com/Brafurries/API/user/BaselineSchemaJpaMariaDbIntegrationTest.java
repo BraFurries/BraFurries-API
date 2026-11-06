@@ -394,6 +394,13 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
         assertEquals(1, memberships.findByUser(f.legacy()).size());
         assertTrue(memberships.findByUser(f.website()).isEmpty());
         assertTrue(consolidationAudit.existsByAbsorbedUserId(f.website().getId()));
+        assertEquals(1, jdbc.queryForObject("""
+            SELECT COUNT(*) FROM user_community_membership_transfers
+            WHERE community_status_id=? AND community_id=?
+              AND from_user_id=? AND to_user_id=?
+            """, Integer.class, originalId, community.getId(),
+            f.website().getId(), f.legacy().getId()));
+
     }
 
     @Test
@@ -519,6 +526,9 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
             assertEquals(0L, website.getAuthVersion());
             assertEquals(0L, canonical.getAuthVersion());
             assertFalse(consolidationAudit.existsByAbsorbedUserId(website.getId()));
+            assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM user_community_membership_transfers WHERE community_status_id=?",
+                Integer.class, membershipId));
             return null;
         });
     }
