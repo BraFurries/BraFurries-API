@@ -131,7 +131,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: BraFurries/BraFurries-Database
-          ref: b7e926e38a4460362a2be9953e84dffe9e54a998
+          ref: 242c2fb40c84b24d7ea2c81571d33e6b1a6653d5
           path: .ci/community-audit-database
           persist-credentials: false
 
@@ -156,7 +156,7 @@ jobs:
           test "$(git -C .ci/social-reconciliation-database rev-parse HEAD)" = "0a13897d0772c8d739fb11d807e1a4f01a143d8b"
           test -s "$identity_migration"
           community_audit_migration=".ci/community-audit-database/flyway/sql/versioned/V20261106_001__audit_community_membership_account_consolidations.sql"
-          test "$(git -C .ci/community-audit-database rev-parse HEAD)" = "b7e926e38a4460362a2be9953e84dffe9e54a998"
+          test "$(git -C .ci/community-audit-database rev-parse HEAD)" = "242c2fb40c84b24d7ea2c81571d33e6b1a6653d5"
           test -s "$community_audit_migration"
           moderation_dir=".ci/moderation-database/flyway/sql/versioned"
           for migration in \
