@@ -389,6 +389,38 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void localPasswordMergeRollbackPreservesOriginalLoginAndNeverLeaksCredentials() {
+        TransactionTemplate seed = new TransactionTemplate(transactionManager);
+        SparseFixture f = seed.execute(status ->
+            sparseFixture("localrollback", 992224440006L, false));
+        assertNotNull(f);
+
+        TransactionTemplate atomic = new TransactionTemplate(transactionManager);
+        atomic.setIsolationLevel(TransactionDefinition.ISOLATION_SERIALIZABLE);
+        assertThrows(IllegalStateException.class, () ->
+            atomic.execute(status -> {
+                sparseMerge.consolidate(f.website(), f.proof());
+                throw new IllegalStateException("simulated failure after local credential transfer");
+            }));
+
+        TransactionTemplate check = new TransactionTemplate(transactionManager);
+        check.execute(status -> {
+            User web = users.findById(f.website().getId()).orElseThrow();
+            User discord = users.findById(f.legacy().getId()).orElseThrow();
+            assertEquals("synthetic-google-localrollback@example.invalid", web.getEmail());
+            assertEquals("local-password-hash", web.getPasswordHash());
+            assertNull(web.getMergedIntoUser());
+            assertNull(discord.getEmail());
+            assertNull(discord.getPasswordHash());
+            assertEquals(0L, web.getAuthVersion());
+            assertEquals(0L, discord.getAuthVersion());
+            assertFalse(consolidationAudit.existsByAbsorbedUserId(web.getId()));
+            return null;
+        });
+    }
+
+    @Test
     @Transactional(isolation = Isolation.SERIALIZABLE)
     void sparseMergeCannotAbsorbOtherCommunityRecordsOnRealMariaDb() {
         SparseFixture f = sparseFixture("block", 992224440002L);
