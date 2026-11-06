@@ -131,8 +131,13 @@ public class UserAccountReconciliationPreflightService {
             // *owner_user_id or *recipient_user_id references may carry grants,
             // ownership or balances and must not be silently ignored.
             boolean historical = historicalActorColumn(normalizedColumn);
-            boolean unknownRelationship = !"user_id".equals(normalizedColumn) && !historical;
-            if (unknownRelationship) unscanned = true;
+            // Challenge ownership is an ephemeral recovery token, not a
+            // transferable Community record. Its replay/state protection
+            // remains in the existing OAuth challenge workflow.
+            boolean knownChallenge = "user_discord_link_challenges".equalsIgnoreCase(table)
+                && "requesting_user_id".equals(normalizedColumn);
+            boolean unknownRelationship = !"user_id".equals(normalizedColumn)
+                && !historical && !knownChallenge;
             String query = "SELECT (EXISTS(SELECT 1 FROM `" + table + "` WHERE `" + column
                 + "` = ? LIMIT 1)) + 2 * (EXISTS(SELECT 1 FROM `" + table
                 + "` WHERE `" + column + "` = ? LIMIT 1))";
@@ -147,6 +152,7 @@ public class UserAccountReconciliationPreflightService {
                 continue;
             }
             if (presence == 0) continue;
+            if (unknownRelationship) unscanned = true;
             DomainAccumulator acc = domains.computeIfAbsent(category, key -> new DomainAccumulator());
             acc.web |= (presence & 1) != 0;
             acc.discord |= (presence & 2) != 0;
