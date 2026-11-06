@@ -96,7 +96,8 @@ public class UserAccountConsolidationPlanner {
 
         policies.add("KEEP_LEGACY_AUDIT_AND_MODERATION_ACTOR_REFERENCES");
         policies.add("REVALIDATE_ALL_COMMUNITIES_UNDER_LOCK");
-        policies.add("TRANSFER_ONLY_VERIFIED_GOOGLE_SUBJECTS");
+        policies.add("TRANSFER_ONLY_INDEPENDENTLY_VERIFIED_OAUTH_SUBJECTS");
+        policies.add("PRESERVE_COMPATIBLE_LOCAL_EMAIL_AND_PASSWORD_LOGIN");
         policies.add("INVALIDATE_BOTH_ACCOUNT_SESSIONS");
         return new Plan("AUTO_MERGE_CANDIDATE", "DISCORD_HISTORY_OWNER",
             policies.stream().distinct().toList(),
