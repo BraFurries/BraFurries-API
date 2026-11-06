@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - feat/self-service-discord-account-recovery-20261105
 
 permissions:
   contents: read
