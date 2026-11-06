@@ -129,13 +129,40 @@ class UserAccountReconciliationPreflightServiceTest {
         when(jdbc.queryForList(anyString())).thenReturn(List.of(
             reference("user_unindexed", "user_id", 0),
             reference("unsafe`table", "user_id", 1)));
+        when(jdbc.queryForObject(anyString(), eq(Number.class), eq(10), eq(20))).thenReturn(0);
 
         var result = service().inspect(website, legacy);
 
         assertEquals("REVIEW_REQUIRED", result.status());
         assertTrue(result.nextActions().contains("COMPLETE_REFERENCE_INVENTORY"));
         assertTrue(result.domains().isEmpty());
-        verify(jdbc, never()).queryForObject(anyString(), eq(Number.class), any(), any());
+        verify(jdbc).queryForObject(anyString(), eq(Number.class), eq(10), eq(20));
+    }
+
+    @Test
+    void absentRowsInLegacyUnindexedTableDoNotCreateArtificialConflict() {
+        User website = user(10), legacy = user(20);
+        when(jdbc.queryForList(anyString())).thenReturn(List.of(
+            reference("community_member_notes", "user_id", 0)));
+        when(jdbc.queryForObject(anyString(), eq(Number.class), eq(10), eq(20))).thenReturn(0);
+
+        var result = service().inspect(website, legacy);
+
+        assertEquals("PRECHECK_REQUIRED", result.status());
+        assertTrue(result.domains().isEmpty());
+    }
+
+    @Test
+    void websiteModerationRowsRequireResolutionEvenWhenDiscordHasNone() {
+        User website = user(10), legacy = user(20);
+        when(jdbc.queryForList(anyString())).thenReturn(List.of(
+            reference("community_member_notes", "user_id", 0)));
+        when(jdbc.queryForObject(anyString(), eq(Number.class), eq(10), eq(20))).thenReturn(1);
+
+        var result = service().inspect(website, legacy);
+
+        assertEquals("RESOLUTION_REQUIRED", result.status());
+        assertTrue(result.nextActions().contains("RECONCILE_DOMAIN_DATA"));
     }
 
     @Test
