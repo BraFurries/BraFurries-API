@@ -241,7 +241,7 @@ class DiscordSelfServiceLinkServiceTest {
     }
 
     @Test
-    void previewNeverOffersMergeWithoutVerifiedGoogleProviderSubject() {
+    void previewRequiresRecoveryIfThereIsNeitherLocalPasswordNorVerifiedOAuth() {
         User web = user(10), legacy = user(20);
         UserDiscord existing = new UserDiscord();
         existing.setUser(legacy);
@@ -257,9 +257,36 @@ class DiscordSelfServiceLinkServiceTest {
         var preview = service().preview(auth(), TICKET);
 
         assertEquals("RESOLUTION_REQUIRED", preview.status());
-        assertEquals(List.of("VERIFY_GOOGLE_BEFORE_MERGE"), preview.nextActions());
+        assertEquals(List.of("VERIFY_GOOGLE_OR_RECOVER_LOCAL_LOGIN"), preview.nextActions());
         assertEquals("RESOLUTION_REQUIRED", preview.consolidationPlan().status());
         verify(socialIdentities).findByUserIdAndProvider(10, "google");
+    }
+
+    @Test
+    void previewCanOfferSafeMergeForLocalPasswordAndDiscordWithSameProviderEmail() {
+        User web = user(10), legacy = user(20);
+        web.setPasswordHash("hashed-local-password");
+        UserDiscord existing = new UserDiscord();
+        existing.setUser(legacy);
+        existing.setDiscordUserId(123456789L);
+        when(users.findByEmail("person@example.com")).thenReturn(Optional.of(web));
+        when(challenges.findByTicketHash(anyString())).thenReturn(Optional.of(verified(web)));
+        when(discord.findByDiscordUserId(123456789L)).thenReturn(Optional.of(existing));
+        var findings = new UserAccountReconciliationPreflightService.Findings(
+            "PRECHECK_REQUIRED", List.of("CHECK_ACCOUNT_CONFLICTS"), List.of(), List.of());
+        when(preflight.inspect(web, legacy)).thenReturn(findings);
+        when(planner.propose(findings)).thenReturn(new UserAccountConsolidationPlanner.Plan(
+            "AUTO_MERGE_CANDIDATE", "DISCORD_HISTORY_OWNER",
+            List.of("PRESERVE_DISCORD_COMMUNITY_IN_PLACE"), List.of()));
+
+        var preview = service().preview(auth(), TICKET);
+
+        assertEquals("PRECHECK_REQUIRED", preview.status());
+        assertEquals("AUTO_MERGE_CANDIDATE", preview.consolidationPlan().status());
+        assertEquals("DISCORD_HISTORY_OWNER",
+            preview.consolidationPlan().preferredCanonicalAccount());
+        verify(socialIdentities).findByUserIdAndProvider(10, "google");
+        verifyNoInteractions(consolidation);
     }
 
     @Test
