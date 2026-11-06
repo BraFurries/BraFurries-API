@@ -39,6 +39,7 @@ public class DiscordSelfServiceLinkService {
     private final UserAccountReconciliationPreflightService preflight;
     private final UserAccountConsolidationPlanner planner;
     private final VerifiedSocialIdentityService verifiedIdentities;
+    private final UserSocialIdentityRepository socialIdentities;
     private final SparseAccountConsolidationExecutor consolidation;
     private final UserIdentityLinkRepository links;
     private final UserDiscordLinkChallengeRepository challenges;
@@ -52,6 +53,7 @@ public class DiscordSelfServiceLinkService {
         UserAccountReconciliationPreflightService preflight,
         UserAccountConsolidationPlanner planner,
         VerifiedSocialIdentityService verifiedIdentities,
+        UserSocialIdentityRepository socialIdentities,
         SparseAccountConsolidationExecutor consolidation,
         UserIdentityLinkRepository links,
         UserDiscordLinkChallengeRepository challenges,
@@ -64,6 +66,7 @@ public class DiscordSelfServiceLinkService {
         this.preflight = preflight;
         this.planner = planner;
         this.verifiedIdentities = verifiedIdentities;
+        this.socialIdentities = socialIdentities;
         this.consolidation = consolidation;
         this.links = links;
         this.challenges = challenges;
@@ -162,6 +165,18 @@ public class DiscordSelfServiceLinkService {
         }
         var assessment = preflight.inspect(actor, existing.getUser());
         var plan = planner.propose(assessment);
+        if (plan != null && "AUTO_MERGE_CANDIDATE".equals(plan.status())
+            && socialIdentities.findByUserIdAndProvider(actor.getId(), "google").isEmpty()) {
+            // A local password proves only a site session. Without a verified
+            // Google sub, this merge could silently lose Google sign-in.
+            return new Preview(challenge.getDiscordUsername(), true,
+                "RESOLUTION_REQUIRED", List.of("VERIFY_GOOGLE_BEFORE_MERGE"),
+                "Antes de unificar, comprove a identidade Google na sua conta do site. "
+                    + "Nenhum registro será alterado enquanto isso.",
+                assessment,
+                new UserAccountConsolidationPlanner.Plan("RESOLUTION_REQUIRED", "UNDECIDED",
+                    List.of(), List.of("VERIFY_GOOGLE_BEFORE_MERGE")));
+        }
         String notice = switch (assessment.status()) {
             case "REVIEW_REQUIRED" ->
                 "Há restrições, privilégios ou referências ainda não verificadas. A identidade está comprovada, mas a fusão exige revisão segura.";
