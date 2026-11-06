@@ -18,6 +18,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
@@ -221,7 +222,7 @@ public class DiscordSelfServiceLinkService {
      * must be revoked. Caller re-authenticates as the surviving Discord
      * history owner after the transaction commits.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.SERIALIZABLE)
     public ConsolidationResult consolidate(Authentication authentication, String ticket,
                                            boolean acknowledgeDiscordHistoryOwner) {
         if (!acknowledgeDiscordHistoryOwner) {
