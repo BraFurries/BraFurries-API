@@ -89,6 +89,9 @@ public class UserAccountReconciliationPreflightService {
 
     public record DomainImpact(
         String domain,
+        // Ownership/operational records only. Historical actor references
+        // remain visible via includesHistoricalReferences, but do not imply
+        // that a privilege or balance needs to move to the canonical user.
         boolean websiteHasRecords,
         boolean discordHasRecords,
         boolean bothHaveRecords,
@@ -177,7 +180,7 @@ public class UserAccountReconciliationPreflightService {
 
         List<DomainImpact> data = domains.entrySet().stream()
             .sorted(Map.Entry.comparingByKey())
-            .map(entry -> new DomainImpact(entry.getKey(), entry.getValue().web,
+            .map(entry -> new DomainImpact(entry.getKey(), entry.getValue().webOwned,
                 entry.getValue().discord, entry.getValue().both, entry.getValue().historical))
             .toList();
 
