@@ -44,6 +44,7 @@ class AuthSocialServiceConflictTest {
     @Test
     void discordEmailConflictFailsClosedWithoutDestructiveMutation() {
         User emailUser = user(10, "person@example.com");
+        emailUser.setPasswordHash("local-password-hash");
         User providerUser = user(20, null);
         UserDiscord providerLink = new UserDiscord();
         providerLink.setUser(providerUser);
@@ -71,8 +72,9 @@ class AuthSocialServiceConflictTest {
     }
 
     @Test
-    void matchingVerifiedEmailAloneNeverAuthorizesANewDiscordIdentity() {
+    void matchingVerifiedDiscordEmailNeverClaimsPasswordOnlySiteAccount() {
         User emailUser = user(10, "person@example.com");
+        emailUser.setPasswordHash("local-password-hash");
         emailUser.setDisplayName("Person");
         when(authentication.getAuthorizedClientRegistrationId()).thenReturn("discord");
         when(authentication.getPrincipal()).thenReturn(principal);
