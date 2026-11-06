@@ -36,6 +36,7 @@ class SparseAccountConsolidationExecutorTest {
     @Mock UserTokenRepository tokens;
     @Mock UserAccountConsolidationRepository audit;
     @Mock SparseAccountOwnershipGuard ownership;
+    @Mock CommunityMembershipReconciliationService communityReconciliation;
 
     private SparseAccountConsolidationExecutor service;
     private User website;
@@ -45,7 +46,7 @@ class SparseAccountConsolidationExecutorTest {
     @BeforeEach
     void setup() {
         service = new SparseAccountConsolidationExecutor(users, discord, links,
-            identities, refresh, tokens, audit, ownership);
+            identities, refresh, tokens, audit, ownership, communityReconciliation);
         website = new User();
         website.setId(10);
         website.setEmail("google@example.com");
