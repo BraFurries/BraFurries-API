@@ -156,11 +156,31 @@ class SparseAccountConsolidationExecutorTest {
     }
 
     @Test
+    void localPasswordAloneDoesNotProveLegacyGoogleIdentity() {
+        mockValidLockedPair();
+        website.setPasswordHash("safe-local-password-hash");
+        when(identities.findByUserIdAndProvider(10, "google")).thenReturn(List.of());
+        when(identities.findByUserIdAndProvider(10, "discord")).thenReturn(List.of());
+
+        var failure = assertThrows(ResponseStatusException.class,
+            () -> service.consolidate(website, ticket));
+
+        assertEquals("VERIFY_GOOGLE_BEFORE_MERGE", failure.getReason());
+        verify(identities, never()).save(any());
+        verifyNoInteractions(refresh, tokens);
+        verify(audit, never()).saveAndFlush(any());
+    }
+
+    @Test
     void conflictingCanonicalEmailRequiresExplicitResolution() {
         mockValidLockedPair();
         legacy.setEmail("discord@example.com");
-        website.setPasswordHash("valid-local-password-hash");
-        when(identities.findByUserIdAndProvider(10, "google")).thenReturn(List.of());
+        UserSocialIdentity verifiedGoogle = new UserSocialIdentity();
+        verifiedGoogle.setProvider("google");
+        verifiedGoogle.setProviderSubject("immutable-google-sub");
+        verifiedGoogle.setUser(website);
+        when(identities.findByUserIdAndProvider(10, "google"))
+            .thenReturn(List.of(verifiedGoogle));
         when(identities.findByUserIdAndProvider(10, "discord")).thenReturn(List.of());
 
         var failure = assertThrows(ResponseStatusException.class,
