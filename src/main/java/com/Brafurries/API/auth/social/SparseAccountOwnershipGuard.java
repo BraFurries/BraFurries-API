@@ -52,11 +52,20 @@ public class SparseAccountOwnershipGuard {
                            AND fk.REFERENCED_COLUMN_NAME='id'))
           -- OAuth account IDs are INT users.id. These columns store IDs from
           -- external networks (or user_discord.id), not users.id.
-          AND c.COLUMN_NAME NOT IN ('discord_user_id', 'patreon_user_id',
-                  'telegram_user_id', 'disc_user_id')
-          AND RIGHT(c.COLUMN_NAME, 16) <> '_discord_user_id'
-          AND NOT (c.TABLE_NAME IN ('form_submissions', 'portaria_account_release')
-                   AND c.COLUMN_NAME='user_id')
+          AND (
+              NOT (c.COLUMN_NAME IN ('discord_user_id', 'patreon_user_id',
+                      'telegram_user_id', 'disc_user_id')
+                  OR RIGHT(c.COLUMN_NAME, 16) = '_discord_user_id'
+                  OR (c.TABLE_NAME IN ('form_submissions', 'portaria_account_release')
+                      AND c.COLUMN_NAME='user_id'))
+              OR EXISTS(SELECT 1 FROM information_schema.KEY_COLUMN_USAGE site_fk
+                        WHERE site_fk.TABLE_SCHEMA=c.TABLE_SCHEMA
+                          AND site_fk.TABLE_NAME=c.TABLE_NAME
+                          AND site_fk.COLUMN_NAME=c.COLUMN_NAME
+                          AND site_fk.REFERENCED_TABLE_SCHEMA=DATABASE()
+                          AND site_fk.REFERENCED_TABLE_NAME='users'
+                          AND site_fk.REFERENCED_COLUMN_NAME='id')
+          )
         ORDER BY c.TABLE_NAME, c.COLUMN_NAME
         """;
 
