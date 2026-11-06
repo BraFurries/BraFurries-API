@@ -6,6 +6,8 @@ import com.Brafurries.API.entity.community.Community;
 import com.Brafurries.API.entity.community.CommunityStore;
 import com.Brafurries.API.auth.social.SparseAccountConsolidationExecutor;
 import com.Brafurries.API.auth.social.SparseAccountOwnershipGuard;
+import com.Brafurries.API.auth.social.UserAccountReconciliationPreflightService;
+import com.Brafurries.API.auth.social.UserAccountConsolidationPlanner;
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.entity.user.UserDiscord;
 import com.Brafurries.API.entity.user.UserDiscordLinkChallenge;
@@ -56,7 +58,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 })
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Import({ThemeControlPlaneStore.class, BackupControlPlaneStore.class,
-    SparseAccountConsolidationExecutor.class, SparseAccountOwnershipGuard.class})
+    SparseAccountConsolidationExecutor.class, SparseAccountOwnershipGuard.class,
+    UserAccountReconciliationPreflightService.class, UserAccountConsolidationPlanner.class})
 class BaselineSchemaJpaMariaDbIntegrationTest {
     private static final long GUILD_A = 991001L;
     private static final long GUILD_B = 991002L;
@@ -81,6 +84,8 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
     @Autowired private UserAccountConsolidationRepository consolidationAudit;
     @Autowired private UserCommunityStatusRepository memberships;
     @Autowired private SparseAccountConsolidationExecutor sparseMerge;
+    @Autowired private UserAccountReconciliationPreflightService preflight;
+    @Autowired private UserAccountConsolidationPlanner planner;
     @Autowired private PlatformTransactionManager transactionManager;
 
     @Test
@@ -308,6 +313,43 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
         assertEquals(canonical, discords.findByDiscordUserId(992224440004L)
             .orElseThrow().getUser().getId());
         assertTrue(consolidationAudit.existsByAbsorbedUserId(absorbed));
+    }
+
+    @Test
+    @Transactional(isolation = Isolation.SERIALIZABLE)
+    void existingDiscordCommunityBanAndVipStayOnCanonicalAccountWithoutWebsitePrivilegeCopy() {
+        SparseFixture f = sparseFixture("preservedrestrictions", 992224440005L, false);
+        Community community = new Community();
+        community.setName("Synthetic protected community");
+        community = communities.saveAndFlush(community);
+        UserCommunityStatus membership = new UserCommunityStatus();
+        membership.setUser(f.legacy());
+        membership.setCommunity(community);
+        membership.setMemberSince(LocalDateTime.now());
+        membership.setApproved(true);
+        membership.setIsVip(true);
+        membership.setIsPartner(false);
+        membership.setBanned(true);
+        membership.setBirthdayMentionable(false);
+        memberships.saveAndFlush(membership);
+
+        var findings = preflight.inspect(f.website(), f.legacy());
+        assertEquals("PRECHECK_REQUIRED", findings.status());
+        var proposal = planner.propose(findings);
+        assertEquals("AUTO_MERGE_CANDIDATE", proposal.status());
+        assertEquals("DISCORD_HISTORY_OWNER", proposal.preferredCanonicalAccount());
+
+        Integer mergedId = sparseMerge.consolidate(f.website(), f.proof());
+        assertEquals(f.legacy().getId(), mergedId);
+        entityManager.flush();
+        entityManager.clear();
+
+        UserCommunityStatus retained = memberships.findById(membership.getId()).orElseThrow();
+        assertEquals(mergedId, retained.getUser().getId());
+        assertTrue(Boolean.TRUE.equals(retained.getIsVip()));
+        assertTrue(Boolean.TRUE.equals(retained.getBanned()));
+        assertEquals(f.legacy().getId(), users.findById(f.website().getId())
+            .orElseThrow().getMergedIntoUser().getId());
     }
 
     @Test
