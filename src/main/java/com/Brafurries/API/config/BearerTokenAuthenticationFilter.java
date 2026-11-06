@@ -31,7 +31,7 @@ public class BearerTokenAuthenticationFilter extends OncePerRequestFilter {
         if (authorizationHeader != null && authorizationHeader.startsWith("Bearer ")) {
             String token = authorizationHeader.substring(7).trim();
             Authentication authentication = tokenService.authenticateAccessToken(token);
-            if (authentication != null && isAccountAllowed(authentication.getName())) {
+            if (authentication != null && isAccountAllowed(authentication)) {
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             }
         }
@@ -39,12 +39,16 @@ public class BearerTokenAuthenticationFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
-    private boolean isAccountAllowed(String principal) {
-        return userRepository.findByEmail(principal)
-            .map(user -> !userTokenRepository.existsByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(
-                user,
-                UserTokenType.EMAIL_VERIFICATION
-            ))
+    private boolean isAccountAllowed(Authentication authentication) {
+        Object claimedVersion = authentication.getDetails();
+        if (!(claimedVersion instanceof Number signedVersion)) return false;
+
+        return userRepository.findByEmail(authentication.getName())
+            .map(user -> user.getMergedIntoUser() == null
+                && user.getAuthVersion() != null
+                && user.getAuthVersion().longValue() == signedVersion.longValue()
+                && !userTokenRepository.existsByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(
+                    user, UserTokenType.EMAIL_VERIFICATION))
             .orElse(false);
     }
 }
