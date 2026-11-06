@@ -10,16 +10,17 @@ import org.springframework.stereotype.Component;
 /**
  * Policy proposal, not an execution permission.
  *
- * For a sparse Google account and a historical Discord account, the Discord
+ * For a sparse website account (local password and/or verified OAuth) and a historical Discord account, the Discord
  * owner is the preferred canonical user: Community/XP/moderation history
- * remains attached to its original user_id, while verified Google subjects
- * can eventually be moved through a separate audited, locked transaction.
+ * remains attached to its original user_id, while locally-owned login credentials and independently verified OAuth
+ * subjects can be transferred by the guarded consolidation transaction.
  * This planner NEVER updates the database or authorizes a merge by itself.
  */
 @Component
 public class UserAccountConsolidationPlanner {
     private static final Set<String> LEGACY_PRESERVED_DOMAINS = Set.of(
-        "COMMUNITY", "MODERATION", "PROGRESSION", "ASSETS", "IDENTITY");
+        "COMMUNITY", "MODERATION", "PROGRESSION", "ASSETS", "IDENTITY",
+        "AUTHORIZATION");
     private static final Set<String> WEBSITE_RECOVERABLE_DOMAINS = Set.of(
         "IDENTITY", "CREDENTIALS", "PROVENANCE");
 
@@ -51,7 +52,15 @@ public class UserAccountConsolidationPlanner {
                 continue;
             }
             if ("AUTHORIZATION".equals(domain.domain())) {
-                conflicts.add("REVIEW_ACCESS_GRANTS");
+                if (domain.websiteHasRecords()) {
+                    // Never transfer roles/permissions from the absorbed user
+                    // into the canonical Discord account without review.
+                    conflicts.add("REVIEW_ACCESS_GRANTS");
+                } else if (domain.discordHasRecords()) {
+                    // Existing grants already belong to the canonical owner;
+                    // no authorization is copied or elevated.
+                    policies.add("PRESERVE_DISCORD_AUTHORIZATION_IN_PLACE");
+                }
                 continue;
             }
             if (domain.websiteHasRecords()
