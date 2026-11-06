@@ -259,6 +259,11 @@ jobs:
           partner_migration=".ci/partner-database/flyway/sql/versioned/V20261104_001__partner_external_link_primary.sql"
           test -s "$partner_migration"
           cat "$partner_migration" >> src/test/resources/recruitment_schema.sql
+          # Step-local shell variables do not survive from the earlier JPA job.
+          recovery_migration=".ci/discord-recovery-database/flyway/sql/versioned/V20261105_001__discord_self_service_link_challenges.sql"
+          identity_migration=".ci/social-reconciliation-database/flyway/sql/versioned/V20261105_002__create_self_service_social_account_reconciliation.sql"
+          test -s "$recovery_migration"
+          test -s "$identity_migration"
           cat "$recovery_migration" >> src/test/resources/recruitment_schema.sql
           cat "$identity_migration" >> src/test/resources/recruitment_schema.sql
           ./mvnw -B -Dtest=RecruitmentDraftJdbcMariaDbIntegrationTest,RecruitmentStageEditorJdbcMariaDbIntegrationTest,RecruitmentPublicationJdbcMariaDbIntegrationTest,RecruitmentCandidateJdbcMariaDbIntegrationTest,RecruitmentTrackingJdbcMariaDbIntegrationTest,RecruitmentHumanReviewJdbcMariaDbIntegrationTest,RecruitmentStageDecisionJdbcMariaDbIntegrationTest,RecruitmentDecisionPolicyJdbcMariaDbIntegrationTest,RecruitmentDecisionDeskJdbcMariaDbIntegrationTest,RecruitmentStageVotingJdbcMariaDbIntegrationTest,RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest,RecruitmentObjectiveGradeJdbcMariaDbIntegrationTest test
