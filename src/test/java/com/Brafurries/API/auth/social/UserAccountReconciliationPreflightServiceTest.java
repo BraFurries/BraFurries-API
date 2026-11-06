@@ -182,6 +182,32 @@ class UserAccountReconciliationPreflightServiceTest {
     }
 
     @Test
+    void emptyUnknownOwnershipColumnIsNotAnArtificialMergeConflict() {
+        User website = user(10), legacy = user(20);
+        when(jdbc.queryForList(anyString())).thenReturn(
+            List.of(reference("unknown_future_feature", "owner_user_id", 1)));
+        when(jdbc.queryForObject(anyString(), eq(Number.class), eq(10), eq(20))).thenReturn(0);
+
+        var result = service().inspect(website, legacy);
+
+        assertEquals("PRECHECK_REQUIRED", result.status());
+        assertTrue(result.domains().isEmpty());
+    }
+
+    @Test
+    void initiatorsOpenDiscordOAuthChallengeDoesNotMakeSparseAccountUnmergeable() {
+        User website = user(10), legacy = user(20);
+        when(jdbc.queryForList(anyString())).thenReturn(
+            List.of(reference("user_discord_link_challenges", "requesting_user_id", 1)));
+        when(jdbc.queryForObject(anyString(), eq(Number.class), eq(10), eq(20))).thenReturn(1);
+
+        var result = service().inspect(website, legacy);
+
+        assertEquals("PRECHECK_REQUIRED", result.status());
+        assertEquals("PROVENANCE", result.domains().getFirst().domain());
+    }
+
+    @Test
     void cannotInspectSingleUserAsTwoSeparateAccountOwners() {
         User owner = user(10);
         assertThrows(IllegalArgumentException.class, () -> service().inspect(owner, owner));
