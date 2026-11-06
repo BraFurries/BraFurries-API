@@ -193,7 +193,7 @@ public class AuthService {
         String normalizedEmail = request.email().trim().toLowerCase();
 
         userRepository.findByEmail(normalizedEmail).ifPresent(user -> {
-            if (isEmailVerificationPending(user)) {
+            if (user.getMergedIntoUser() != null || isEmailVerificationPending(user)) {
                 return;
             }
 
@@ -224,6 +224,7 @@ public class AuthService {
         }
 
         User user = resetToken.getUser();
+        ensureNotMerged(user);
         user.setPasswordHash(passwordEncoder.encode(request.password()));
         userRepository.save(user);
 
@@ -345,8 +346,15 @@ public class AuthService {
     }
 
     private void ensureAccountConfirmed(User user) {
+        ensureNotMerged(user);
         if (isEmailVerificationPending(user)) {
             throw new BadCredentialsException("Confirme seu e-mail antes de acessar a conta");
+        }
+    }
+
+    private void ensureNotMerged(User user) {
+        if (user.getMergedIntoUser() != null) {
+            throw new BadCredentialsException("ACCOUNT_CONSOLIDATED");
         }
     }
 
@@ -369,6 +377,12 @@ public class AuthService {
 
         for (UserToken expiredToken : expiredTokens) {
             User user = expiredToken.getUser();
+            if (user.getMergedIntoUser() != null) {
+                // Retain the immutable absorbed user as historical provenance;
+                // deleting it would break audit and related foreign keys.
+                userTokenRepository.delete(expiredToken);
+                continue;
+            }
             userTokenRepository.deleteByUser(user);
             userRefreshTokenRepository.deleteByUser(user);
             userRepository.delete(user);
