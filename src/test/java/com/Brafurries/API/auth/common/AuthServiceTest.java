@@ -226,6 +226,45 @@ class AuthServiceTest {
     }
 
     @Test
+    void previouslyMergedAccountCannotAuthenticateWithOldPassword() {
+        User absorbed = new User();
+        absorbed.setId(10);
+        absorbed.setEmail("absorbed@example.com");
+        absorbed.setPasswordHash("legacy-hash");
+        User canonical = new User();
+        canonical.setId(20);
+        absorbed.setMergedIntoUser(canonical);
+        when(userRepository.findByEmail("absorbed@example.com"))
+            .thenReturn(Optional.of(absorbed));
+        when(passwordEncoder.matches("secret", "legacy-hash")).thenReturn(true);
+
+        assertThrows(BadCredentialsException.class, () ->
+            authService.loginCommon(new LoginRequest("absorbed@example.com", "secret", true)));
+        verify(userRefreshTokenRepository, never()).deleteByUser(absorbed);
+    }
+
+    @Test
+    void passwordResetCannotReactivateHistoricalAbsorbedIdentity() {
+        User absorbed = new User();
+        absorbed.setId(10);
+        User canonical = new User();
+        canonical.setId(20);
+        absorbed.setMergedIntoUser(canonical);
+        UserToken oldRecovery = new UserToken();
+        oldRecovery.setUser(absorbed);
+        oldRecovery.setType(UserTokenType.PASSWORD_RESET);
+        oldRecovery.setExpiresAt(Instant.now().plusSeconds(60));
+        when(userTokenRepository.findByTokenAndType("old-token", UserTokenType.PASSWORD_RESET))
+            .thenReturn(Optional.of(oldRecovery));
+
+        assertThrows(BadCredentialsException.class, () ->
+            authService.resetPassword(
+                new com.Brafurries.API.auth.common.dto.AuthDtos.ResetPasswordRequest(
+                    "old-token", "new-password")));
+        verify(userRepository, never()).save(absorbed);
+    }
+
+    @Test
     void confirmEmailConsumesTokenAndAllowsAccountActivation() {
         User user = new User();
         user.setId(10);
