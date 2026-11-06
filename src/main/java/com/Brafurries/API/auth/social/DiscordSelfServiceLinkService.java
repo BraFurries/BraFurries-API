@@ -166,16 +166,19 @@ public class DiscordSelfServiceLinkService {
         var assessment = preflight.inspect(actor, existing.getUser());
         var plan = planner.propose(assessment);
         if (plan != null && "AUTO_MERGE_CANDIDATE".equals(plan.status())
-            && socialIdentities.findByUserIdAndProvider(actor.getId(), "google").isEmpty()) {
-            // A local password proves only a site session. Without a verified
-            // Google sub, this merge could silently lose Google sign-in.
+            && socialIdentities.findByUserIdAndProvider(actor.getId(), "google").isEmpty()
+            && (actor.getPasswordHash() == null || actor.getPasswordHash().isBlank())) {
+            // The website account may be local-only; do not impose a Google
+            // OAuth requirement on local users. But a social-only legacy user
+            // must establish a recoverable login method before absorption.
             return new Preview(challenge.getDiscordUsername(), true,
-                "RESOLUTION_REQUIRED", List.of("VERIFY_GOOGLE_BEFORE_MERGE"),
-                "Antes de unificar, comprove a identidade Google na sua conta do site. "
-                    + "Nenhum registro será alterado enquanto isso.",
+                "RESOLUTION_REQUIRED", List.of("VERIFY_GOOGLE_OR_RECOVER_LOCAL_LOGIN"),
+                "Esta conta ainda não tem um método de acesso recuperável comprovado "
+                    + "para preservar após a unificação. Comprove o Google ou recupere "
+                    + "o acesso por e-mail e senha antes de continuar.",
                 assessment,
                 new UserAccountConsolidationPlanner.Plan("RESOLUTION_REQUIRED", "UNDECIDED",
-                    List.of(), List.of("VERIFY_GOOGLE_BEFORE_MERGE")));
+                    List.of(), List.of("VERIFY_GOOGLE_OR_RECOVER_LOCAL_LOGIN")));
         }
         String notice = switch (assessment.status()) {
             case "REVIEW_REQUIRED" ->
