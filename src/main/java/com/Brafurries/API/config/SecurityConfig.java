@@ -212,6 +212,10 @@ public class SecurityConfig {
             var user = userRepository.findByEmail(normalizedUsername)
                 .orElseThrow(() -> new org.springframework.security.core.userdetails.UsernameNotFoundException("Usuário não encontrado"));
 
+            if (user.getMergedIntoUser() != null) {
+                throw new org.springframework.security.authentication.BadCredentialsException("ACCOUNT_CONSOLIDATED");
+            }
+
             String passwordHash = user.getPasswordHash();
             if (passwordHash == null || passwordHash.isBlank()) {
                 throw new org.springframework.security.authentication.BadCredentialsException("Usuário sem senha local cadastrada");
