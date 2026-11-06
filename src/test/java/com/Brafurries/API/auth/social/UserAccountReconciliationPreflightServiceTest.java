@@ -154,6 +154,34 @@ class UserAccountReconciliationPreflightServiceTest {
     }
 
     @Test
+    void unknownOwnershipColumnCannotBeMisclassifiedAsHistoricalAudit() {
+        User website = user(10), legacy = user(20);
+        when(jdbc.queryForList(anyString())).thenReturn(
+            List.of(reference("user_property_claims", "owner_user_id", 1)));
+        when(jdbc.queryForObject(anyString(), eq(Number.class), eq(10), eq(20))).thenReturn(2);
+
+        var result = service().inspect(website, legacy);
+
+        assertEquals("REVIEW_REQUIRED", result.status());
+        assertTrue(result.nextActions().contains("COMPLETE_REFERENCE_INVENTORY"));
+        assertFalse(result.domains().getFirst().includesHistoricalReferences());
+    }
+
+    @Test
+    void newUnknownDomainMustBeReconciledEvenIfOnlyOneUserHasRows() {
+        User website = user(10), legacy = user(20);
+        when(jdbc.queryForList(anyString())).thenReturn(
+            List.of(reference("new_unclassified_feature", "user_id", 1)));
+        when(jdbc.queryForObject(anyString(), eq(Number.class), eq(10), eq(20))).thenReturn(1);
+
+        var result = service().inspect(website, legacy);
+
+        assertEquals("REVIEW_REQUIRED", result.status());
+        assertEquals("OTHER", result.domains().getFirst().domain());
+        assertTrue(result.nextActions().contains("COMPLETE_REFERENCE_INVENTORY"));
+    }
+
+    @Test
     void cannotInspectSingleUserAsTwoSeparateAccountOwners() {
         User owner = user(10);
         assertThrows(IllegalArgumentException.class, () -> service().inspect(owner, owner));
