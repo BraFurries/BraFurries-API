@@ -51,6 +51,20 @@ public class UserAccountReconciliationPreflightService {
                   AND k.REFERENCED_TABLE_NAME = 'users'
                   AND k.REFERENCED_COLUMN_NAME = 'id'
            ))
+           AND (
+              NOT (c.COLUMN_NAME IN ('discord_user_id', 'patreon_user_id',
+                       'telegram_user_id', 'disc_user_id')
+                  OR RIGHT(c.COLUMN_NAME, 16) = '_discord_user_id'
+                  OR (c.TABLE_NAME IN ('form_submissions', 'portaria_account_release')
+                      AND c.COLUMN_NAME='user_id'))
+              OR EXISTS(SELECT 1 FROM information_schema.KEY_COLUMN_USAGE site_fk
+                        WHERE site_fk.TABLE_SCHEMA=c.TABLE_SCHEMA
+                          AND site_fk.TABLE_NAME=c.TABLE_NAME
+                          AND site_fk.COLUMN_NAME=c.COLUMN_NAME
+                          AND site_fk.REFERENCED_TABLE_SCHEMA=DATABASE()
+                          AND site_fk.REFERENCED_TABLE_NAME='users'
+                          AND site_fk.REFERENCED_COLUMN_NAME='id')
+           )
          ORDER BY c.TABLE_NAME, c.COLUMN_NAME
         """;
 
@@ -118,10 +132,8 @@ public class UserAccountReconciliationPreflightService {
             Object columnObject = reference.get("column_name");
             if (!(tableObject instanceof String table) || !(columnObject instanceof String column)
                 || !SAFE_IDENTIFIER.matcher(table).matches()
-                || !SAFE_IDENTIFIER.matcher(column).matches()
-                || !(reference.get("leading_index") instanceof Number index)
-                || index.intValue() != 1) {
-                // Non-indexed or invalid metadata is not scanned: never assume empty.
+                || !SAFE_IDENTIFIER.matcher(column).matches()) {
+                // Invalid metadata is never interpolated into a SQL identifier.
                 unscanned = true;
                 continue;
             }
@@ -178,6 +190,9 @@ public class UserAccountReconciliationPreflightService {
         boolean overlap = communities.stream().anyMatch(impact ->
             (impact.websiteMembership() && impact.discordMembership()) || impact.needsDuplicateReview());
         boolean dualDomain = domains.values().stream().anyMatch(acc -> acc.both);
+        boolean websiteOperationalData = domains.entrySet().stream().anyMatch(entry ->
+            entry.getValue().web && !Set.of("IDENTITY", "CREDENTIALS", "PROVENANCE")
+                .contains(entry.getKey()));
         Set<String> actions = new LinkedHashSet<>();
         String status;
         if (unscanned || restricted || privileged) {
@@ -186,10 +201,10 @@ public class UserAccountReconciliationPreflightService {
             if (restricted) actions.add("PRESERVE_COMMUNITY_RESTRICTIONS");
             if (privileged) actions.add("REVIEW_ACCESS_GRANTS");
             actions.add("REQUEST_IDENTITY_REVIEW");
-        } else if (overlap || dualDomain) {
+        } else if (overlap || dualDomain || websiteOperationalData) {
             status = "RESOLUTION_REQUIRED";
             if (overlap) actions.add("RECONCILE_COMMUNITY_MEMBERSHIP");
-            if (dualDomain) actions.add("RECONCILE_DOMAIN_DATA");
+            if (dualDomain || websiteOperationalData) actions.add("RECONCILE_DOMAIN_DATA");
             actions.add("CHECK_ACCOUNT_CONFLICTS");
         } else {
             status = "PRECHECK_REQUIRED";
