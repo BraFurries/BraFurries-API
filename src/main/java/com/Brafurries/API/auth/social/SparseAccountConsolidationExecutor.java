@@ -106,9 +106,10 @@ public class SparseAccountConsolidationExecutor {
         if (!identities.findByUserIdAndProvider(websiteId, "discord").isEmpty()) {
             throw blocked("MULTIPLE_DISCORD_REVIEW_REQUIRED");
         }
-        if (google.isEmpty() && (web.getPasswordHash() == null
-            || web.getPasswordHash().isBlank())) {
-            // Do not leave a legacy Google-only user unable to authenticate.
+        if (google.isEmpty()) {
+            // A local password does not prove the Google provider subject.
+            // Do not absorb the site account until the Google identity is
+            // independently verified and preserved on the canonical account.
             throw blocked("VERIFY_GOOGLE_BEFORE_MERGE");
         }
 
