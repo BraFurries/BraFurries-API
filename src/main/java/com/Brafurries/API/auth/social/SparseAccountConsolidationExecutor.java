@@ -145,14 +145,19 @@ public class SparseAccountConsolidationExecutor {
         recoveryTokens.deleteByUser(canonical);
 
         String email = web.getEmail();
-        // Clear the globally unique email on absorbed account first, then flush:
-        // no transaction may temporarily expose two owners for one address.
+        String localPasswordHash = web.getPasswordHash();
+        // The absorbed row is an immutable provenance alias, not a usable
+        // login identity. Keep the original author and user IDs for audits,
+        // but do not retain a second copy of live login credentials.
         web.setEmail(null);
+        web.setPasswordHash(null);
         web.setAuthVersion(web.getAuthVersion() + 1);
         users.saveAndFlush(web);
 
         if (canonical.getEmail() == null) canonical.setEmail(email);
-        if (canonical.getPasswordHash() == null) canonical.setPasswordHash(web.getPasswordHash());
+        if (canonical.getPasswordHash() == null || canonical.getPasswordHash().isBlank()) {
+            canonical.setPasswordHash(localPasswordHash);
+        }
         if (canonical.getDisplayName() == null) canonical.setDisplayName(web.getDisplayName());
         if (canonical.getUsername() == null) canonical.setUsername(web.getUsername());
         if (canonical.getProfileImageKey() == null) {
