@@ -37,6 +37,7 @@ class AuthSocialServiceConflictTest {
     @Mock UserDiscordRepository discord;
     @Mock UserTokenRepository userTokens;
     @Mock DiscordSelfServiceLinkService accountLinks;
+    @Mock VerifiedSocialIdentityService verifiedIdentities;
     @Mock OAuth2AuthenticationToken authentication;
     @Mock OAuth2User principal;
 
@@ -58,7 +59,7 @@ class AuthSocialServiceConflictTest {
         when(discord.findByDiscordUserId(123456789L)).thenReturn(Optional.of(providerLink));
 
         AuthSocialService service = new AuthSocialService(
-            users, refreshTokens, tokens, accessTokens, roles, permissions, discord, userTokens, accountLinks
+            users, refreshTokens, tokens, accessTokens, roles, permissions, discord, userTokens, accountLinks, verifiedIdentities
         );
 
         assertThrows(BadCredentialsException.class, () -> service.loginOAuth2(authentication));
@@ -83,7 +84,7 @@ class AuthSocialServiceConflictTest {
         when(discord.findByDiscordUserId(222L)).thenReturn(Optional.empty());
 
         AuthSocialService service = new AuthSocialService(
-            users, refreshTokens, tokens, accessTokens, roles, permissions, discord, userTokens, accountLinks
+            users, refreshTokens, tokens, accessTokens, roles, permissions, discord, userTokens, accountLinks, verifiedIdentities
         );
 
         assertThrows(BadCredentialsException.class, () -> service.loginOAuth2(authentication));
@@ -91,6 +92,54 @@ class AuthSocialServiceConflictTest {
         verify(users, never()).deleteById(org.mockito.ArgumentMatchers.any());
         verify(refreshTokens, never()).save(org.mockito.ArgumentMatchers.any());
         verify(roles, never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void googleCannotClaimLegacyAccountByMatchingVerifiedEmailAlone() {
+        User legacy = user(10, "person@example.com");
+        when(authentication.getAuthorizedClientRegistrationId()).thenReturn("google");
+        when(authentication.getPrincipal()).thenReturn(principal);
+        when(principal.getAttributes()).thenReturn(Map.of(
+            "sub", "google-sub-xyz", "email", "person@example.com",
+            "email_verified", true, "name", "Person"
+        ));
+        when(verifiedIdentities.ownerOf("google", "google-sub-xyz")).thenReturn(Optional.empty());
+        when(users.findByEmail("person@example.com")).thenReturn(Optional.of(legacy));
+
+        AuthSocialService service = new AuthSocialService(
+            users, refreshTokens, tokens, accessTokens, roles, permissions,
+            discord, userTokens, accountLinks, verifiedIdentities
+        );
+
+        assertThrows(BadCredentialsException.class, () -> service.loginOAuth2(authentication));
+        verify(users, never()).save(org.mockito.ArgumentMatchers.any());
+        verify(verifiedIdentities, never()).bindProvenSubject(
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void googleProviderSubjectEmailCollisionCannotTakeOverAnotherAccount() {
+        User providerOwner = user(20, "original@example.com");
+        User emailOwner = user(10, "person@example.com");
+        when(authentication.getAuthorizedClientRegistrationId()).thenReturn("google");
+        when(authentication.getPrincipal()).thenReturn(principal);
+        when(principal.getAttributes()).thenReturn(Map.of(
+            "sub", "google-sub-xyz", "email", "person@example.com",
+            "email_verified", true, "name", "Person"
+        ));
+        when(verifiedIdentities.ownerOf("google", "google-sub-xyz"))
+            .thenReturn(Optional.of(providerOwner));
+        when(users.findByEmail("person@example.com")).thenReturn(Optional.of(emailOwner));
+
+        AuthSocialService service = new AuthSocialService(
+            users, refreshTokens, tokens, accessTokens, roles, permissions,
+            discord, userTokens, accountLinks, verifiedIdentities
+        );
+
+        assertThrows(BadCredentialsException.class, () -> service.loginOAuth2(authentication));
+        verify(users, never()).save(org.mockito.ArgumentMatchers.any());
+        verify(refreshTokens, never()).save(org.mockito.ArgumentMatchers.any());
     }
 
     private User user(int id, String email) {
