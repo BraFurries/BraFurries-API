@@ -142,7 +142,7 @@ class SparseAccountConsolidationExecutorTest {
     }
 
     @Test
-    void unknownLegacyGoogleSubjectBlocksMergeToPreserveLoginRecovery() {
+    void accountWithoutPasswordOrVerifiedProviderMustRecoverBeforeMerge() {
         mockValidLockedPair();
         when(identities.findByUserIdAndProvider(10, "google")).thenReturn(List.of());
         when(identities.findByUserIdAndProvider(10, "discord")).thenReturn(List.of());
@@ -150,25 +150,37 @@ class SparseAccountConsolidationExecutorTest {
         var failure = assertThrows(ResponseStatusException.class,
             () -> service.consolidate(website, ticket));
 
-        assertEquals("VERIFY_GOOGLE_BEFORE_MERGE", failure.getReason());
+        assertEquals("VERIFY_GOOGLE_OR_RECOVER_LOCAL_LOGIN", failure.getReason());
         verifyNoInteractions(refresh, tokens);
         verify(audit, never()).saveAndFlush(any());
     }
 
     @Test
-    void localPasswordAloneDoesNotProveLegacyGoogleIdentity() {
+    void localEmailAndPasswordAccountMergesWithProvenDiscordWithoutGoogleOAuth() {
         mockValidLockedPair();
         website.setPasswordHash("safe-local-password-hash");
+        website.setEmail("shared-with-discord@example.com");
+        // The verified Discord login has the same address at its provider,
+        // but the legacy users row has no e-mail. Equality alone is NOT proof.
+        // The authenticated website session and one-time Discord OAuth ticket
+        // independently prove ownership of both identities.
         when(identities.findByUserIdAndProvider(10, "google")).thenReturn(List.of());
         when(identities.findByUserIdAndProvider(10, "discord")).thenReturn(List.of());
 
-        var failure = assertThrows(ResponseStatusException.class,
-            () -> service.consolidate(website, ticket));
+        Integer canonicalId = service.consolidate(website, ticket);
 
-        assertEquals("VERIFY_GOOGLE_BEFORE_MERGE", failure.getReason());
+        assertEquals(20, canonicalId);
+        assertEquals("shared-with-discord@example.com", legacy.getEmail());
+        assertEquals("safe-local-password-hash", legacy.getPasswordHash());
+        assertNull(website.getEmail());
+        assertEquals(legacy, website.getMergedIntoUser());
+        assertEquals(1L, website.getAuthVersion());
+        assertEquals(1L, legacy.getAuthVersion());
+        verify(ownership).assertOnlyTransferableReferences(10);
+        verify(refresh).deleteByUser(website);
+        verify(refresh).deleteByUser(legacy);
+        verify(audit).saveAndFlush(any(UserAccountConsolidation.class));
         verify(identities, never()).save(any());
-        verifyNoInteractions(refresh, tokens);
-        verify(audit, never()).saveAndFlush(any());
     }
 
     @Test
