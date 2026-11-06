@@ -34,6 +34,7 @@ class DiscordSelfServiceLinkServiceTest {
     @Mock UserAccountReconciliationPreflightService preflight;
     @Mock UserAccountConsolidationPlanner planner;
     @Mock VerifiedSocialIdentityService verifiedIdentities;
+    @Mock UserSocialIdentityRepository socialIdentities;
     @Mock SparseAccountConsolidationExecutor consolidation;
     @Mock UserIdentityLinkRepository links;
     @Mock UserDiscordLinkChallengeRepository challenges;
@@ -41,7 +42,7 @@ class DiscordSelfServiceLinkServiceTest {
     @Mock TokenService tokens;
 
     private DiscordSelfServiceLinkService service() {
-        return new DiscordSelfServiceLinkService(users, discord, memberships, preflight, planner, verifiedIdentities, consolidation, links, challenges, bans, tokens);
+        return new DiscordSelfServiceLinkService(users, discord, memberships, preflight, planner, verifiedIdentities, socialIdentities, consolidation, links, challenges, bans, tokens);
     }
 
     private Authentication auth() {
@@ -237,6 +238,28 @@ class DiscordSelfServiceLinkServiceTest {
         assertTrue(preview.hasExistingHistory());
         verify(discord, never()).save(any());
         verify(links, never()).save(any());
+    }
+
+    @Test
+    void previewNeverOffersMergeWithoutVerifiedGoogleProviderSubject() {
+        User web = user(10), legacy = user(20);
+        UserDiscord existing = new UserDiscord();
+        existing.setUser(legacy);
+        when(users.findByEmail("person@example.com")).thenReturn(Optional.of(web));
+        when(challenges.findByTicketHash(anyString())).thenReturn(Optional.of(verified(web)));
+        when(discord.findByDiscordUserId(123456789L)).thenReturn(Optional.of(existing));
+        when(preflight.inspect(web, legacy)).thenReturn(
+            new UserAccountReconciliationPreflightService.Findings(
+                "PRECHECK_REQUIRED", List.of("CHECK_ACCOUNT_CONFLICTS"), List.of(), List.of()));
+        when(planner.propose(any())).thenReturn(new UserAccountConsolidationPlanner.Plan(
+            "AUTO_MERGE_CANDIDATE", "DISCORD_HISTORY_OWNER", List.of(), List.of()));
+
+        var preview = service().preview(auth(), TICKET);
+
+        assertEquals("RESOLUTION_REQUIRED", preview.status());
+        assertEquals(List.of("VERIFY_GOOGLE_BEFORE_MERGE"), preview.nextActions());
+        assertEquals("RESOLUTION_REQUIRED", preview.consolidationPlan().status());
+        verify(socialIdentities).findByUserIdAndProvider(10, "google");
     }
 
     @Test
