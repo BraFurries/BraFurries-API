@@ -36,6 +36,7 @@ public class DiscordSelfServiceLinkService {
     private final UserDiscordRepository discord;
     private final UserCommunityStatusRepository memberships;
     private final UserAccountReconciliationPreflightService preflight;
+    private final VerifiedSocialIdentityService verifiedIdentities;
     private final UserIdentityLinkRepository links;
     private final UserDiscordLinkChallengeRepository challenges;
     private final IdentityBanPropagationService banPropagation;
@@ -46,6 +47,7 @@ public class DiscordSelfServiceLinkService {
         UserDiscordRepository discord,
         UserCommunityStatusRepository memberships,
         UserAccountReconciliationPreflightService preflight,
+        VerifiedSocialIdentityService verifiedIdentities,
         UserIdentityLinkRepository links,
         UserDiscordLinkChallengeRepository challenges,
         IdentityBanPropagationService banPropagation,
@@ -55,6 +57,7 @@ public class DiscordSelfServiceLinkService {
         this.discord = discord;
         this.memberships = memberships;
         this.preflight = preflight;
+        this.verifiedIdentities = verifiedIdentities;
         this.links = links;
         this.challenges = challenges;
         this.banPropagation = banPropagation;
@@ -193,6 +196,11 @@ public class DiscordSelfServiceLinkService {
         }
 
 
+        // The site account and Discord provider were independently verified.
+        // Record the immutable OAuth subject only for the same canonical owner.
+        // Cross-user recovery is blocked earlier until a safe merge exists.
+        verifiedIdentities.bindProvenSubject(actor, "discord",
+            challenge.getDiscordUserId().toString(), null);
         challenge.setStatus("CONSUMED");
         challenge.setConsumedAt(now());
         challenges.save(challenge);
