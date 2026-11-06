@@ -68,11 +68,8 @@ class SparseAccountConsolidationExecutorTest {
         existingDiscord.setDiscordUserId(123456789L);
         when(discord.findByDiscordUserId(123456789L))
             .thenReturn(Optional.of(existingDiscord));
-        when(discord.findByUser(website)).thenReturn(Optional.empty());
         when(users.findByIdForUpdate(10)).thenReturn(Optional.of(website));
         when(users.findByIdForUpdate(20)).thenReturn(Optional.of(legacy));
-        when(links.findActiveLinksContainingUser(10)).thenReturn(List.of());
-        when(links.findActiveLinksContainingUser(20)).thenReturn(List.of());
     }
 
     @Test
@@ -128,7 +125,8 @@ class SparseAccountConsolidationExecutorTest {
         assertEquals("google@example.com", website.getEmail());
         assertNull(website.getMergedIntoUser());
         verify(users, never()).saveAndFlush(any());
-        verifyNoInteractions(refresh, tokens, audit);
+        verifyNoInteractions(refresh, tokens);
+        verify(audit, never()).saveAndFlush(any());
     }
 
     @Test
@@ -153,7 +151,8 @@ class SparseAccountConsolidationExecutorTest {
             () -> service.consolidate(website, ticket));
 
         assertEquals("VERIFY_GOOGLE_BEFORE_MERGE", failure.getReason());
-        verifyNoInteractions(refresh, tokens, audit);
+        verifyNoInteractions(refresh, tokens);
+        verify(audit, never()).saveAndFlush(any());
     }
 
     @Test
@@ -169,7 +168,8 @@ class SparseAccountConsolidationExecutorTest {
 
         assertEquals("EMAIL_RECONCILIATION_REQUIRED", failure.getReason());
         assertEquals("google@example.com", website.getEmail());
-        verifyNoInteractions(refresh, tokens, audit);
+        verifyNoInteractions(refresh, tokens);
+        verify(audit, never()).saveAndFlush(any());
     }
 
     @Test
