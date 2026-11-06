@@ -197,9 +197,14 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
     private record SparseFixture(User website, User legacy, UserDiscordLinkChallenge proof) {}
 
     private SparseFixture sparseFixture(String suffix, long discordId) {
+        return sparseFixture(suffix, discordId, true);
+    }
+
+    private SparseFixture sparseFixture(String suffix, long discordId, boolean includeVerifiedGoogle) {
         User website = new User();
         website.setEmail("synthetic-google-" + suffix + "@example.invalid");
-        website.setDisplayName("Google profile");
+        website.setDisplayName(includeVerifiedGoogle ? "Google profile" : "Local profile");
+        if (!includeVerifiedGoogle) website.setPasswordHash("local-password-hash");
         website = users.saveAndFlush(website);
 
         User legacy = new User();
@@ -213,12 +218,14 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
         discord.setDisplayName("Discord profile");
         discords.saveAndFlush(discord);
 
-        UserSocialIdentity google = new UserSocialIdentity();
-        google.setUser(website);
-        google.setProvider("google");
-        google.setProviderSubject("synthetic-google-sub-" + suffix);
-        google.setVerifiedEmail(website.getEmail());
-        socialIdentities.saveAndFlush(google);
+        if (includeVerifiedGoogle) {
+            UserSocialIdentity google = new UserSocialIdentity();
+            google.setUser(website);
+            google.setProvider("google");
+            google.setProviderSubject("synthetic-google-sub-" + suffix);
+            google.setVerifiedEmail(website.getEmail());
+            socialIdentities.saveAndFlush(google);
+        }
 
         UserDiscordLinkChallenge proof = new UserDiscordLinkChallenge();
         proof.setRequester(website);
@@ -268,6 +275,37 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
         assertEquals(canonical, memberships.findById(membershipId)
             .orElseThrow().getUser().getId());
         assertEquals(canonical, discords.findByDiscordUserId(992224440001L)
+            .orElseThrow().getUser().getId());
+        assertTrue(consolidationAudit.existsByAbsorbedUserId(absorbed));
+    }
+
+    @Test
+    @Transactional(isolation = Isolation.SERIALIZABLE)
+    void localPasswordOnlyAccountMergesWithDiscordHistoryWithoutGoogleSubject() {
+        // Simulates a person registered with e-mail/password and separately
+        // verified through Discord OAuth, using the same provider e-mail.
+        SparseFixture f = sparseFixture("localonly", 992224440004L, false);
+        Integer absorbed = f.website().getId();
+        Integer canonical = f.legacy().getId();
+
+        assertTrue(socialIdentities.findByUserIdAndProvider(absorbed, "google").isEmpty());
+
+        Integer result = sparseMerge.consolidate(f.website(), f.proof());
+
+        assertEquals(canonical, result);
+        entityManager.flush();
+        entityManager.clear();
+        User oldSite = users.findById(absorbed).orElseThrow();
+        User current = users.findById(canonical).orElseThrow();
+
+        assertEquals(canonical, oldSite.getMergedIntoUser().getId());
+        assertNull(oldSite.getEmail());
+        assertEquals("synthetic-google-localonly@example.invalid", current.getEmail());
+        assertEquals("local-password-hash", current.getPasswordHash());
+        assertEquals(1L, current.getAuthVersion());
+        assertEquals(1L, oldSite.getAuthVersion());
+        assertTrue(socialIdentities.findByUserIdAndProvider(canonical, "google").isEmpty());
+        assertEquals(canonical, discords.findByDiscordUserId(992224440004L)
             .orElseThrow().getUser().getId());
         assertTrue(consolidationAudit.existsByAbsorbedUserId(absorbed));
     }
