@@ -226,6 +226,9 @@ public class AuthSocialService {
     }
 
     private User updateExistingSocialUser(User user, ProviderProfile profile) {
+        if (user.getMergedIntoUser() != null) {
+            throw new BadCredentialsException("ACCOUNT_CONSOLIDATED");
+        }
         boolean changed = false;
         if ((user.getEmail() == null || user.getEmail().isBlank()) && profile.email() != null && !profile.email().isBlank()) {
             user.setEmail(profile.email());
