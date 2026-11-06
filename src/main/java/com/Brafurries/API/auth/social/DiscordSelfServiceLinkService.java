@@ -222,7 +222,7 @@ public class DiscordSelfServiceLinkService {
      * must be revoked. Caller re-authenticates as the surviving Discord
      * history owner after the transaction commits.
      */
-    @Transactional(isolation = Isolation.SERIALIZABLE)
+    @Transactional(isolation = Isolation.SERIALIZABLE, timeout = 20)
     public ConsolidationResult consolidate(Authentication authentication, String ticket,
                                            boolean acknowledgeDiscordHistoryOwner) {
         if (!acknowledgeDiscordHistoryOwner) {
