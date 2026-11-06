@@ -32,13 +32,14 @@ class DiscordSelfServiceLinkServiceTest {
     @Mock UserDiscordRepository discord;
     @Mock UserCommunityStatusRepository memberships;
     @Mock UserAccountReconciliationPreflightService preflight;
+    @Mock VerifiedSocialIdentityService verifiedIdentities;
     @Mock UserIdentityLinkRepository links;
     @Mock UserDiscordLinkChallengeRepository challenges;
     @Mock IdentityBanPropagationService bans;
     @Mock TokenService tokens;
 
     private DiscordSelfServiceLinkService service() {
-        return new DiscordSelfServiceLinkService(users, discord, memberships, preflight, links, challenges, bans, tokens);
+        return new DiscordSelfServiceLinkService(users, discord, memberships, preflight, verifiedIdentities, links, challenges, bans, tokens);
     }
 
     private Authentication auth() {
@@ -147,6 +148,7 @@ class DiscordSelfServiceLinkServiceTest {
         verify(discord, never()).saveAndFlush(any());
         assertEquals(legacy, legacyDiscord.getUser());
         assertEquals("VERIFIED", proof.getStatus());
+        verifyNoInteractions(verifiedIdentities);
     }
 
     @Test
@@ -161,6 +163,7 @@ class DiscordSelfServiceLinkServiceTest {
         verify(discord).saveAndFlush(created.capture());
         assertEquals(10, created.getValue().getUser().getId());
         assertEquals(123456789L, created.getValue().getDiscordUserId());
+        verify(verifiedIdentities).bindProvenSubject(web, "discord", "123456789", null);
         verifyNoInteractions(links);
     }
 
