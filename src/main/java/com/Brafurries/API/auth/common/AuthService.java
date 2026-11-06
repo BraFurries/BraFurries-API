@@ -101,7 +101,7 @@ public class AuthService {
 
         List<String> roles = apiUserRoleRepository.findRoleNamesByUserId(user.getId());
         List<String> permissions = apiRolePermissionRepository.findPermissionNamesByUserId(user.getId());
-        String accessToken = tokenService.generateAccessToken(user.getEmail(), roles, permissions);
+        String accessToken = tokenService.generateAccessToken(user.getEmail(), roles, permissions, user.getAuthVersion());
 
         String refreshToken = null;
         if (request.rememberMe() == null || request.rememberMe()) {
@@ -250,7 +250,7 @@ public class AuthService {
         String newRefreshToken = tokenService.generateToken(64);
         List<String> roles = apiUserRoleRepository.findRoleNamesByUserId(savedToken.getUser().getId());
         List<String> permissions = apiRolePermissionRepository.findPermissionNamesByUserId(savedToken.getUser().getId());
-        String newAccessToken = tokenService.generateAccessToken(savedToken.getUser().getEmail(), roles, permissions);
+        String newAccessToken = tokenService.generateAccessToken(savedToken.getUser().getEmail(), roles, permissions, savedToken.getUser().getAuthVersion());
         UserRefreshToken rotatedToken = new UserRefreshToken();
         rotatedToken.setUser(savedToken.getUser());
         rotatedToken.setToken(newRefreshToken);
