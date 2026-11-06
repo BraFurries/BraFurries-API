@@ -30,6 +30,9 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.Authentication;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.stereotype.Service;
@@ -103,6 +106,39 @@ public class AuthSocialService {
         validateTermsAgreement(request.termsAgreement());
         ProviderProfile profile = validateDiscordToken(request.providerToken(), request.email(), request.displayName());
         return registerSocial(profile);
+    }
+
+    /**
+     * Two independent proofs: a valid BraFurries site session and a Google
+     * ID token verified for this application's configured client ID.
+     * Does not change the current session or merge any other users.
+     */
+    @Transactional
+    public String linkGoogleToAuthenticatedAccount(Authentication authentication, String googleIdToken) {
+        if (authentication == null || !authentication.isAuthenticated()
+            || authentication.getName() == null || authentication.getName().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Faça login antes de vincular o Google");
+        }
+        if (googleClientId == null || googleClientId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                "A vinculação Google está temporariamente indisponível");
+        }
+
+        // Verify OAuth first; never treat a supplied e-mail or subject as proof.
+        ProviderProfile verifiedGoogle = validateGoogleToken(googleIdToken, null, null);
+        User actor = userRepository.findByEmail(authentication.getName().trim().toLowerCase(Locale.ROOT))
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão não reconhecida"));
+        User canonical = userRepository.findByIdForUpdate(actor.getId())
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "Conta alterada"));
+
+        Optional<User> emailOwner = userRepository.findByEmail(verifiedGoogle.email());
+        if (emailOwner.isPresent() && !emailOwner.get().getId().equals(canonical.getId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "ACCOUNT_RECONCILIATION_REQUIRED");
+        }
+
+        verifiedIdentities.bindProvenSubject(canonical, "google",
+            verifiedGoogle.providerUserId(), verifiedGoogle.email());
+        return "VERIFIED";
     }
 
     @Transactional
@@ -500,8 +536,12 @@ public class AuthSocialService {
             throw new BadCredentialsException("Token Google invalido");
         }
 
-        if (!response.email().equalsIgnoreCase(requestedEmail)) {
+        if (requestedEmail != null && !response.email().equalsIgnoreCase(requestedEmail)) {
             throw new BadCredentialsException("E-mail nao confere com o token Google");
+        }
+        if (response.subject() == null || response.subject().isBlank()
+            || response.subject().length() > 128 || !response.email().contains("@")) {
+            throw new BadCredentialsException("Identidade Google incompleta");
         }
 
         if (!googleClientId.isBlank() && !googleClientId.equals(response.audience())) {
