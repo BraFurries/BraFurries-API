@@ -42,7 +42,7 @@ public class UserAccountReconciliationPreflightService {
             ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
          WHERE c.TABLE_SCHEMA = DATABASE()
            AND t.TABLE_TYPE = 'BASE TABLE'
-           AND (c.COLUMN_NAME = 'user_id' OR EXISTS (
+           AND (c.COLUMN_NAME = 'user_id' OR c.COLUMN_NAME LIKE '%\\_user\\_id' ESCAPE '\\' OR EXISTS (
                SELECT 1 FROM information_schema.KEY_COLUMN_USAGE k
                 WHERE k.TABLE_SCHEMA = c.TABLE_SCHEMA
                   AND k.TABLE_NAME = c.TABLE_NAME
