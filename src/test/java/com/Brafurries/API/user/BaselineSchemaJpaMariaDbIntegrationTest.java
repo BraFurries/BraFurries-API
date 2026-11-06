@@ -435,6 +435,42 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
     }
 
     @Test
+    @Transactional(isolation = Isolation.SERIALIZABLE)
+    void compositeForeignKeyToCommunityNotesPreventsPartialMembershipTransfer() {
+        SparseFixture f = sparseFixture("parentwithnote", 992224440009L, false);
+        Community community = new Community();
+        community.setName("Synthetic notes relationship");
+        community = communities.saveAndFlush(community);
+        UserCommunityStatus row = new UserCommunityStatus();
+        row.setUser(f.website());
+        row.setCommunity(community);
+        row.setMemberSince(LocalDateTime.now());
+        row.setApproved(true);
+        row.setIsVip(false);
+        row.setIsPartner(false);
+        row.setBanned(false);
+        row.setBirthdayMentionable(false);
+        row = memberships.saveAndFlush(row);
+        Integer rowId = row.getId();
+
+        jdbc.update("""
+                INSERT INTO community_member_notes
+                    (community_id, user_id, author_user_id, updated_by_user_id, content)
+                VALUES (?, ?, ?, ?, ?)
+                """, community.getId(), f.website().getId(),
+            f.legacy().getId(), f.legacy().getId(), "Synthetic audit note");
+
+        var error = assertThrows(ResponseStatusException.class,
+            () -> sparseMerge.consolidate(f.website(), f.proof()));
+
+        assertEquals("ACCOUNT_DATA_RECONCILIATION_REQUIRED", error.getReason());
+        entityManager.clear();
+        assertEquals(f.website().getId(),
+            memberships.findById(rowId).orElseThrow().getUser().getId());
+        assertFalse(consolidationAudit.existsByAbsorbedUserId(f.website().getId()));
+    }
+
+    @Test
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void sparseMergeRollbackRestoresBothAccountsAfterPostWriteFailure() {
         TransactionTemplate seed = new TransactionTemplate(transactionManager);
