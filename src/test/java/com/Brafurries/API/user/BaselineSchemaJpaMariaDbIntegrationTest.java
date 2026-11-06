@@ -4,6 +4,22 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import com.Brafurries.API.entity.community.Community;
 import com.Brafurries.API.entity.community.CommunityStore;
+import com.Brafurries.API.auth.social.SparseAccountConsolidationExecutor;
+import com.Brafurries.API.auth.social.SparseAccountOwnershipGuard;
+import com.Brafurries.API.entity.user.User;
+import com.Brafurries.API.entity.user.UserDiscord;
+import com.Brafurries.API.entity.user.UserDiscordLinkChallenge;
+import com.Brafurries.API.entity.user.UserSocialIdentity;
+import com.Brafurries.API.entity.user.UserCommunityStatus;
+import com.Brafurries.API.repository.user.UserRepository;
+import com.Brafurries.API.repository.user.UserDiscordRepository;
+import com.Brafurries.API.repository.user.UserSocialIdentityRepository;
+import com.Brafurries.API.repository.user.UserAccountConsolidationRepository;
+import com.Brafurries.API.repository.user.UserCommunityStatusRepository;
+import java.time.LocalDateTime;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 import com.Brafurries.API.repository.community.CommunityStoreRepository;
 import com.Brafurries.API.repository.community.CommunityRepository;
 import java.util.List;
@@ -35,7 +51,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
     "spring.jpa.open-in-view=false"
 })
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({ThemeControlPlaneStore.class, BackupControlPlaneStore.class})
+@Import({ThemeControlPlaneStore.class, BackupControlPlaneStore.class,
+    SparseAccountConsolidationExecutor.class, SparseAccountOwnershipGuard.class})
 class BaselineSchemaJpaMariaDbIntegrationTest {
     private static final long GUILD_A = 991001L;
     private static final long GUILD_B = 991002L;
@@ -54,6 +71,12 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
     @Autowired private EntityManager entityManager;
     @Autowired private ThemeControlPlaneStore themes;
     @Autowired private BackupControlPlaneStore backups;
+    @Autowired private UserRepository users;
+    @Autowired private UserDiscordRepository discords;
+    @Autowired private UserSocialIdentityRepository socialIdentities;
+    @Autowired private UserAccountConsolidationRepository consolidationAudit;
+    @Autowired private UserCommunityStatusRepository memberships;
+    @Autowired private SparseAccountConsolidationExecutor sparseMerge;
 
     @Test
     void validatesEntityMappingsAgainstDatabaseOwnedSchema() {
@@ -166,4 +189,107 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
         assertTrue(backups.readSettings(GUILD_A).periodicEnabled());
         assertFalse(backups.readSettings(GUILD_B).periodicEnabled());
     }
+    private record SparseFixture(User website, User legacy, UserDiscordLinkChallenge proof) {}
+
+    private SparseFixture sparseFixture(String suffix, long discordId) {
+        User website = new User();
+        website.setEmail("synthetic-google-" + suffix + "@example.invalid");
+        website.setDisplayName("Google profile");
+        website = users.saveAndFlush(website);
+
+        User legacy = new User();
+        legacy.setDisplayName("Discord profile");
+        legacy = users.saveAndFlush(legacy);
+
+        UserDiscord discord = new UserDiscord();
+        discord.setUser(legacy);
+        discord.setDiscordUserId(discordId);
+        discord.setUsername("legacy_" + suffix);
+        discord.setDisplayName("Discord profile");
+        discords.saveAndFlush(discord);
+
+        UserSocialIdentity google = new UserSocialIdentity();
+        google.setUser(website);
+        google.setProvider("google");
+        google.setProviderSubject("synthetic-google-sub-" + suffix);
+        google.setVerifiedEmail(website.getEmail());
+        socialIdentities.saveAndFlush(google);
+
+        UserDiscordLinkChallenge proof = new UserDiscordLinkChallenge();
+        proof.setRequester(website);
+        proof.setDiscordUserId(discordId);
+        proof.setStatus("VERIFIED");
+        return new SparseFixture(website, legacy, proof);
+    }
+
+    @Test
+    @Transactional(isolation = Isolation.SERIALIZABLE)
+    void sparseMergeUsesRealMariaDbFksAndPreservesDiscordHistory() {
+        SparseFixture f = sparseFixture("ok", 992224440001L);
+        Integer absorbed = f.website().getId();
+        Integer canonical = f.legacy().getId();
+
+        // A Discord Community remains attached to the same original user_id.
+        Community community = new Community();
+        community.setName("Synthetic continuity");
+        community = communities.saveAndFlush(community);
+        UserCommunityStatus membership = new UserCommunityStatus();
+        membership.setUser(f.legacy());
+        membership.setCommunity(community);
+        membership.setMemberSince(LocalDateTime.now());
+        membership.setApproved(true);
+        membership.setIsVip(false);
+        membership.setIsPartner(false);
+        membership.setBanned(false);
+        membership.setBirthdayMentionable(false);
+        memberships.saveAndFlush(membership);
+        Integer membershipId = membership.getId();
+
+        Integer actualCanonical = sparseMerge.consolidate(f.website(), f.proof());
+
+        assertEquals(canonical, actualCanonical);
+        entityManager.flush();
+        entityManager.clear();
+        User web = users.findById(absorbed).orElseThrow();
+        User legacy = users.findById(canonical).orElseThrow();
+        assertNull(web.getEmail());
+        assertEquals(canonical, web.getMergedIntoUser().getId());
+        assertEquals("synthetic-google-ok@example.invalid", legacy.getEmail());
+        assertEquals(1L, legacy.getAuthVersion());
+        assertEquals(1L, web.getAuthVersion());
+        assertEquals(canonical, socialIdentities
+            .findByProviderAndProviderSubject("google", "synthetic-google-sub-ok")
+            .orElseThrow().getUser().getId());
+        assertEquals(canonical, memberships.findById(membershipId)
+            .orElseThrow().getUser().getId());
+        assertEquals(canonical, discords.findByDiscordUserId(992224440001L)
+            .orElseThrow().getUser().getId());
+        assertTrue(consolidationAudit.existsByAbsorbedUserId(absorbed));
+    }
+
+    @Test
+    @Transactional(isolation = Isolation.SERIALIZABLE)
+    void sparseMergeCannotAbsorbOtherCommunityRecordsOnRealMariaDb() {
+        SparseFixture f = sparseFixture("block", 992224440002L);
+        Community community = new Community();
+        community.setName("Synthetic website restriction");
+        community = communities.saveAndFlush(community);
+        UserCommunityStatus membership = new UserCommunityStatus();
+        membership.setUser(f.website());
+        membership.setCommunity(community);
+        membership.setMemberSince(LocalDateTime.now());
+        membership.setApproved(true);
+        membership.setIsVip(false);
+        membership.setIsPartner(false);
+        membership.setBanned(false);
+        membership.setBirthdayMentionable(false);
+        memberships.saveAndFlush(membership);
+
+        assertThrows(ResponseStatusException.class,
+            () -> sparseMerge.consolidate(f.website(), f.proof()));
+        assertEquals("synthetic-google-block@example.invalid", f.website().getEmail());
+        assertNull(f.website().getMergedIntoUser());
+        assertFalse(consolidationAudit.existsByAbsorbedUserId(f.website().getId()));
+    }
+
 }
