@@ -212,25 +212,38 @@ public class AuthSocialService {
     }
 
     private Optional<User> findExistingSocialUser(ProviderProfile profile) {
-        Optional<User> byEmail = userRepository.findByEmail(profile.email());
+        // Provider subject is the immutable authentication key; e-mail is
+        // profile metadata and must never justify silently joining two users.
         Optional<User> byProviderId = findUserByProviderId(profile);
+        Optional<User> byEmail = userRepository.findByEmail(profile.email());
+
+        if ("google".equals(profile.provider())) {
+            if (byProviderId.isPresent()) {
+                if (byEmail.isPresent()
+                    && !byEmail.get().getId().equals(byProviderId.get().getId())) {
+                    throw new BadCredentialsException("ACCOUNT_RECONCILIATION_REQUIRED");
+                }
+                return byProviderId;
+            }
+            // Existing Google users created before immutable subjects were
+            // recorded need authenticated recovery, not e-mail-only claiming.
+            // The new Google-link endpoint will require an existing site
+            // session and a separately verified Google ID token.
+            if (byEmail.isPresent()) throw new BadCredentialsException("ACCOUNT_LINK_REQUIRED");
+            return Optional.empty();
+        }
 
         if ("discord".equals(profile.provider())) {
             if (byProviderId.isEmpty()) {
-                // A verified Discord e-mail is NOT proof of possession of an
-                // existing BraFurries/Google account with the same address.
-                // The owner must sign in there and complete Discord OAuth proof.
                 if (byEmail.isPresent()) throw new BadCredentialsException("ACCOUNT_LINK_REQUIRED");
                 return Optional.empty();
             }
 
-            // Only a pre-existing OAuth-proven SOCIAL link can redirect login
-            // away from the original Discord owner. Never infer this by e-mail.
             Optional<User> recovered = accountLinks.recoveredLoginFor(byProviderId.get());
             if (recovered.isPresent()) {
                 if (byEmail.isPresent() && !byEmail.get().getId().equals(recovered.get().getId())
                     && !byEmail.get().getId().equals(byProviderId.get().getId())) {
-                    throw new BadCredentialsException("ACCOUNT_LINK_REQUIRED");
+                    throw new BadCredentialsException("ACCOUNT_RECONCILIATION_REQUIRED");
                 }
                 return recovered;
             }
@@ -241,14 +254,15 @@ public class AuthSocialService {
             return byProviderId;
         }
 
-        // Google subject persistence and conflict handling require the
-        // upcoming user_social_identities migration. This legacy e-mail
-        // fallback MUST be removed before final account-consolidation rollout.
-        return byEmail.or(() -> byProviderId);
+        throw new BadCredentialsException("Unsupported provider");
     }
 
     private Optional<User> findUserByProviderId(ProviderProfile profile) {
-        if (!"discord".equals(profile.provider()) || profile.providerUserId() == null || profile.providerUserId().isBlank()) {
+        if ("google".equals(profile.provider())) {
+            return verifiedIdentities.ownerOf("google", profile.providerUserId());
+        }
+        if (!"discord".equals(profile.provider()) || profile.providerUserId() == null
+            || profile.providerUserId().isBlank()) {
             return Optional.empty();
         }
 
@@ -259,8 +273,7 @@ public class AuthSocialService {
             return Optional.empty();
         }
 
-        return userDiscordRepository.findByDiscordUserId(discordUserId)
-            .map(UserDiscord::getUser);
+        return userDiscordRepository.findByDiscordUserId(discordUserId).map(UserDiscord::getUser);
     }
 
     private User createSocialUser(String email, String displayName) {
@@ -462,6 +475,13 @@ public class AuthSocialService {
         if ("discord".equals(profile.provider()) && profile.providerUserId() != null) {
             linkDiscordAccount(user, profile);
         }
+        // Refresh an already-proven provider subject, or a newly connected
+        // Discord that is now owned by this user. Never bootstrap a Google
+        // subject from a matching e-mail alone.
+        findUserByProviderId(profile)
+            .filter(known -> known.getId().equals(user.getId()))
+            .ifPresent(known -> verifiedIdentities.bindProvenSubject(
+                user, profile.provider(), profile.providerUserId(), profile.email()));
     }
 
     private ProviderProfile validateGoogleToken(String providerToken, String requestedEmail, String requestedDisplayName) {
