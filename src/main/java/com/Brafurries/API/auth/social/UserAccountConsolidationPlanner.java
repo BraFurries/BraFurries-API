@@ -35,11 +35,19 @@ public class UserAccountConsolidationPlanner {
         if (findings == null) {
             throw new IllegalArgumentException("Verified-account preflight is required");
         }
-        if ("REVIEW_REQUIRED".equals(findings.status())) {
+        if (!"PRECHECK_REQUIRED".equals(findings.status())
+            && !"RESOLUTION_REQUIRED".equals(findings.status())) {
             return new Plan("REVIEW_REQUIRED", "UNDECIDED", List.of(),
                 findings.nextActions());
         }
+        // The preflight may have detected user-owned rows in a community
+        // even if a future domain has not yet been mapped to transfer rules.
+        // Never replace its blocking verdict with an optimistic auto-merge.
         List<String> conflicts = new ArrayList<>();
+        if ("RESOLUTION_REQUIRED".equals(findings.status())) {
+            conflicts.addAll(findings.nextActions());
+            if (conflicts.isEmpty()) conflicts.add("RECONCILE_WEBSITE_OWNERSHIP");
+        }
         List<String> policies = new ArrayList<>();
         boolean overlappingCommunity = findings.communities().stream().anyMatch(c ->
             c.websiteMembership() && c.discordMembership() || c.needsDuplicateReview());
