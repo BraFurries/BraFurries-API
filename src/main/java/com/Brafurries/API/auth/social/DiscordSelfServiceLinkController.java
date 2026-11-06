@@ -4,6 +4,8 @@ import com.Brafurries.API.auth.social.DiscordSelfServiceLinkService.Confirmation
 import com.Brafurries.API.auth.social.DiscordSelfServiceLinkService.Preview;
 import com.Brafurries.API.auth.social.DiscordSelfServiceLinkService.Start;
 import java.util.Map;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -30,5 +32,14 @@ public class DiscordSelfServiceLinkController {
     @PostMapping("/confirm")
     public Confirmation confirm(Authentication auth, @RequestBody Map<String, String> request) {
         return links.confirm(auth, request.get("ticket"));
+    }
+
+    public record ConsolidateRequest(@NotBlank String ticket, boolean acknowledgeDiscordHistoryOwner) {}
+
+    @PostMapping("/consolidate")
+    public DiscordSelfServiceLinkService.ConsolidationResult consolidate(
+        Authentication auth, @Valid @RequestBody ConsolidateRequest request
+    ) {
+        return links.consolidate(auth, request.ticket(), request.acknowledgeDiscordHistoryOwner());
     }
 }
