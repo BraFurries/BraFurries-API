@@ -18,6 +18,10 @@ import com.Brafurries.API.repository.user.UserAccountConsolidationRepository;
 import com.Brafurries.API.repository.user.UserCommunityStatusRepository;
 import java.time.LocalDateTime;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import com.Brafurries.API.repository.community.CommunityStoreRepository;
@@ -77,6 +81,7 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
     @Autowired private UserAccountConsolidationRepository consolidationAudit;
     @Autowired private UserCommunityStatusRepository memberships;
     @Autowired private SparseAccountConsolidationExecutor sparseMerge;
+    @Autowired private PlatformTransactionManager transactionManager;
 
     @Test
     void validatesEntityMappingsAgainstDatabaseOwnedSchema() {
@@ -265,6 +270,41 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
         assertEquals(canonical, discords.findByDiscordUserId(992224440001L)
             .orElseThrow().getUser().getId());
         assertTrue(consolidationAudit.existsByAbsorbedUserId(absorbed));
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void sparseMergeRollbackRestoresBothAccountsAfterPostWriteFailure() {
+        TransactionTemplate seed = new TransactionTemplate(transactionManager);
+        SparseFixture f = seed.execute(status -> sparseFixture("rollback", 992224440003L));
+        assertNotNull(f);
+
+        TransactionTemplate atomic = new TransactionTemplate(transactionManager);
+        atomic.setIsolationLevel(TransactionDefinition.ISOLATION_SERIALIZABLE);
+        IllegalStateException failure = assertThrows(IllegalStateException.class, () ->
+            atomic.execute(status -> {
+                sparseMerge.consolidate(f.website(), f.proof());
+                // Simulate a failure after all writes/audit; Spring must roll
+                // back the complete transaction rather than partial owners.
+                throw new IllegalStateException("synthetic rollback after merge");
+            }));
+        assertEquals("synthetic rollback after merge", failure.getMessage());
+
+        TransactionTemplate check = new TransactionTemplate(transactionManager);
+        check.execute(status -> {
+            User website = users.findById(f.website().getId()).orElseThrow();
+            User legacy = users.findById(f.legacy().getId()).orElseThrow();
+            assertEquals("synthetic-google-rollback@example.invalid", website.getEmail());
+            assertNull(website.getMergedIntoUser());
+            assertNull(legacy.getEmail());
+            assertEquals(0L, website.getAuthVersion());
+            assertEquals(0L, legacy.getAuthVersion());
+            assertEquals(website.getId(), socialIdentities
+                .findByProviderAndProviderSubject("google", "synthetic-google-sub-rollback")
+                .orElseThrow().getUser().getId());
+            assertFalse(consolidationAudit.existsByAbsorbedUserId(website.getId()));
+            return null;
+        });
     }
 
     @Test
