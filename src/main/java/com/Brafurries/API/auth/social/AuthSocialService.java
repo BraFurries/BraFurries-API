@@ -47,6 +47,7 @@ public class AuthSocialService {
     private final UserDiscordRepository userDiscordRepository;
     private final UserTokenRepository userTokenRepository;
     private final DiscordSelfServiceLinkService accountLinks;
+    private final VerifiedSocialIdentityService verifiedIdentities;
     private final Map<String, PendingSocialRegistration> pendingRegistrations = new ConcurrentHashMap<>();
 
     @Value("${GOOGLE_CLIENT_ID:}")
@@ -63,7 +64,8 @@ public class AuthSocialService {
         ApiRolePermissionRepository apiRolePermissionRepository,
         UserDiscordRepository userDiscordRepository,
         UserTokenRepository userTokenRepository,
-        DiscordSelfServiceLinkService accountLinks
+        DiscordSelfServiceLinkService accountLinks,
+        VerifiedSocialIdentityService verifiedIdentities
     ) {
         this.userRepository = userRepository;
         this.userRefreshTokenRepository = userRefreshTokenRepository;
@@ -74,6 +76,7 @@ public class AuthSocialService {
         this.userDiscordRepository = userDiscordRepository;
         this.userTokenRepository = userTokenRepository;
         this.accountLinks = accountLinks;
+        this.verifiedIdentities = verifiedIdentities;
     }
 
     @Transactional
@@ -132,6 +135,7 @@ public class AuthSocialService {
 
         User user = createSocialUser(pending.email(), request.displayName());
         linkProviderAccount(user, profile);
+        verifiedIdentities.bindProvenSubject(user, profile.provider(), profile.providerUserId(), profile.email());
         return issueLoginResponse(user);
     }
 
@@ -154,8 +158,8 @@ public class AuthSocialService {
     }
 
     private User findOrCreateSocialUser(ProviderProfile profile) {
-        User user = findExistingSocialUser(profile)
-            .orElseGet(() -> createSocialUser(profile.email(), profile.displayName()));
+        Optional<User> existing = findExistingSocialUser(profile);
+        User user = existing.orElseGet(() -> createSocialUser(profile.email(), profile.displayName()));
 
         boolean changed = false;
         if ((user.getDisplayName() == null || user.getDisplayName().isBlank())
@@ -178,6 +182,9 @@ public class AuthSocialService {
 
         activateVerifiedProviderAccount(user);
         linkProviderAccount(user, profile);
+        if (existing.isEmpty()) {
+            verifiedIdentities.bindProvenSubject(user, profile.provider(), profile.providerUserId(), profile.email());
+        }
 
         return user;
     }
