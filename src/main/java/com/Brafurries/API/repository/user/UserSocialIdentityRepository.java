@@ -13,4 +13,5 @@ public interface UserSocialIdentityRepository extends JpaRepository<UserSocialId
     Optional<UserSocialIdentity> findByProviderAndProviderSubject(String provider, String providerSubject);
 
     List<UserSocialIdentity> findByUserIdAndProvider(Integer userId, String provider);
+    boolean existsByUser(User user);
 }
