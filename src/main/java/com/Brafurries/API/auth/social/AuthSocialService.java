@@ -22,7 +22,7 @@ import com.Brafurries.API.repository.user.UserRepository;
 import com.Brafurries.API.repository.user.UserTokenRepository;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import jakarta.transaction.Transactional;
+import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
