@@ -107,7 +107,7 @@ class GoogleSelfServiceLinkServiceTest {
     }
 
     @Test
-    void verifiedGoogleSubjectCannotBypassExistingOtherAccount() {
+    void differingProviderEmailDoesNotBlockProvenGoogleSubjectOwnership() {
         AuthSocialService service = service();
         ReflectionTestUtils.setField(service, "googleClientId", "expected-client");
         RestClient.Builder builder = RestClient.builder();
@@ -119,19 +119,16 @@ class GoogleSelfServiceLinkServiceTest {
                  "email_verified":"true","aud":"expected-client","name":"Other"}
                 """, MediaType.APPLICATION_JSON));
         User owner = siteUser(10, "owner@example.com");
-        User other = siteUser(20, "other@example.com");
         when(users.findByEmail("owner@example.com")).thenReturn(Optional.of(owner));
-        when(users.findByEmail("other@example.com")).thenReturn(Optional.of(other));
         when(users.findByIdForUpdate(10)).thenReturn(Optional.of(owner));
 
-        ResponseStatusException error = assertThrows(ResponseStatusException.class,
-            () -> service.linkGoogleToAuthenticatedAccount(
-                new UsernamePasswordAuthenticationToken("owner@example.com", null, List.of()),
-                "verified-google-token"));
-
-        assertEquals(HttpStatus.CONFLICT, error.getStatusCode());
-        assertEquals("ACCOUNT_RECONCILIATION_REQUIRED", error.getReason());
-        verifyNoInteractions(identities);
+        assertEquals("VERIFIED", service.linkGoogleToAuthenticatedAccount(
+            new UsernamePasswordAuthenticationToken("owner@example.com", null, List.of()),
+            "verified-google-token"));
+        verify(identities).bindProvenSubject(owner, "google", "immutable-google-sub",
+            "other@example.com");
+        verify(users, never()).findByEmail("other@example.com");
+        assertEquals("owner@example.com", owner.getEmail());
         server.verify();
     }
 
