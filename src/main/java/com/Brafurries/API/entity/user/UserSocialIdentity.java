@@ -41,6 +41,10 @@ public class UserSocialIdentity {
     @Column(name = "verified_email", length = 255)
     private String verifiedEmail;
 
+    // This flag governs authentication only, not the Discord/Community link.
+    @Column(name = "login_enabled", nullable = false)
+    private Boolean loginEnabled = true;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
