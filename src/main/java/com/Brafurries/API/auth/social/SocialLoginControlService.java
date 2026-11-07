@@ -38,6 +38,7 @@ public class SocialLoginControlService {
     private final PasswordEncoder passwords;
     private final AuthSocialService social;
     private final DiscordSelfServiceLinkService discord;
+    private final SocialLoginOAuthProofService oauthProofs;
 
     public SocialLoginControlService(
         UserRepository users,
@@ -47,7 +48,8 @@ public class SocialLoginControlService {
         UserTokenRepository userTokens,
         PasswordEncoder passwords,
         AuthSocialService social,
-        DiscordSelfServiceLinkService discord
+        DiscordSelfServiceLinkService discord,
+        SocialLoginOAuthProofService oauthProofs
     ) {
         this.users = users;
         this.identities = identities;
@@ -57,6 +59,7 @@ public class SocialLoginControlService {
         this.passwords = passwords;
         this.social = social;
         this.discord = discord;
+        this.oauthProofs = oauthProofs;
     }
 
     public record ProviderLogin(Long identityId, String provider, boolean loginEnabled) {}
@@ -91,6 +94,15 @@ public class SocialLoginControlService {
         // taking the account lock. An e-mail match is never sufficient.
         String subject = social.verifiedGoogleSubject(idToken);
         User actor = requireLockedActor(authentication, password);
+        UserSocialIdentity identity = ownedIdentity(actor, "google", subject);
+        return enable(actor, identity);
+    }
+
+    /** A fresh server-side Google OAuth callback proves the stable subject. */
+    @Transactional
+    public ChangeResult enableGoogleOAuth(Authentication authentication, String ticket, String password) {
+        User actor = requireLockedActor(authentication, password);
+        String subject = oauthProofs.consumeVerifiedGoogle(actor, ticket);
         UserSocialIdentity identity = ownedIdentity(actor, "google", subject);
         return enable(actor, identity);
     }
