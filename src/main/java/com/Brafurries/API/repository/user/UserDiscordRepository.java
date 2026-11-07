@@ -15,6 +15,7 @@ public interface UserDiscordRepository extends JpaRepository<UserDiscord, Intege
     Optional<UserDiscord> findByDiscordUserId(Long discordUserId);
 
     Optional<UserDiscord> findByUser(User user);
+    boolean existsByUser(User user);
 
     @EntityGraph(attributePaths = "user")
     List<UserDiscord> findByUserIdIn(Collection<Integer> userIds);
