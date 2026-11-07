@@ -121,6 +121,9 @@ class AuthSocialServiceOnboardingTest {
     void matchingEmailDoesNotClaimAnUnrelatedSiteAccount() {
         User unrelated = new User();
         unrelated.setId(44);
+        when(onboarding.lockVerified("opaque"))
+            .thenReturn(proof("google", "google-sub", "provider@gmail.com"));
+        when(identities.loginAllowed("google", "google-sub")).thenReturn(true);
         when(users.findByEmail("chosen@example.com")).thenReturn(Optional.of(unrelated));
 
         var failure = assertThrows(ResponseStatusException.class,
@@ -128,7 +131,9 @@ class AuthSocialServiceOnboardingTest {
 
         assertEquals(HttpStatus.CONFLICT, failure.getStatusCode());
         assertEquals("ACCOUNT_RECONCILIATION_REQUIRED", failure.getReason());
-        verifyNoInteractions(onboarding, identities, localAuth, refreshTokens);
+        verify(onboarding, never()).consume(any());
+        verify(identities, never()).bindProvenSubject(any(), any(), any(), any());
+        verifyNoInteractions(localAuth, refreshTokens);
         verify(users, never()).saveAndFlush(any());
     }
 
