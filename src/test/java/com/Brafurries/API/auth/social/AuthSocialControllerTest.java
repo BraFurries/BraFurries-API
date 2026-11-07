@@ -11,7 +11,8 @@ class AuthSocialControllerTest {
     private final SocialFrontendOriginPolicy policy =
         new SocialFrontendOriginPolicy("https://brafurries.com.br");
     private final AuthSocialController controller =
-        new AuthSocialController(mock(AuthSocialService.class), mock(DiscordSelfServiceLinkService.class), policy);
+        new AuthSocialController(mock(AuthSocialService.class), mock(DiscordSelfServiceLinkService.class),
+            mock(SocialLoginOAuthProofService.class), policy);
 
     @Test
     void storesTrustedPreviewOriginBeforeStartingDiscordOauth() {
@@ -34,7 +35,7 @@ class AuthSocialControllerTest {
     void replacesUntrustedOriginWithConfiguredFrontendBeforeStartingOauth() {
         MockHttpServletRequest request = new MockHttpServletRequest();
 
-        controller.startGoogleOAuth2Login("https://evil.example", request);
+        controller.startGoogleOAuth2Login("https://evil.example", null, request);
 
         assertEquals(
             "https://brafurries.com.br",
