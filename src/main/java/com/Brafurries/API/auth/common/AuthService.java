@@ -25,6 +25,8 @@ import com.Brafurries.API.repository.api.ApiRolePermissionRepository;
 import com.Brafurries.API.repository.api.ApiUserRoleRepository;
 import com.Brafurries.API.repository.user.UserRefreshTokenRepository;
 import com.Brafurries.API.repository.user.UserRepository;
+import com.Brafurries.API.repository.user.UserDiscordRepository;
+import com.Brafurries.API.repository.user.UserSocialIdentityRepository;
 import com.Brafurries.API.repository.user.UserTokenRepository;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -46,6 +48,8 @@ import org.springframework.web.server.ResponseStatusException;
 public class AuthService {
 
     private final UserRepository userRepository;
+    private final UserDiscordRepository userDiscordRepository;
+    private final UserSocialIdentityRepository socialIdentitiesRepository;
     private final UserTokenRepository userTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final UserRefreshTokenRepository userRefreshTokenRepository;
@@ -60,6 +64,8 @@ public class AuthService {
 
     public AuthService(
         UserRepository userRepository,
+        UserDiscordRepository userDiscordRepository,
+        UserSocialIdentityRepository socialIdentitiesRepository,
         UserTokenRepository userTokenRepository,
         PasswordEncoder passwordEncoder,
         UserRefreshTokenRepository userRefreshTokenRepository,
@@ -73,6 +79,8 @@ public class AuthService {
         @Value("${app.auth.email-verification-expiration-hours:24}") long emailVerificationExpirationHours
     ) {
         this.userRepository = userRepository;
+        this.userDiscordRepository = userDiscordRepository;
+        this.socialIdentitiesRepository = socialIdentitiesRepository;
         this.userTokenRepository = userTokenRepository;
         this.passwordEncoder = passwordEncoder;
         this.userRefreshTokenRepository = userRefreshTokenRepository;
@@ -167,6 +175,28 @@ public class AuthService {
             saved.getEmail(),
             "Cadastro recebido. Confirme seu e-mail para ativar a conta."
         );
+    }
+
+    /**
+     * Issue the same locally verified e-mail flow for a user who completed
+     * independently verified OAuth onboarding. The caller must already hold
+     * the transaction that creates/activates the site account.
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public void requireLocalEmailConfirmation(User user) {
+        if (user == null || user.getId() == null || user.getEmail() == null
+            || user.getEmail().isBlank() || user.getPasswordHash() == null
+            || user.getPasswordHash().isBlank()) {
+            throw new IllegalArgumentException("Local e-mail and password required");
+        }
+        userTokenRepository.deleteByUserAndType(user, UserTokenType.EMAIL_VERIFICATION);
+        UserToken verification = new UserToken();
+        verification.setUser(user);
+        verification.setType(UserTokenType.EMAIL_VERIFICATION);
+        verification.setToken(tokenService.generateToken(48));
+        verification.setExpiresAt(Instant.now().plus(emailVerificationExpirationHours, ChronoUnit.HOURS));
+        userTokenRepository.save(verification);
+        sendEmailVerificationEmail(user.getEmail(), verification.getToken());
     }
 
     @Transactional
@@ -378,8 +408,17 @@ public class AuthService {
         for (UserToken expiredToken : expiredTokens) {
             User user = expiredToken.getUser();
             if (user.getMergedIntoUser() != null) {
-                // Retain the immutable absorbed user as historical provenance;
-                // deleting it would break audit and related foreign keys.
+                // Retain immutable absorbed users and historical attribution.
+                userTokenRepository.delete(expiredToken);
+                continue;
+            }
+            // The user may exist because Coddy has recorded years of Discord
+            // membership or historical activity. Never delete a Discord
+            // identity and its operational rows because site onboarding lapsed.
+            // For now retain ALL incomplete OAuth identities, including Google
+            // subjects; a future cleanup can be scoped to proven empty shells.
+            if (user.getId() != null && (userDiscordRepository.existsByUser(user)
+                || socialIdentitiesRepository.existsByUser(user))) {
                 userTokenRepository.delete(expiredToken);
                 continue;
             }
