@@ -114,7 +114,9 @@ class AuthSocialServiceOnboardingTest {
         verify(discord).save(linked);
         verify(localAuth).requireLocalEmailConfirmation(legacy);
         verify(onboarding).consume(proof);
-        verifyNoInteractions(refreshTokens, accessTokens);
+        verify(refreshTokens).deleteByUser(legacy);
+        verifyNoInteractions(accessTokens);
+        assertEquals(1L, legacy.getAuthVersion());
     }
 
     @Test
