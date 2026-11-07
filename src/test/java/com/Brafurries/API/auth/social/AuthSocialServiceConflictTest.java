@@ -72,6 +72,7 @@ class AuthSocialServiceConflictTest {
         principal("discord", Map.of(
             "id", "123456789", "email", "person@example.com",
             "verified", true, "username", "person"));
+        when(verifiedIdentities.loginAllowed("discord", "123456789")).thenReturn(true);
         when(discord.findByDiscordUserId(123456789L)).thenReturn(Optional.of(record));
         when(onboarding.create(eq("discord"), eq("123456789"), eq("person@example.com"), anyString()))
             .thenReturn(new SocialOnboardingChallengeService.Created("secure-ticket", "discord"));
@@ -89,6 +90,7 @@ class AuthSocialServiceConflictTest {
         principal("google", Map.of(
             "sub", "g-sub", "email", "person@example.com",
             "email_verified", true, "name", "Person"));
+        when(verifiedIdentities.loginAllowed("google", "g-sub")).thenReturn(true);
         when(verifiedIdentities.ownerOf("google", "g-sub")).thenReturn(Optional.empty());
         when(onboarding.create(eq("google"), eq("g-sub"), eq("person@example.com"), anyString()))
             .thenReturn(new SocialOnboardingChallengeService.Created("secure-ticket", "google"));
@@ -102,6 +104,7 @@ class AuthSocialServiceConflictTest {
     @Test
     void discordIdentifyOnlyCanCreateProofWithoutProviderEmail() {
         principal("discord", Map.of("id", "9999", "username", "Furry"));
+        when(verifiedIdentities.loginAllowed("discord", "9999")).thenReturn(true);
         when(discord.findByDiscordUserId(9999L)).thenReturn(Optional.empty());
         when(onboarding.create(eq("discord"), eq("9999"), isNull(), eq("Furry")))
             .thenReturn(new SocialOnboardingChallengeService.Created("secure-ticket", "discord"));
@@ -130,6 +133,7 @@ class AuthSocialServiceConflictTest {
         User oldOwner = user(20, "legacy@example.com");
         principal("google", Map.of(
             "sub", "g-sub", "email", "provider@example.com", "email_verified", true));
+        when(verifiedIdentities.loginAllowed("google", "g-sub")).thenReturn(true);
         when(verifiedIdentities.ownerOf("google", "g-sub")).thenReturn(Optional.of(oldOwner));
         when(onboarding.create(eq("google"), eq("g-sub"), eq("provider@example.com"), anyString()))
             .thenReturn(new SocialOnboardingChallengeService.Created("secure-ticket", "google"));
