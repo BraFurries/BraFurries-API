@@ -101,6 +101,56 @@ class AuthServiceTest {
     }
 
     @Test
+    void expiredOAuthEmailConfirmationCannotSilentlyActivateHistoricalDiscordAccount() {
+        User historical = new User();
+        historical.setId(42);
+        historical.setEmail("chosen@example.com");
+        historical.setPasswordHash("local-hash");
+        UserToken expired = new UserToken();
+        expired.setUser(historical);
+        expired.setType(UserTokenType.EMAIL_VERIFICATION);
+        expired.setExpiresAt(Instant.now().minusSeconds(60));
+
+        when(userTokenRepository.findByTypeAndUsedAtIsNullAndRevokedAtIsNullAndExpiresAtBefore(
+            UserTokenType.EMAIL_VERIFICATION, org.mockito.ArgumentMatchers.any(Instant.class)))
+            .thenReturn(List.of(expired));
+        when(userDiscordRepository.existsByUser(historical)).thenReturn(true);
+
+        authService.cleanupExpiredPendingEmailRegistrations();
+
+        verify(userRepository, never()).delete(historical);
+        verify(userTokenRepository, never()).delete(expired);
+        verify(userTokenRepository, never()).deleteByUser(historical);
+    }
+
+    @Test
+    void passwordOwnerCanRequestNewVerificationAfterEarlierTokenExpired() {
+        User pending = new User();
+        pending.setId(42);
+        pending.setEmail("chosen@example.com");
+        pending.setPasswordHash("hash");
+        when(userRepository.findByEmail("chosen@example.com")).thenReturn(Optional.of(pending));
+        when(userRepository.findByIdForUpdate(42)).thenReturn(Optional.of(pending));
+        when(passwordEncoder.matches("strong-password", "hash")).thenReturn(true);
+        when(userTokenRepository.existsByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(
+            pending, UserTokenType.EMAIL_VERIFICATION)).thenReturn(true);
+        when(userTokenRepository.findByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(
+            pending, UserTokenType.EMAIL_VERIFICATION)).thenReturn(List.of());
+        when(tokenService.generateToken(48)).thenReturn("new-verification-token");
+        when(userTokenRepository.save(org.mockito.ArgumentMatchers.any(UserToken.class)))
+            .thenAnswer(call -> call.getArgument(0));
+
+        var result = authService.resendEmailConfirmation(
+            new com.Brafurries.API.auth.common.dto.AuthDtos.ResendEmailConfirmationRequest(
+                "chosen@example.com", "strong-password"));
+
+        assertTrue(result.message().contains("enviarmos") || result.message().contains("enviaremos"));
+        verify(userTokenRepository, org.mockito.Mockito.atLeastOnce())
+            .deleteByUserAndType(pending, UserTokenType.EMAIL_VERIFICATION);
+        verify(mailSender).send(org.mockito.ArgumentMatchers.any(SimpleMailMessage.class));
+    }
+
+    @Test
     void registerCommonCreatesPendingEmailVerificationTokenAndSendsEmail() {
         when(userTokenRepository.findByTypeAndUsedAtIsNullAndRevokedAtIsNullAndExpiresAtBefore(any(), any())).thenReturn(List.of());
         when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.empty());
