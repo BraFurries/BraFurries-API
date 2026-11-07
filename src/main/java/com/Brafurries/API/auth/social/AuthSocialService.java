@@ -300,7 +300,7 @@ public class AuthSocialService {
 
     private Optional<User> findExistingSocialUser(ProviderProfile profile) {
         // Provider subject, not provider e-mail, is the only OAuth identity.
-        if (!verifiedIdentities.loginAllowed(profile.provider(), profile.providerUserId())) {
+        if (Boolean.FALSE.equals(verifiedIdentities.loginAllowed(profile.provider(), profile.providerUserId()))) {
             throw new BadCredentialsException("PROVIDER_LOGIN_DISABLED");
         }
         return findUserByProviderId(profile);
