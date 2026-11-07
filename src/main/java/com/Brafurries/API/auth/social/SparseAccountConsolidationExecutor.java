@@ -5,7 +5,10 @@ import com.Brafurries.API.entity.user.UserAccountConsolidation;
 import com.Brafurries.API.entity.user.UserDiscord;
 import com.Brafurries.API.entity.user.UserDiscordLinkChallenge;
 import com.Brafurries.API.entity.user.UserSocialIdentity;
+import com.Brafurries.API.entity.user.UserCommunityStatus;
+import com.Brafurries.API.entity.user.UserCommunityMembershipTransfer;
 import com.Brafurries.API.repository.user.UserAccountConsolidationRepository;
+import com.Brafurries.API.repository.user.UserCommunityMembershipTransferRepository;
 import com.Brafurries.API.repository.user.UserDiscordRepository;
 import com.Brafurries.API.repository.user.UserIdentityLinkRepository;
 import com.Brafurries.API.repository.user.UserRefreshTokenRepository;
@@ -31,7 +34,8 @@ import org.springframework.web.server.ResponseStatusException;
  * This service locks both user IDs in deterministic order, checks again under
  * lock, and only then moves independently verified provider subjects and
  * compatible local login credentials.
- * Discord and Community/XP/assets/moderation data NEVER change owner here.
+ * Discord/XP/assets/moderation data NEVER change owner here. Only eligible
+ * website-only Community status rows can move with their historical fields intact.
  */
 @Service
 public class SparseAccountConsolidationExecutor {
@@ -43,12 +47,16 @@ public class SparseAccountConsolidationExecutor {
     private final UserTokenRepository recoveryTokens;
     private final UserAccountConsolidationRepository audit;
     private final SparseAccountOwnershipGuard ownership;
+    private final CommunityMembershipReconciliationService communityReconciliation;
+    private final UserCommunityMembershipTransferRepository membershipAudit;
 
     public SparseAccountConsolidationExecutor(UserRepository users,
         UserDiscordRepository discord, UserIdentityLinkRepository links,
         UserSocialIdentityRepository identities, UserRefreshTokenRepository refreshTokens,
         UserTokenRepository recoveryTokens, UserAccountConsolidationRepository audit,
-        SparseAccountOwnershipGuard ownership) {
+        SparseAccountOwnershipGuard ownership,
+        CommunityMembershipReconciliationService communityReconciliation,
+        UserCommunityMembershipTransferRepository membershipAudit) {
         this.users = users;
         this.discord = discord;
         this.links = links;
@@ -57,6 +65,8 @@ public class SparseAccountConsolidationExecutor {
         this.recoveryTokens = recoveryTokens;
         this.audit = audit;
         this.ownership = ownership;
+        this.communityReconciliation = communityReconciliation;
+        this.membershipAudit = membershipAudit;
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -99,10 +109,17 @@ public class SparseAccountConsolidationExecutor {
             throw blocked("IDENTITY_LINK_REVIEW_REQUIRED");
         }
 
-        // This rejects any website-owned Community, finance, progression,
-        // moderation, API grant, admin ownership, or future unknown FK.
-        // The live schema is rechecked under transaction locks.
-        ownership.assertOnlyTransferableReferences(websiteId);
+        // Parents are locked in deterministic order. Lock both Community
+        // membership sets, too, and refuse overlaps, restrictions or grants.
+        // The schema scan below still blocks EVERY other website-owned row:
+        // balance, XP, staff, moderation, financial and composite child FKs.
+        List<UserCommunityStatus> membershipsToTransfer =
+            communityReconciliation.prepareLockedTransfer(web, canonical);
+        if (membershipsToTransfer.isEmpty()) {
+            ownership.assertOnlyTransferableReferences(websiteId);
+        } else {
+            ownership.assertOnlyTransferableReferencesWithCommunityMemberships(websiteId);
+        }
 
         List<UserSocialIdentity> google = identities.findByUserIdAndProvider(websiteId, "google");
         if (!identities.findByUserIdAndProvider(websiteId, "discord").isEmpty()) {
@@ -177,16 +194,33 @@ public class SparseAccountConsolidationExecutor {
         }
         identities.flush();
 
-        // Preserve the historical website row and every audit actor FK.
-        web.setMergedIntoUser(canonical);
-        users.saveAndFlush(web);
-
+        // The immutable event is the parent of each transferred membership
+        // audit record. All of these writes belong to the SAME transaction.
         UserAccountConsolidation event = new UserAccountConsolidation();
         event.setCanonicalUser(canonical);
         event.setAbsorbedUser(web);
         event.setInitiatedByUser(web);
         event.setProvedDiscordUserId(challenge.getDiscordUserId());
         audit.saveAndFlush(event);
+
+        // Transfer only one-sided neutral Community membership rows, keeping
+        // their original PKs, join/leave records, approval and portaria state.
+        // Any composite foreign-key conflict aborts the whole transaction.
+        communityReconciliation.transferPrepared(membershipsToTransfer, web, canonical);
+        for (UserCommunityStatus row : membershipsToTransfer) {
+            UserCommunityMembershipTransfer transfer = new UserCommunityMembershipTransfer();
+            transfer.setConsolidation(event);
+            transfer.setCommunityStatus(row);
+            transfer.setCommunity(row.getCommunity());
+            transfer.setFromUser(web);
+            transfer.setToUser(canonical);
+            membershipAudit.save(transfer);
+        }
+        membershipAudit.flush();
+
+        // Preserve the historical website row and every audit actor FK.
+        web.setMergedIntoUser(canonical);
+        users.saveAndFlush(web);
         return canonical.getId();
     }
 

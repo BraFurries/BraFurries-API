@@ -65,6 +65,49 @@ class SparseAccountOwnershipGuardTest {
     }
 
     @Test
+    void websiteCommunityMembershipIsAllowedOnlyBySpecificTransferGuard() {
+        when(jdbc.queryForObject("SELECT @@tx_isolation", String.class))
+            .thenReturn("SERIALIZABLE");
+        when(jdbc.queryForList(anyString())).thenReturn(
+            List.of(column("user_community_status", "user_id", 1)));
+        when(jdbc.queryForObject(anyString(), eq(Long.class), eq(10))).thenReturn(1L);
+
+        assertEquals("ACCOUNT_DATA_RECONCILIATION_REQUIRED",
+            assertThrows(ResponseStatusException.class,
+                () -> guard().assertOnlyTransferableReferences(10)).getReason());
+
+        assertDoesNotThrow(
+            () -> guard().assertOnlyTransferableReferencesWithCommunityMemberships(10));
+    }
+
+    @Test
+    void communityStatusTransferCannotAbsorbDependentNotesOrStaffRoles() {
+        when(jdbc.queryForObject("SELECT @@tx_isolation", String.class))
+            .thenReturn("SERIALIZABLE");
+        when(jdbc.queryForList(anyString())).thenReturn(List.of(
+            column("user_community_status", "user_id", 1),
+            column("community_team_role_assignments", "user_id", 0)));
+        when(jdbc.queryForObject(anyString(), eq(Long.class), eq(10))).thenReturn(1L);
+
+        var error = assertThrows(ResponseStatusException.class,
+            () -> guard().assertOnlyTransferableReferencesWithCommunityMemberships(10));
+
+        assertEquals("ACCOUNT_DATA_RECONCILIATION_REQUIRED", error.getReason());
+    }
+
+    @Test
+    void membershipTransferRequiresUsersForeignKeyAndSerializableIsolation() {
+        when(jdbc.queryForObject("SELECT @@tx_isolation", String.class))
+            .thenReturn("SERIALIZABLE");
+        when(jdbc.queryForList(anyString())).thenReturn(
+            List.of(column("user_community_status", "user_id", 0)));
+
+        var error = assertThrows(ResponseStatusException.class,
+            () -> guard().assertOnlyTransferableReferencesWithCommunityMemberships(10));
+        assertEquals("ACCOUNT_DATA_RECONCILIATION_REQUIRED", error.getReason());
+    }
+
+    @Test
     void transferWhitelistRequiresRealUsersForeignKeyToPreventPhantoms() {
         when(jdbc.queryForObject("SELECT @@tx_isolation", String.class))
             .thenReturn("SERIALIZABLE");

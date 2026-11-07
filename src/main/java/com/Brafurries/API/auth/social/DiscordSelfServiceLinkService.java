@@ -12,6 +12,7 @@ import java.time.ZoneOffset;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.core.Authentication;
@@ -38,6 +39,7 @@ public class DiscordSelfServiceLinkService {
     private final UserCommunityStatusRepository memberships;
     private final UserAccountReconciliationPreflightService preflight;
     private final UserAccountConsolidationPlanner planner;
+    private final CommunityMembershipReconciliationService communityReconciliation;
     private final VerifiedSocialIdentityService verifiedIdentities;
     private final UserSocialIdentityRepository socialIdentities;
     private final SparseAccountConsolidationExecutor consolidation;
@@ -52,6 +54,7 @@ public class DiscordSelfServiceLinkService {
         UserCommunityStatusRepository memberships,
         UserAccountReconciliationPreflightService preflight,
         UserAccountConsolidationPlanner planner,
+        CommunityMembershipReconciliationService communityReconciliation,
         VerifiedSocialIdentityService verifiedIdentities,
         UserSocialIdentityRepository socialIdentities,
         SparseAccountConsolidationExecutor consolidation,
@@ -65,6 +68,7 @@ public class DiscordSelfServiceLinkService {
         this.memberships = memberships;
         this.preflight = preflight;
         this.planner = planner;
+        this.communityReconciliation = communityReconciliation;
         this.verifiedIdentities = verifiedIdentities;
         this.socialIdentities = socialIdentities;
         this.consolidation = consolidation;
@@ -165,6 +169,28 @@ public class DiscordSelfServiceLinkService {
         }
         var assessment = preflight.inspect(actor, existing.getUser());
         var plan = planner.propose(assessment);
+        boolean oneSidedCommunityCandidate = "RESOLUTION_REQUIRED".equals(assessment.status())
+            && assessment.nextActions().contains("TRANSFER_WEBSITE_COMMUNITY_DATA")
+            && assessment.communities().stream().anyMatch(c -> c.websiteMembership())
+            && assessment.communities().stream().noneMatch(c ->
+                (c.websiteMembership() && c.discordMembership()) || c.needsDuplicateReview())
+            && assessment.domains().stream().allMatch(d ->
+                !d.websiteHasRecords() ||
+                Set.of("COMMUNITY", "IDENTITY", "CREDENTIALS", "PROVENANCE").contains(d.domain()));
+
+        if (oneSidedCommunityCandidate) {
+            var membershipPlan = communityReconciliation.preview(actor, existing.getUser());
+            if (membershipPlan.transferReady()) {
+                plan = new UserAccountConsolidationPlanner.Plan(
+                    "AUTO_MERGE_CANDIDATE", "DISCORD_HISTORY_OWNER",
+                    List.of("PRESERVE_CANONICAL_COMMUNITIES",
+                        "TRANSFER_ELIGIBLE_WEBSITE_MEMBERSHIP_ROWS_UNDER_LOCK",
+                        "REVALIDATE_ALL_OTHER_REFERENCES_IN_TRANSACTION",
+                        "INVALIDATE_BOTH_ACCOUNT_SESSIONS"),
+                    List.of("VERIFY_ALL_OTHER_USER_REFERENCES_UNDER_LOCK"));
+            }
+        }
+
         if (plan != null && "AUTO_MERGE_CANDIDATE".equals(plan.status())
             && socialIdentities.findByUserIdAndProvider(actor.getId(), "google").isEmpty()
             && (actor.getPasswordHash() == null || actor.getPasswordHash().isBlank())) {
@@ -188,6 +214,17 @@ public class DiscordSelfServiceLinkService {
             default ->
                 "As identidades estão comprovadas e não foram encontrados conflitos nesta triagem. Falta validar as políticas de transferência antes da fusão.";
         };
+        if (oneSidedCommunityCandidate && "AUTO_MERGE_CANDIDATE".equals(plan.status())) {
+            // Preview is still advisory: under the one-time OAuth challenge,
+            // the SERIALIZABLE executor checks the live database schema,
+            // composite foreign keys and membership uniqueness AGAIN.
+            return new Preview(challenge.getDiscordUsername(), true,
+                "PRECHECK_REQUIRED", List.of("VERIFY_ALL_OTHER_USER_REFERENCES_UNDER_LOCK"),
+                "Encontramos vínculos em Communities diferentes. Os vínculos exclusivos "
+                    + "da conta do site poderão ser preservados durante a unificação, "
+                    + "se a validação transacional confirmar que não há outras dependências.",
+                assessment, plan);
+        }
         return new Preview(challenge.getDiscordUsername(), true,
             assessment.status(), assessment.nextActions(), notice, assessment, plan);
     }

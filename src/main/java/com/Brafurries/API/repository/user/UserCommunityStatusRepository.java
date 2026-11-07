@@ -30,6 +30,20 @@ public interface UserCommunityStatusRepository extends JpaRepository<UserCommuni
     Optional<UserCommunityStatus> findByUserAndCommunity(User user, Community community);
     List<UserCommunityStatus> findAllByUserIdAndCommunityIdOrderByMemberSinceAscIdAsc(Integer userId, Integer communityId);
 
+    /**
+     * Ordered row locks for transferring a website user's one-sided
+     * Community memberships under the account-level SERIALIZABLE merge.
+     * Preserve row IDs and their approval, join/leave and portaria metadata.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+        SELECT status FROM UserCommunityStatus status
+        JOIN FETCH status.community
+        WHERE status.user.id = :userId
+        ORDER BY status.community.id ASC, status.id ASC
+        """)
+    List<UserCommunityStatus> findAllForAccountReconciliation(@Param("userId") Integer userId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
         SELECT status

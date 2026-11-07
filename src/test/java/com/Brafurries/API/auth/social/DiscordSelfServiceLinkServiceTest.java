@@ -33,6 +33,7 @@ class DiscordSelfServiceLinkServiceTest {
     @Mock UserCommunityStatusRepository memberships;
     @Mock UserAccountReconciliationPreflightService preflight;
     @Mock UserAccountConsolidationPlanner planner;
+    @Mock CommunityMembershipReconciliationService communityReconciliation;
     @Mock VerifiedSocialIdentityService verifiedIdentities;
     @Mock UserSocialIdentityRepository socialIdentities;
     @Mock SparseAccountConsolidationExecutor consolidation;
@@ -42,7 +43,7 @@ class DiscordSelfServiceLinkServiceTest {
     @Mock TokenService tokens;
 
     private DiscordSelfServiceLinkService service() {
-        return new DiscordSelfServiceLinkService(users, discord, memberships, preflight, planner, verifiedIdentities, socialIdentities, consolidation, links, challenges, bans, tokens);
+        return new DiscordSelfServiceLinkService(users, discord, memberships, preflight, planner, communityReconciliation, verifiedIdentities, socialIdentities, consolidation, links, challenges, bans, tokens);
     }
 
     private Authentication auth() {
@@ -306,6 +307,77 @@ class DiscordSelfServiceLinkServiceTest {
 
         assertEquals("RESOLUTION_REQUIRED", preview.status());
         assertTrue(preview.nextActions().contains("RECONCILE_COMMUNITY_MEMBERSHIP"));
+    }
+
+    @Test
+    void oneSidedNeutralCommunityCanBePreviewedAsConditionalTransferCandidate() {
+        User web = user(10), legacy = user(20);
+        web.setPasswordHash("verified-site-password-hash");
+        UserDiscord existing = new UserDiscord();
+        existing.setUser(legacy);
+        existing.setDiscordUserId(123456789L);
+        when(users.findByEmail("person@example.com")).thenReturn(Optional.of(web));
+        when(challenges.findByTicketHash(anyString())).thenReturn(Optional.of(verified(web)));
+        when(discord.findByDiscordUserId(123456789L)).thenReturn(Optional.of(existing));
+
+        var findings = new UserAccountReconciliationPreflightService.Findings(
+            "RESOLUTION_REQUIRED",
+            List.of("TRANSFER_WEBSITE_COMMUNITY_DATA", "RECONCILE_DOMAIN_DATA",
+                "CHECK_ACCOUNT_CONFLICTS"),
+            List.of(new UserAccountReconciliationPreflightService.CommunityImpact(
+                1, true, false, false, false, false)),
+            List.of(new UserAccountReconciliationPreflightService.DomainImpact(
+                "COMMUNITY", true, false, false, false)));
+        when(preflight.inspect(web, legacy)).thenReturn(findings);
+        when(planner.propose(findings)).thenReturn(new UserAccountConsolidationPlanner.Plan(
+            "RESOLUTION_REQUIRED", "UNDECIDED", List.of(),
+            List.of("TRANSFER_WEBSITE_COMMUNITY_DATA")));
+        when(communityReconciliation.preview(web, legacy))
+            .thenReturn(new CommunityMembershipReconciliationService.Assessment(
+                true, List.of(new CommunityMembershipReconciliationService.CommunityDecision(
+                    1, "TRANSFER_CANDIDATE", List.of())),
+                List.of("VERIFY_ALL_OTHER_USER_REFERENCES_UNDER_LOCK")));
+
+        var result = service().preview(auth(), TICKET);
+
+        assertEquals("PRECHECK_REQUIRED", result.status());
+        assertEquals("AUTO_MERGE_CANDIDATE", result.consolidationPlan().status());
+        assertTrue(result.consolidationPlan().preservationPolicies().contains(
+            "TRANSFER_ELIGIBLE_WEBSITE_MEMBERSHIP_ROWS_UNDER_LOCK"));
+        assertTrue(result.notice().contains("validação transacional"));
+        verify(consolidation, never()).consolidate(any(), any());
+    }
+
+    @Test
+    void oneSidedVipOnWebsiteMustRemainResolutionRequiredEvenAfterIdentityProof() {
+        User web = user(10), legacy = user(20);
+        web.setPasswordHash("verified-site-password-hash");
+        UserDiscord existing = new UserDiscord();
+        existing.setUser(legacy);
+        when(users.findByEmail("person@example.com")).thenReturn(Optional.of(web));
+        when(challenges.findByTicketHash(anyString())).thenReturn(Optional.of(verified(web)));
+        when(discord.findByDiscordUserId(123456789L)).thenReturn(Optional.of(existing));
+
+        var findings = new UserAccountReconciliationPreflightService.Findings(
+            "RESOLUTION_REQUIRED", List.of("TRANSFER_WEBSITE_COMMUNITY_DATA"),
+            List.of(new UserAccountReconciliationPreflightService.CommunityImpact(
+                1, true, false, false, false, false)),
+            List.of());
+        when(preflight.inspect(web, legacy)).thenReturn(findings);
+        when(planner.propose(findings)).thenReturn(new UserAccountConsolidationPlanner.Plan(
+            "RESOLUTION_REQUIRED", "UNDECIDED", List.of(),
+            List.of("REVIEW_MEMBERSHIP_GRANTS")));
+        when(communityReconciliation.preview(web, legacy))
+            .thenReturn(new CommunityMembershipReconciliationService.Assessment(
+                false, List.of(new CommunityMembershipReconciliationService.CommunityDecision(
+                    1, "REVIEW_REQUIRED", List.of("REVIEW_MEMBERSHIP_GRANTS"))),
+                List.of("REVIEW_MEMBERSHIP_GRANTS")));
+
+        var result = service().preview(auth(), TICKET);
+
+        assertEquals("RESOLUTION_REQUIRED", result.status());
+        assertEquals("RESOLUTION_REQUIRED", result.consolidationPlan().status());
+        verifyNoInteractions(consolidation);
     }
 
     @Test

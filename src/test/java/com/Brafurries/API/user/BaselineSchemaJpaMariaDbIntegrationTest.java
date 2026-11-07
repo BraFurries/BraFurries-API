@@ -6,6 +6,7 @@ import com.Brafurries.API.entity.community.Community;
 import com.Brafurries.API.entity.community.CommunityStore;
 import com.Brafurries.API.auth.social.SparseAccountConsolidationExecutor;
 import com.Brafurries.API.auth.social.SparseAccountOwnershipGuard;
+import com.Brafurries.API.auth.social.CommunityMembershipReconciliationService;
 import com.Brafurries.API.auth.social.UserAccountReconciliationPreflightService;
 import com.Brafurries.API.auth.social.UserAccountConsolidationPlanner;
 import com.Brafurries.API.entity.user.User;
@@ -59,6 +60,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Import({ThemeControlPlaneStore.class, BackupControlPlaneStore.class,
     SparseAccountConsolidationExecutor.class, SparseAccountOwnershipGuard.class,
+    CommunityMembershipReconciliationService.class,
     UserAccountReconciliationPreflightService.class, UserAccountConsolidationPlanner.class})
 class BaselineSchemaJpaMariaDbIntegrationTest {
     private static final long GUILD_A = 991001L;
@@ -95,7 +97,7 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
             "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='BASE TABLE'",
             Integer.class
         );
-        assertEquals(110, count);
+        assertEquals(111, count);
 
         Community community = new Community();
         community.setName("Synthetic tenant");
@@ -354,6 +356,184 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
     }
 
     @Test
+    @Transactional(isolation = Isolation.SERIALIZABLE)
+    void transfersOneSidedWebsiteMembershipWithoutChangingItsTenantOrPortariaFields() {
+        SparseFixture f = sparseFixture("membershiponly", 992224440007L, false);
+        Community community = new Community();
+        community.setName("Synthetic site-only Community");
+        community = communities.saveAndFlush(community);
+
+        UserCommunityStatus row = new UserCommunityStatus();
+        row.setUser(f.website());
+        row.setCommunity(community);
+        row.setMemberSince(LocalDateTime.of(2024, 1, 3, 8, 0));
+        row.setLastJoinDate(LocalDateTime.of(2024, 5, 7, 9, 0));
+        row.setApproved(true);
+        row.setApprovedAt(LocalDateTime.of(2024, 1, 3, 8, 20));
+        row.setIsVip(false);
+        row.setIsPartner(false);
+        row.setBanned(false);
+        row.setBirthdayMentionable(false);
+        row.setInviteLinkUsed("site-invitation");
+        row = memberships.saveAndFlush(row);
+
+        Integer originalId = row.getId();
+        Integer targetId = f.legacy().getId();
+        assertEquals(targetId, sparseMerge.consolidate(f.website(), f.proof()));
+        entityManager.flush();
+        entityManager.clear();
+
+        UserCommunityStatus transferred = memberships.findById(originalId).orElseThrow();
+        assertEquals(targetId, transferred.getUser().getId());
+        assertEquals(community.getId(), transferred.getCommunity().getId());
+        assertEquals(LocalDateTime.of(2024, 1, 3, 8, 0), transferred.getMemberSince());
+        assertEquals(LocalDateTime.of(2024, 5, 7, 9, 0), transferred.getLastJoinDate());
+        assertTrue(transferred.getApproved());
+        assertEquals(LocalDateTime.of(2024, 1, 3, 8, 20), transferred.getApprovedAt());
+        assertEquals("site-invitation", transferred.getInviteLinkUsed());
+        assertEquals(1, memberships.findByUser(f.legacy()).size());
+        assertTrue(memberships.findByUser(f.website()).isEmpty());
+        assertTrue(consolidationAudit.existsByAbsorbedUserId(f.website().getId()));
+        assertEquals(1, jdbc.queryForObject("""
+            SELECT COUNT(*) FROM user_community_membership_transfers
+            WHERE community_status_id=? AND community_id=?
+              AND from_user_id=? AND to_user_id=?
+            """, Integer.class, originalId, community.getId(),
+            f.website().getId(), f.legacy().getId()));
+
+    }
+
+    @Test
+    @Transactional(isolation = Isolation.SERIALIZABLE)
+    void duplicateMembershipInSameCommunityBlocksFullMergeWithoutChangingRows() {
+        SparseFixture f = sparseFixture("duplicatestatus", 992224440008L, false);
+        Community community = new Community();
+        community.setName("Synthetic duplicate Community");
+        community = communities.saveAndFlush(community);
+        UserCommunityStatus site = new UserCommunityStatus();
+        site.setUser(f.website());
+        site.setCommunity(community);
+        site.setMemberSince(LocalDateTime.now());
+        site.setApproved(true);
+        site.setIsVip(false);
+        site.setIsPartner(false);
+        site.setBanned(false);
+        site.setBirthdayMentionable(false);
+        site = memberships.saveAndFlush(site);
+        UserCommunityStatus discord = new UserCommunityStatus();
+        discord.setUser(f.legacy());
+        discord.setCommunity(community);
+        discord.setMemberSince(LocalDateTime.now());
+        discord.setApproved(true);
+        discord.setIsVip(false);
+        discord.setIsPartner(false);
+        discord.setBanned(false);
+        discord.setBirthdayMentionable(false);
+        discord = memberships.saveAndFlush(discord);
+
+        Integer siteRowId = site.getId(), discordRowId = discord.getId();
+        assertThrows(ResponseStatusException.class,
+            () -> sparseMerge.consolidate(f.website(), f.proof()));
+        entityManager.clear();
+
+        assertEquals(f.website().getId(), memberships.findById(siteRowId).orElseThrow().getUser().getId());
+        assertEquals(f.legacy().getId(), memberships.findById(discordRowId).orElseThrow().getUser().getId());
+        assertFalse(consolidationAudit.existsByAbsorbedUserId(f.website().getId()));
+    }
+
+    @Test
+    @Transactional(isolation = Isolation.SERIALIZABLE)
+    void compositeForeignKeyToCommunityNotesPreventsPartialMembershipTransfer() {
+        SparseFixture f = sparseFixture("parentwithnote", 992224440009L, false);
+        Community community = new Community();
+        community.setName("Synthetic notes relationship");
+        community = communities.saveAndFlush(community);
+        UserCommunityStatus row = new UserCommunityStatus();
+        row.setUser(f.website());
+        row.setCommunity(community);
+        row.setMemberSince(LocalDateTime.now());
+        row.setApproved(true);
+        row.setIsVip(false);
+        row.setIsPartner(false);
+        row.setBanned(false);
+        row.setBirthdayMentionable(false);
+        row = memberships.saveAndFlush(row);
+        Integer rowId = row.getId();
+
+        jdbc.update("""
+                INSERT INTO community_member_notes
+                    (community_id, user_id, author_user_id, updated_by_user_id, content)
+                VALUES (?, ?, ?, ?, ?)
+                """, community.getId(), f.website().getId(),
+            f.legacy().getId(), f.legacy().getId(), "Synthetic audit note");
+
+        var error = assertThrows(ResponseStatusException.class,
+            () -> sparseMerge.consolidate(f.website(), f.proof()));
+
+        assertEquals("ACCOUNT_DATA_RECONCILIATION_REQUIRED", error.getReason());
+        entityManager.clear();
+        assertEquals(f.website().getId(),
+            memberships.findById(rowId).orElseThrow().getUser().getId());
+        assertFalse(consolidationAudit.existsByAbsorbedUserId(f.website().getId()));
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void postWriteFailureRollsBackBothUserMergeAndOneSidedCommunityTransfer() {
+        TransactionTemplate setup = new TransactionTemplate(transactionManager);
+        Object[] fixture = setup.execute(status -> {
+            SparseFixture f = sparseFixture("commrollback", 992224440010L, false);
+            Community community = new Community();
+            community.setName("Synthetic tenant rollback");
+            community = communities.saveAndFlush(community);
+
+            UserCommunityStatus membership = new UserCommunityStatus();
+            membership.setUser(f.website());
+            membership.setCommunity(community);
+            membership.setMemberSince(LocalDateTime.of(2024, 1, 1, 10, 0));
+            membership.setApproved(true);
+            membership.setIsVip(false);
+            membership.setIsPartner(false);
+            membership.setBanned(false);
+            membership.setBirthdayMentionable(false);
+            membership = memberships.saveAndFlush(membership);
+            return new Object[] { f, membership.getId() };
+        });
+        assertNotNull(fixture);
+        SparseFixture f = (SparseFixture) fixture[0];
+        Integer membershipId = (Integer) fixture[1];
+
+        TransactionTemplate atomic = new TransactionTemplate(transactionManager);
+        atomic.setIsolationLevel(TransactionDefinition.ISOLATION_SERIALIZABLE);
+        assertThrows(IllegalStateException.class, () ->
+            atomic.execute(status -> {
+                sparseMerge.consolidate(f.website(), f.proof());
+                throw new IllegalStateException("synthetic failure after Community transfer");
+            }));
+
+        TransactionTemplate check = new TransactionTemplate(transactionManager);
+        check.execute(status -> {
+            User website = users.findById(f.website().getId()).orElseThrow();
+            User canonical = users.findById(f.legacy().getId()).orElseThrow();
+            UserCommunityStatus membership = memberships.findById(membershipId).orElseThrow();
+
+            assertEquals(website.getId(), membership.getUser().getId());
+            assertEquals(LocalDateTime.of(2024, 1, 1, 10, 0), membership.getMemberSince());
+            assertEquals("local-password-hash", website.getPasswordHash());
+            assertNotNull(website.getEmail());
+            assertNull(website.getMergedIntoUser());
+            assertNull(canonical.getEmail());
+            assertEquals(0L, website.getAuthVersion());
+            assertEquals(0L, canonical.getAuthVersion());
+            assertFalse(consolidationAudit.existsByAbsorbedUserId(website.getId()));
+            assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM user_community_membership_transfers WHERE community_status_id=?",
+                Integer.class, membershipId));
+            return null;
+        });
+    }
+
+    @Test
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void sparseMergeRollbackRestoresBothAccountsAfterPostWriteFailure() {
         TransactionTemplate seed = new TransactionTemplate(transactionManager);
@@ -422,17 +602,17 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
 
     @Test
     @Transactional(isolation = Isolation.SERIALIZABLE)
-    void sparseMergeCannotAbsorbOtherCommunityRecordsOnRealMariaDb() {
+    void websiteVipMembershipCannotBeAutoTransferredToCanonicalDiscordOnRealMariaDb() {
         SparseFixture f = sparseFixture("block", 992224440002L);
         Community community = new Community();
-        community.setName("Synthetic website restriction");
+        community.setName("Synthetic site VIP approval conflict");
         community = communities.saveAndFlush(community);
         UserCommunityStatus membership = new UserCommunityStatus();
         membership.setUser(f.website());
         membership.setCommunity(community);
         membership.setMemberSince(LocalDateTime.now());
         membership.setApproved(true);
-        membership.setIsVip(false);
+        membership.setIsVip(true);
         membership.setIsPartner(false);
         membership.setBanned(false);
         membership.setBirthdayMentionable(false);
@@ -443,6 +623,8 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
         assertEquals("synthetic-google-block@example.invalid", f.website().getEmail());
         assertNull(f.website().getMergedIntoUser());
         assertFalse(consolidationAudit.existsByAbsorbedUserId(f.website().getId()));
+        assertTrue(Boolean.TRUE.equals(memberships.findById(membership.getId())
+            .orElseThrow().getIsVip()));
     }
 
 }
