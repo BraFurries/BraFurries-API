@@ -143,18 +143,14 @@ public class SocialOAuth2AuthenticationSuccessHandler implements AuthenticationS
     }
 
     private String registrationRedirectUri(PendingSocialRegistration pendingRegistration, String frontendOrigin) {
-        StringJoiner query = new StringJoiner("&")
-            .add("requires_registration=true")
-            .add("registration_token=" + encode(pendingRegistration.token()))
-            .add("email=" + encode(pendingRegistration.email()))
-            .add("display_name=" + encode(pendingRegistration.displayName()))
-            .add("provider=" + encode(pendingRegistration.provider()));
-
+        // The OAuth provider e-mail is sensitive and only a suggestion. Never
+        // put it in a query parameter. The frontend consumes this one-use
+        // opaque proof from the fragment and obtains the suggestion via POST.
         return UriComponentsBuilder.fromUriString(frontendOrigin)
             .path("/social-login")
-            .query(query.toString())
-            .build(true)
-            .toUriString();
+            .fragment("requires_registration=true&registration_token="
+                + encode(pendingRegistration.token()))
+            .build(true).toUriString();
     }
 
     private String errorRedirectUri(String message, String frontendOrigin) {
