@@ -220,6 +220,8 @@ public class AuthSocialService {
             user = new User();
         }
         user.setEmail(chosenEmail);
+        // Never carry forward proof for an old imported/legacy address.
+        user.setEmailVerifiedAt(null);
         user.setDisplayName(normalizeDisplayName(request.displayName()));
         user.setPasswordHash(passwordEncoder.encode(request.password()));
         user = userRepository.saveAndFlush(user);
