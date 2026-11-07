@@ -10,6 +10,8 @@ import com.Brafurries.API.repository.api.ApiRolePermissionRepository;
 import com.Brafurries.API.repository.api.ApiUserRoleRepository;
 import com.Brafurries.API.repository.user.UserRefreshTokenRepository;
 import com.Brafurries.API.repository.user.UserRepository;
+import com.Brafurries.API.repository.user.UserDiscordRepository;
+import com.Brafurries.API.repository.user.UserSocialIdentityRepository;
 import com.Brafurries.API.repository.user.UserTokenRepository;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -46,6 +48,11 @@ class AuthServiceTest {
     private UserRepository userRepository;
 
     @Mock
+    private UserDiscordRepository userDiscordRepository;
+    @Mock
+    private UserSocialIdentityRepository socialIdentityRepository;
+
+    @Mock
     private UserTokenRepository userTokenRepository;
 
     @Mock
@@ -76,6 +83,8 @@ class AuthServiceTest {
     void setUp() {
         authService = new AuthService(
             userRepository,
+            userDiscordRepository,
+            socialIdentityRepository,
             userTokenRepository,
             passwordEncoder,
             userRefreshTokenRepository,
