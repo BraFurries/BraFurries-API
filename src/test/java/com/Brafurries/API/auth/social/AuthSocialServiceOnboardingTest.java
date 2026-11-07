@@ -66,6 +66,7 @@ class AuthSocialServiceOnboardingTest {
     void googleSuggestionCanBeReplacedBySelectedSiteEmailWithoutIssuingJwt() {
         var proof = proof("google", "google-sub", "provider@gmail.com");
         when(onboarding.lockVerified("opaque")).thenReturn(proof);
+        when(identities.loginAllowed(proof.getProvider(), proof.getProviderSubject())).thenReturn(true);
         when(users.findByEmail("chosen@example.com")).thenReturn(Optional.empty());
         when(identities.ownerOf("google", "google-sub")).thenReturn(Optional.empty());
         when(users.saveAndFlush(any(User.class))).thenAnswer(call -> {
@@ -98,6 +99,7 @@ class AuthSocialServiceOnboardingTest {
         var proof = proof("discord", "987654321", null);
         when(onboarding.lockVerified("opaque")).thenReturn(proof);
         when(users.findByEmail("chosen@example.com")).thenReturn(Optional.empty());
+        when(identities.loginAllowed("discord", "987654321")).thenReturn(true);
         when(discord.findByDiscordUserId(987654321L)).thenReturn(Optional.of(linked));
         when(users.findByIdForUpdate(20)).thenReturn(Optional.of(legacy));
         when(users.saveAndFlush(legacy)).thenReturn(legacy);
