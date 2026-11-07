@@ -24,6 +24,10 @@ public class User {
     @Column(nullable = true, unique = true, length = 255)
     private String email;
 
+    // Durable proof of the user's chosen BraFurries e-mail, never inherited from OAuth.
+    @Column(name = "email_verified_at")
+    private LocalDateTime emailVerifiedAt;
+
     @Column(name = "password_hash", nullable = true, length = 255)
     private String passwordHash;
 
