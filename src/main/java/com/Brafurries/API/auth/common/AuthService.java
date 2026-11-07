@@ -211,6 +211,9 @@ public class AuthService {
         }
 
         User user = verificationToken.getUser();
+        // A locally redeemed token is positive proof. Legacy accounts without
+        // this durable marker remain UNKNOWN until they reconfirm their e-mail.
+        user.setEmailVerifiedAt(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
         verificationToken.setUsedAt(Instant.now());
         userTokenRepository.save(verificationToken);
         userTokenRepository.deleteByUserAndType(user, UserTokenType.EMAIL_VERIFICATION);
