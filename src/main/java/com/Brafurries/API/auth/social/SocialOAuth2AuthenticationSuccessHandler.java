@@ -29,15 +29,18 @@ public class SocialOAuth2AuthenticationSuccessHandler implements AuthenticationS
 
     private final AuthSocialService authSocialService;
     private final DiscordSelfServiceLinkService discordLinkService;
+    private final SocialLoginOAuthProofService googleLoginProofs;
     private final SocialFrontendOriginPolicy frontendOriginPolicy;
 
     public SocialOAuth2AuthenticationSuccessHandler(
         AuthSocialService authSocialService,
         SocialFrontendOriginPolicy frontendOriginPolicy,
-        DiscordSelfServiceLinkService discordLinkService
+        DiscordSelfServiceLinkService discordLinkService,
+        SocialLoginOAuthProofService googleLoginProofs
     ) {
         this.authSocialService = authSocialService;
         this.discordLinkService = discordLinkService;
+        this.googleLoginProofs = googleLoginProofs;
         this.frontendOriginPolicy = frontendOriginPolicy;
     }
 
@@ -53,8 +56,15 @@ public class SocialOAuth2AuthenticationSuccessHandler implements AuthenticationS
 
         String frontendOrigin = consumeFrontendOrigin(request);
         String linkTicket = consumeDiscordLinkTicket(request);
+        String googleTicket = consumeGoogleLoginTicket(request);
 
         try {
+            if (googleTicket != null) {
+                if (linkTicket != null) throw new BadCredentialsException("Conflicting OAuth operations");
+                googleLoginProofs.verifiedGoogleOAuth(googleTicket, oauth2Authentication);
+                response.sendRedirect(googleConfirmationRedirectUri(googleTicket, frontendOrigin));
+                return;
+            }
             if (linkTicket != null) {
                 // This is proof of Discord possession, not a new website login.
                 // Never issue replacement JWTs or switch the current Google session.
@@ -65,14 +75,18 @@ public class SocialOAuth2AuthenticationSuccessHandler implements AuthenticationS
             OAuth2LoginResult result = authSocialService.loginOAuth2(oauth2Authentication);
             response.sendRedirect(redirectUri(result, frontendOrigin));
         } catch (BadCredentialsException | IllegalArgumentException | org.springframework.web.server.ResponseStatusException ex) {
-            response.sendRedirect(linkTicket != null
-                ? linkErrorRedirectUri("Não foi possível confirmar esse Discord. Inicie novamente a vinculação.", frontendOrigin)
-                : errorRedirectUri(ex.getMessage(), frontendOrigin));
+            response.sendRedirect(googleTicket != null
+                ? googleErrorRedirectUri(frontendOrigin)
+                : linkTicket != null
+                    ? linkErrorRedirectUri("Não foi possível confirmar esse Discord. Inicie novamente a vinculação.", frontendOrigin)
+                    : errorRedirectUri(ex.getMessage(), frontendOrigin));
         } catch (RuntimeException ex) {
             LOGGER.error("Erro inesperado ao finalizar OAuth2", ex);
-            response.sendRedirect(linkTicket != null
-                ? linkErrorRedirectUri("Falha ao verificar Discord. Tente novamente.", frontendOrigin)
-                : errorRedirectUri("Falha inesperada ao finalizar login social", frontendOrigin));
+            response.sendRedirect(googleTicket != null
+                ? googleErrorRedirectUri(frontendOrigin)
+                : linkTicket != null
+                    ? linkErrorRedirectUri("Falha ao verificar Discord. Tente novamente.", frontendOrigin)
+                    : errorRedirectUri("Falha inesperada ao finalizar login social", frontendOrigin));
         }
     }
 
@@ -84,9 +98,34 @@ public class SocialOAuth2AuthenticationSuccessHandler implements AuthenticationS
     ) throws IOException {
         String frontendOrigin = consumeFrontendOrigin(request);
         String linkTicket = consumeDiscordLinkTicket(request);
-        response.sendRedirect(linkTicket != null
+        String googleTicket = consumeGoogleLoginTicket(request);
+        response.sendRedirect(googleTicket != null
+            ? googleErrorRedirectUri(frontendOrigin)
+            : linkTicket != null
             ? linkErrorRedirectUri("Autorização Discord não concluída. Você pode tentar novamente.", frontendOrigin)
             : errorRedirectUri(exception.getMessage(), frontendOrigin));
+    }
+
+    private String consumeGoogleLoginTicket(HttpServletRequest request) {
+        var session = request.getSession(false);
+        if (session == null) return null;
+        Object ticket = session.getAttribute(SocialLoginOAuthProofService.GOOGLE_SESSION_TICKET);
+        session.removeAttribute(SocialLoginOAuthProofService.GOOGLE_SESSION_TICKET);
+        return ticket instanceof String value && !value.isBlank() ? value : null;
+    }
+
+    private String googleConfirmationRedirectUri(String ticket, String frontendOrigin) {
+        return UriComponentsBuilder.fromUriString(frontendOrigin)
+            .path("/painel/perfil")
+            .fragment("google_login_ticket=" + encode(ticket))
+            .build(true).toUriString();
+    }
+
+    private String googleErrorRedirectUri(String frontendOrigin) {
+        return UriComponentsBuilder.fromUriString(frontendOrigin)
+            .path("/painel/perfil")
+            .queryParam("google_login_error", "Não foi possível comprovar Google. Tente novamente.")
+            .build().encode().toUriString();
     }
 
     private String consumeDiscordLinkTicket(HttpServletRequest request) {
