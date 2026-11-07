@@ -238,55 +238,12 @@ public class AuthSocialService {
             || user.getPasswordHash() == null || user.getPasswordHash().isBlank();
     }
 
-    private RegisterResponse registerSocial(ProviderProfile profile) {
-        Optional<User> existingUser = findExistingSocialUser(profile);
-        if (existingUser.isPresent()) {
-            User saved = updateExistingSocialUser(existingUser.get(), profile);
-            return new RegisterResponse(saved.getId().longValue(), saved.getEmail(), "Conta ativada pelo provedor");
-        }
-
-        User saved = findOrCreateSocialUser(profile);
-        return new RegisterResponse(saved.getId().longValue(), saved.getEmail(), "Conta criada e ativada pelo provedor");
-    }
-
     private LoginResponse socialLogin(ProviderProfile profile) {
         User user = findExistingSocialUser(profile)
             .orElseThrow(() -> new BadCredentialsException("SOCIAL_ONBOARDING_REQUIRED"));
         if (needsOnboarding(user)) throw new BadCredentialsException("SOCIAL_ONBOARDING_REQUIRED");
         updateExistingSocialUser(user, profile);
         return issueLoginResponse(user);
-    }
-
-    private User findOrCreateSocialUser(ProviderProfile profile) {
-        Optional<User> existing = findExistingSocialUser(profile);
-        User user = existing.orElseGet(() -> createSocialUser(profile.email(), profile.displayName()));
-
-        boolean changed = false;
-        if ((user.getDisplayName() == null || user.getDisplayName().isBlank())
-                && profile.displayName() != null && !profile.displayName().isBlank()) {
-            user.setDisplayName(normalizeDisplayName(profile.displayName()));
-            changed = true;
-        }
-
-        if (user.getEmail() != null) {
-            String normalizedEmail = user.getEmail().trim().toLowerCase(Locale.ROOT);
-            if (!normalizedEmail.equals(user.getEmail())) {
-                user.setEmail(normalizedEmail);
-                changed = true;
-            }
-        }
-
-        if (changed) {
-            user = userRepository.save(user);
-        }
-
-        // OAuth proof NEVER marks the independently chosen local e-mail verified.
-        linkProviderAccount(user, profile);
-        if (existing.isEmpty()) {
-            verifiedIdentities.bindProvenSubject(user, profile.provider(), profile.providerUserId(), profile.email());
-        }
-
-        return user;
     }
 
     private User updateExistingSocialUser(User user, ProviderProfile profile) {
@@ -334,10 +291,6 @@ public class AuthSocialService {
         }
 
         return userDiscordRepository.findByDiscordUserId(discordUserId).map(UserDiscord::getUser);
-    }
-
-    private User createSocialUser(String email, String displayName) {
-        throw new BadCredentialsException("SOCIAL_ONBOARDING_REQUIRED");
     }
 
     private void validateTermsAgreement(Boolean termsAgreement) {
@@ -521,10 +474,6 @@ public class AuthSocialService {
             throw new BadCredentialsException("Token Google invalido");
         }
 
-        if (requestedEmail != null && response.email() != null
-            && !response.email().equalsIgnoreCase(requestedEmail)) {
-            throw new BadCredentialsException("E-mail nao confere com o token Google");
-        }
         if (response.subject() == null || response.subject().isBlank()
             || response.subject().length() > 128) {
             throw new BadCredentialsException("Identidade Google incompleta");
@@ -563,10 +512,6 @@ public class AuthSocialService {
             throw new BadCredentialsException("Token Discord invalido");
         }
 
-        if (requestedEmail != null && response.email() != null
-            && !response.email().equalsIgnoreCase(requestedEmail)) {
-            throw new BadCredentialsException("E-mail nao confere com o token Discord");
-        }
 
         String normalizedEmail = suggestedEmail(response.email(),
             response.verified());
