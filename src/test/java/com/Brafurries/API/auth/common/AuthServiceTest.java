@@ -101,27 +101,14 @@ class AuthServiceTest {
     }
 
     @Test
-    void expiredOAuthEmailConfirmationCannotSilentlyActivateHistoricalDiscordAccount() {
-        User historical = new User();
-        historical.setId(42);
-        historical.setEmail("chosen@example.com");
-        historical.setPasswordHash("local-hash");
-        UserToken expired = new UserToken();
-        expired.setUser(historical);
-        expired.setType(UserTokenType.EMAIL_VERIFICATION);
-        expired.setExpiresAt(Instant.now().minusSeconds(60));
-
-        when(userTokenRepository.findByTypeAndUsedAtIsNullAndRevokedAtIsNullAndExpiresAtBefore(
-            org.mockito.ArgumentMatchers.eq(UserTokenType.EMAIL_VERIFICATION),
-            org.mockito.ArgumentMatchers.any(Instant.class)))
-            .thenReturn(List.of(expired));
-        when(userDiscordRepository.existsByUser(historical)).thenReturn(true);
-
+    void expiredLocalEmailConfirmationMustNotDeleteAnyLegacyAccount() {
         authService.cleanupExpiredPendingEmailRegistrations();
-
-        verify(userRepository, never()).delete(historical);
-        verify(userTokenRepository, never()).delete(expired);
-        verify(userTokenRepository, never()).deleteByUser(historical);
+        verify(userRepository, never()).delete(org.mockito.ArgumentMatchers.any(User.class));
+        verify(userTokenRepository, never()).deleteByUser(org.mockito.ArgumentMatchers.any(User.class));
+        verify(userRefreshTokenRepository, never()).deleteByUser(org.mockito.ArgumentMatchers.any(User.class));
+        verify(userTokenRepository, never())
+            .findByTypeAndUsedAtIsNullAndRevokedAtIsNullAndExpiresAtBefore(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
