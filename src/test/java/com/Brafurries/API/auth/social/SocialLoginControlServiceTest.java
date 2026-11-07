@@ -2,6 +2,9 @@ package com.Brafurries.API.auth.social;
 
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.entity.user.UserSocialIdentity;
+import com.Brafurries.API.entity.user.UserSocialLoginEvent;
+import com.Brafurries.API.repository.user.UserSocialLoginEventRepository;
+import java.time.LocalDateTime;
 import com.Brafurries.API.entity.user.UserTokenType;
 import com.Brafurries.API.repository.user.UserRefreshTokenRepository;
 import com.Brafurries.API.repository.user.UserRepository;
@@ -28,6 +31,7 @@ import static org.mockito.ArgumentMatchers.*;
 class SocialLoginControlServiceTest {
     @Mock UserRepository users;
     @Mock UserSocialIdentityRepository identities;
+    @Mock UserSocialLoginEventRepository events;
     @Mock UserRefreshTokenRepository refreshTokens;
     @Mock UserTokenRepository userTokens;
     @Mock PasswordEncoder passwords;
@@ -40,13 +44,14 @@ class SocialLoginControlServiceTest {
 
     @BeforeEach
     void setup() {
-        service = new SocialLoginControlService(users, identities, refreshTokens, userTokens,
+        service = new SocialLoginControlService(users, identities, events, refreshTokens, userTokens,
             passwords, social, discord);
         owner = new User();
         owner.setId(9);
         owner.setEmail("site@example.com");
         owner.setPasswordHash("hashed-local");
         owner.setAuthVersion(4L);
+        owner.setEmailVerifiedAt(LocalDateTime.now());
         auth = new UsernamePasswordAuthenticationToken("site@example.com", null, List.of());
     }
 
@@ -76,6 +81,11 @@ class SocialLoginControlServiceTest {
         assertEquals(5L, owner.getAuthVersion());
         verify(refreshTokens).deleteByUser(owner);
         verify(identities).save(linked);
+        verify(events).save(argThat(event ->
+            Boolean.TRUE.equals(event.getPreviousLoginEnabled())
+                && Boolean.FALSE.equals(event.getNextLoginEnabled())
+                && Long.valueOf(4L).equals(event.getPreviousAuthVersion())
+                && Long.valueOf(5L).equals(event.getNextAuthVersion())));
         assertEquals("provider-subject", linked.getProviderSubject());
         assertSame(owner, linked.getUser());
     }
@@ -85,7 +95,7 @@ class SocialLoginControlServiceTest {
         when(users.findByEmail("site@example.com")).thenReturn(Optional.of(owner));
         when(users.findByIdForUpdate(9)).thenReturn(Optional.of(owner));
         assertThrows(BadCredentialsException.class, () -> service.disable(auth, 11L, "wrong"));
-        verifyNoInteractions(identities, refreshTokens);
+        verifyNoInteractions(identities, refreshTokens, events);
         assertEquals(4L, owner.getAuthVersion());
     }
 
@@ -99,6 +109,7 @@ class SocialLoginControlServiceTest {
             () -> service.disable(auth, 11L, "local-password"));
         assertEquals(HttpStatus.NOT_FOUND, ex.getStatusCode());
         verify(refreshTokens, never()).deleteByUser(any());
+        verifyNoInteractions(events);
     }
 
     @Test
@@ -110,6 +121,16 @@ class SocialLoginControlServiceTest {
             () -> service.disable(auth, 11L, "local-password"));
         assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
         verifyNoInteractions(identities, refreshTokens);
+    }
+
+    @Test
+    void legacyImportedEmailNeedsPositiveLocalReverification() {
+        owner.setEmailVerifiedAt(null);
+        confirmedLocalAccount();
+        ResponseStatusException error = assertThrows(ResponseStatusException.class,
+            () -> service.disable(auth, 11L, "local-password"));
+        assertEquals(HttpStatus.CONFLICT, error.getStatusCode());
+        verifyNoInteractions(events, identities, refreshTokens);
     }
 
     @Test
