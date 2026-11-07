@@ -1,6 +1,7 @@
 package com.Brafurries.API.auth.social;
 
 import com.Brafurries.API.auth.common.AccessTokenService;
+import com.Brafurries.API.auth.common.AuthService;
 import com.Brafurries.API.auth.common.TokenService;
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.entity.user.UserDiscord;
@@ -17,17 +18,16 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class AuthSocialServiceConflictTest {
-
     @Mock UserRepository users;
     @Mock UserRefreshTokenRepository refreshTokens;
     @Mock TokenService tokens;
@@ -38,116 +38,104 @@ class AuthSocialServiceConflictTest {
     @Mock UserTokenRepository userTokens;
     @Mock DiscordSelfServiceLinkService accountLinks;
     @Mock VerifiedSocialIdentityService verifiedIdentities;
+    @Mock SocialOnboardingChallengeService onboarding;
+    @Mock AuthService localAuth;
+    @Mock PasswordEncoder passwords;
     @Mock OAuth2AuthenticationToken authentication;
     @Mock OAuth2User principal;
 
-    @Test
-    void discordEmailConflictFailsClosedWithoutDestructiveMutation() {
-        User emailUser = user(10, "person@example.com");
-        emailUser.setPasswordHash("local-password-hash");
-        User providerUser = user(20, null);
-        UserDiscord providerLink = new UserDiscord();
-        providerLink.setUser(providerUser);
-        providerLink.setDiscordUserId(123456789L);
-
-        when(authentication.getAuthorizedClientRegistrationId()).thenReturn("discord");
-        when(authentication.getPrincipal()).thenReturn(principal);
-        when(principal.getAttributes()).thenReturn(Map.of(
-            "id", "123456789", "email", "person@example.com", "verified", true,
-            "username", "person", "global_name", "Person"
-        ));
-        when(users.findByEmail("person@example.com")).thenReturn(Optional.of(emailUser));
-        when(discord.findByDiscordUserId(123456789L)).thenReturn(Optional.of(providerLink));
-
-        AuthSocialService service = new AuthSocialService(
-            users, refreshTokens, tokens, accessTokens, roles, permissions, discord, userTokens, accountLinks, verifiedIdentities
-        );
-
-        assertThrows(BadCredentialsException.class, () -> service.loginOAuth2(authentication));
-        verify(users, never()).deleteById(20);
-        verify(users, never()).save(providerUser);
-        verify(discord, never()).save(providerLink);
-        verify(refreshTokens, never()).save(org.mockito.ArgumentMatchers.any());
-        verify(roles, never()).save(org.mockito.ArgumentMatchers.any());
-    }
-
-    @Test
-    void matchingVerifiedDiscordEmailNeverClaimsPasswordOnlySiteAccount() {
-        User emailUser = user(10, "person@example.com");
-        emailUser.setPasswordHash("local-password-hash");
-        emailUser.setDisplayName("Person");
-        when(authentication.getAuthorizedClientRegistrationId()).thenReturn("discord");
-        when(authentication.getPrincipal()).thenReturn(principal);
-        when(principal.getAttributes()).thenReturn(Map.of(
-            "id", "222", "email", "person@example.com", "verified", true,
-            "username", "person", "global_name", "Person"
-        ));
-        when(users.findByEmail("person@example.com")).thenReturn(Optional.of(emailUser));
-        when(discord.findByDiscordUserId(222L)).thenReturn(Optional.empty());
-
-        AuthSocialService service = new AuthSocialService(
-            users, refreshTokens, tokens, accessTokens, roles, permissions, discord, userTokens, accountLinks, verifiedIdentities
-        );
-
-        assertThrows(BadCredentialsException.class, () -> service.loginOAuth2(authentication));
-        verify(discord, never()).save(org.mockito.ArgumentMatchers.any());
-        verify(users, never()).deleteById(org.mockito.ArgumentMatchers.any());
-        verify(refreshTokens, never()).save(org.mockito.ArgumentMatchers.any());
-        verify(roles, never()).save(org.mockito.ArgumentMatchers.any());
-    }
-
-    @Test
-    void googleCannotClaimLegacyAccountByMatchingVerifiedEmailAlone() {
-        User legacy = user(10, "person@example.com");
-        when(authentication.getAuthorizedClientRegistrationId()).thenReturn("google");
-        when(authentication.getPrincipal()).thenReturn(principal);
-        when(principal.getAttributes()).thenReturn(Map.of(
-            "sub", "google-sub-xyz", "email", "person@example.com",
-            "email_verified", true, "name", "Person"
-        ));
-        when(verifiedIdentities.ownerOf("google", "google-sub-xyz")).thenReturn(Optional.empty());
-        when(users.findByEmail("person@example.com")).thenReturn(Optional.of(legacy));
-
-        AuthSocialService service = new AuthSocialService(
-            users, refreshTokens, tokens, accessTokens, roles, permissions,
-            discord, userTokens, accountLinks, verifiedIdentities
-        );
-
-        assertThrows(BadCredentialsException.class, () -> service.loginOAuth2(authentication));
-        verify(users, never()).save(org.mockito.ArgumentMatchers.any());
-        verify(verifiedIdentities, never()).bindProvenSubject(
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
-    }
-
-    @Test
-    void googleProviderSubjectEmailCollisionCannotTakeOverAnotherAccount() {
-        User providerOwner = user(20, "original@example.com");
-        User emailOwner = user(10, "person@example.com");
-        when(authentication.getAuthorizedClientRegistrationId()).thenReturn("google");
-        when(authentication.getPrincipal()).thenReturn(principal);
-        when(principal.getAttributes()).thenReturn(Map.of(
-            "sub", "google-sub-xyz", "email", "person@example.com",
-            "email_verified", true, "name", "Person"
-        ));
-        when(verifiedIdentities.ownerOf("google", "google-sub-xyz"))
-            .thenReturn(Optional.of(providerOwner));
-        when(users.findByEmail("person@example.com")).thenReturn(Optional.of(emailOwner));
-
-        AuthSocialService service = new AuthSocialService(
-            users, refreshTokens, tokens, accessTokens, roles, permissions,
-            discord, userTokens, accountLinks, verifiedIdentities
-        );
-
-        assertThrows(BadCredentialsException.class, () -> service.loginOAuth2(authentication));
-        verify(users, never()).save(org.mockito.ArgumentMatchers.any());
-        verify(refreshTokens, never()).save(org.mockito.ArgumentMatchers.any());
+    private AuthSocialService service() {
+        return new AuthSocialService(users, refreshTokens, tokens, accessTokens,
+            roles, permissions, discord, userTokens, accountLinks,
+            verifiedIdentities, onboarding, localAuth, passwords);
     }
 
     private User user(int id, String email) {
-        User user = new User();
-        user.setId(id);
-        user.setEmail(email);
-        return user;
+        User u = new User();
+        u.setId(id);
+        u.setEmail(email);
+        return u;
+    }
+
+    private void principal(String provider, Map<String, Object> attrs) {
+        when(authentication.getAuthorizedClientRegistrationId()).thenReturn(provider);
+        when(authentication.getPrincipal()).thenReturn(principal);
+        when(principal.getAttributes()).thenReturn(attrs);
+    }
+
+    @Test
+    void legacyDiscordWithSameEmailAsLocalAccountCannotClaimIt() {
+        User legacy = user(20, null);
+        UserDiscord record = new UserDiscord();
+        record.setUser(legacy);
+        record.setDiscordUserId(123456789L);
+        principal("discord", Map.of(
+            "id", "123456789", "email", "person@example.com",
+            "verified", true, "username", "person"));
+        when(discord.findByDiscordUserId(123456789L)).thenReturn(Optional.of(record));
+        when(onboarding.create(eq("discord"), eq("123456789"), eq("person@example.com"), anyString()))
+            .thenReturn(new SocialOnboardingChallengeService.Created("secure-ticket", "discord"));
+
+        var result = service().loginOAuth2(authentication);
+
+        assertInstanceOf(AuthSocialService.RegistrationRequired.class, result);
+        verify(users, never()).findByEmail("person@example.com");
+        verify(users, never()).save(any());
+        verify(verifiedIdentities, never()).bindProvenSubject(any(), any(), any(), any());
+    }
+
+    @Test
+    void googleMatchingEmailNeverClaimsExistingPasswordAccount() {
+        principal("google", Map.of(
+            "sub", "g-sub", "email", "person@example.com",
+            "email_verified", true, "name", "Person"));
+        when(verifiedIdentities.ownerOf("google", "g-sub")).thenReturn(Optional.empty());
+        when(onboarding.create(eq("google"), eq("g-sub"), eq("person@example.com"), anyString()))
+            .thenReturn(new SocialOnboardingChallengeService.Created("secure-ticket", "google"));
+
+        assertInstanceOf(AuthSocialService.RegistrationRequired.class,
+            service().loginOAuth2(authentication));
+        verify(users, never()).findByEmail("person@example.com");
+        verify(users, never()).save(any());
+    }
+
+    @Test
+    void discordIdentifyOnlyCanCreateProofWithoutProviderEmail() {
+        principal("discord", Map.of("id", "9999", "username", "Furry"));
+        when(discord.findByDiscordUserId(9999L)).thenReturn(Optional.empty());
+        when(onboarding.create(eq("discord"), eq("9999"), isNull(), eq("Furry")))
+            .thenReturn(new SocialOnboardingChallengeService.Created("secure-ticket", "discord"));
+
+        var pending = (AuthSocialService.RegistrationRequired) service().loginOAuth2(authentication);
+
+        assertNull(pending.pendingRegistration().email());
+        assertEquals("secure-ticket", pending.pendingRegistration().token());
+        verify(users, never()).save(any());
+    }
+
+    @Test
+    void disabledDiscordLoginCannotCreateNewAccountOrProof() {
+        principal("discord", Map.of("id", "9999", "username", "Furry"));
+        when(verifiedIdentities.loginAllowed("discord", "9999")).thenReturn(false);
+
+        BadCredentialsException ex = assertThrows(BadCredentialsException.class,
+            () -> service().loginOAuth2(authentication));
+
+        assertEquals("PROVIDER_LOGIN_DISABLED", ex.getMessage());
+        verifyNoInteractions(onboarding, users, discord);
+    }
+
+    @Test
+    void googleOwnerWithNoLocalPasswordRequiresOnboardingRatherThanJwt() {
+        User oldOwner = user(20, "legacy@example.com");
+        principal("google", Map.of(
+            "sub", "g-sub", "email", "provider@example.com", "email_verified", true));
+        when(verifiedIdentities.ownerOf("google", "g-sub")).thenReturn(Optional.of(oldOwner));
+        when(onboarding.create(eq("google"), eq("g-sub"), eq("provider@example.com"), anyString()))
+            .thenReturn(new SocialOnboardingChallengeService.Created("secure-ticket", "google"));
+
+        assertInstanceOf(AuthSocialService.RegistrationRequired.class,
+            service().loginOAuth2(authentication));
+        verify(refreshTokens, never()).save(any());
     }
 }
