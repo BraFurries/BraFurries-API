@@ -30,6 +30,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.core.Authentication;
@@ -74,8 +75,8 @@ public class AuthSocialService {
         DiscordSelfServiceLinkService accountLinks,
         VerifiedSocialIdentityService verifiedIdentities,
         SocialOnboardingChallengeService onboarding,
-        AuthService localAuth,
-        PasswordEncoder passwordEncoder
+        @Lazy AuthService localAuth,
+        @Lazy PasswordEncoder passwordEncoder
     ) {
         this.userRepository = userRepository;
         this.userRefreshTokenRepository = userRefreshTokenRepository;
