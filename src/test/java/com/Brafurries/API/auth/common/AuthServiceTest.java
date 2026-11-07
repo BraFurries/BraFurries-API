@@ -112,7 +112,8 @@ class AuthServiceTest {
         expired.setExpiresAt(Instant.now().minusSeconds(60));
 
         when(userTokenRepository.findByTypeAndUsedAtIsNullAndRevokedAtIsNullAndExpiresAtBefore(
-            UserTokenType.EMAIL_VERIFICATION, org.mockito.ArgumentMatchers.any(Instant.class)))
+            org.mockito.ArgumentMatchers.eq(UserTokenType.EMAIL_VERIFICATION),
+            org.mockito.ArgumentMatchers.any(Instant.class)))
             .thenReturn(List.of(expired));
         when(userDiscordRepository.existsByUser(historical)).thenReturn(true);
 
