@@ -523,7 +523,8 @@ public class AuthSocialService {
             throw new BadCredentialsException("Identidade Google incompleta");
         }
 
-        if (!googleClientId.isBlank() && !googleClientId.equals(response.audience())) {
+        if (googleClientId == null || googleClientId.isBlank()
+            || !googleClientId.equals(response.audience())) {
             throw new BadCredentialsException("Token Google emitido para outro client_id");
         }
 
@@ -533,7 +534,7 @@ public class AuthSocialService {
             response.name(),
             response.givenName(),
             requestedDisplayName,
-            normalizedEmail.substring(0, normalizedEmail.indexOf('@'))
+            "Usuário"
         );
         return new ProviderProfile("google", response.subject(), normalizedEmail, displayName, response.picture());
     }
@@ -566,7 +567,7 @@ public class AuthSocialService {
             response.globalName(),
             response.username(),
             requestedDisplayName,
-            normalizedEmail.substring(0, normalizedEmail.indexOf('@'))
+            "Usuário"
         );
         return new ProviderProfile(
             "discord",
