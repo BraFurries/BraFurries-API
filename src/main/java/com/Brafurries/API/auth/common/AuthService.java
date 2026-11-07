@@ -219,6 +219,31 @@ public class AuthService {
     }
 
 
+    @Transactional
+    public ConfirmEmailResponse resendEmailConfirmation(
+        com.Brafurries.API.auth.common.dto.AuthDtos.ResendEmailConfirmationRequest request
+    ) {
+        // Do not disclose whether a site e-mail exists.
+        String response = "Se houver um cadastro pendente válido, enviaremos uma nova confirmação.";
+        String email = request.email().trim().toLowerCase(java.util.Locale.ROOT);
+        var found = userRepository.findByEmail(email);
+        if (found.isEmpty()) return new ConfirmEmailResponse(response);
+        User user = userRepository.findByIdForUpdate(found.get().getId()).orElse(found.get());
+        if (user.getMergedIntoUser() != null || user.getPasswordHash() == null
+            || !passwordEncoder.matches(request.password(), user.getPasswordHash())
+            || !isEmailVerificationPending(user)) {
+            return new ConfirmEmailResponse(response);
+        }
+        var outstanding = userTokenRepository
+            .findByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(user, UserTokenType.EMAIL_VERIFICATION);
+        boolean tooSoon = outstanding.stream().anyMatch(token -> token.getCreatedAt() != null
+            && token.getCreatedAt().isAfter(Instant.now().minus(2, ChronoUnit.MINUTES)));
+        if (tooSoon) return new ConfirmEmailResponse(response);
+        userTokenRepository.deleteByUserAndType(user, UserTokenType.EMAIL_VERIFICATION);
+        requireLocalEmailConfirmation(user);
+        return new ConfirmEmailResponse(response);
+    }
+
     public ForgotPasswordResponse forgotPassword(ForgotPasswordRequest request) {
         String normalizedEmail = request.email().trim().toLowerCase();
 
@@ -419,7 +444,10 @@ public class AuthService {
             // subjects; a future cleanup can be scoped to proven empty shells.
             if (user.getId() != null && (userDiscordRepository.existsByUser(user)
                 || socialIdentitiesRepository.existsByUser(user))) {
-                userTokenRepository.delete(expiredToken);
+                // Keep the expired pending challenge as a durable negative
+                // authorization marker. Removing it would silently authorize
+                // a provider-backed account with an unverified local e-mail.
+                // The user can reissue a new code with local credentials.
                 continue;
             }
             userTokenRepository.deleteByUser(user);
