@@ -31,6 +31,7 @@ public class AuthSocialController {
 
     private final AuthSocialService authSocialService;
     private final DiscordSelfServiceLinkService discordLinkService;
+    private final SocialLoginOAuthProofService oauthLoginProofs;
     private final SocialFrontendOriginPolicy frontendOriginPolicy;
 
     @Operation(summary = "Inicia login OAuth2 via Discord")
@@ -40,16 +41,17 @@ public class AuthSocialController {
         @RequestParam(name = "link_ticket", required = false) String linkTicket,
         HttpServletRequest request
     ) {
-        return startOAuth2Login("discord", frontendOrigin, linkTicket, request);
+        return startOAuth2Login("discord", frontendOrigin, linkTicket, null, request);
     }
 
     @Operation(summary = "Inicia login OAuth2 via Google")
     @GetMapping("/auth/oauth2/google")
     public RedirectView startGoogleOAuth2Login(
         @RequestParam(name = "frontend_origin", required = false) String frontendOrigin,
+        @RequestParam(name = "reenable_ticket", required = false) String reenableTicket,
         HttpServletRequest request
     ) {
-        return startOAuth2Login("google", frontendOrigin, null, request);
+        return startOAuth2Login("google", frontendOrigin, null, reenableTicket, request);
     }
 
     @Operation(summary = "Login via Google")
@@ -96,6 +98,7 @@ public class AuthSocialController {
         String provider,
         String frontendOrigin,
         String linkTicket,
+        String reenableTicket,
         HttpServletRequest request
     ) {
         String resolvedOrigin = frontendOriginPolicy.resolve(frontendOrigin);
@@ -103,6 +106,7 @@ public class AuthSocialController {
         // Explicitly clear an unfinished prior OAuth operation. It must never
         // turn a regular login into a link or vice versa.
         session.removeAttribute(DiscordSelfServiceLinkService.SESSION_TICKET);
+        session.removeAttribute(SocialLoginOAuthProofService.GOOGLE_SESSION_TICKET);
         if (linkTicket != null && !linkTicket.isBlank()) {
             if (!"discord".equals(provider)) {
                 throw new org.springframework.web.server.ResponseStatusException(
@@ -110,6 +114,14 @@ public class AuthSocialController {
             }
             discordLinkService.authorizeOAuthStart(linkTicket);
             session.setAttribute(DiscordSelfServiceLinkService.SESSION_TICKET, linkTicket);
+        }
+        if (reenableTicket != null && !reenableTicket.isBlank()) {
+            if (!"google".equals(provider) || (linkTicket != null && !linkTicket.isBlank())) {
+                throw new org.springframework.web.server.ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "A reativação exige Google");
+            }
+            oauthLoginProofs.authorizeGoogleStart(reenableTicket);
+            session.setAttribute(SocialLoginOAuthProofService.GOOGLE_SESSION_TICKET, reenableTicket);
         }
         session.setAttribute(SocialFrontendOriginPolicy.SESSION_ATTRIBUTE, resolvedOrigin);
         return new RedirectView("/oauth2/authorization/" + provider);
