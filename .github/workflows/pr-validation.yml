@@ -125,6 +125,16 @@ jobs:
           path: .ci/social-reconciliation-database
           persist-credentials: false
 
+      # Social onboarding migration is owned by Database #50, pinned for
+      # disposable tests without altering any API schema in production.
+      - name: Checkout pinned OAuth onboarding migration (read only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: BraFurries/BraFurries-Database
+          ref: 6585662c2b417e4c0b1f70fa8b44cea598b10744
+          path: .ci/social-onboarding-database
+          persist-credentials: false
+
       - name: Verify baseline source and run opt-in MariaDB Testcontainers compatibility
         env:
           BRF_BASELINE_JPA_INTEGRATION: "true"
@@ -145,6 +155,9 @@ jobs:
           identity_migration=".ci/social-reconciliation-database/flyway/sql/versioned/V20261105_002__create_self_service_social_account_reconciliation.sql"
           test "$(git -C .ci/social-reconciliation-database rev-parse HEAD)" = "0a13897d0772c8d739fb11d807e1a4f01a143d8b"
           test -s "$identity_migration"
+          onboarding_migration=".ci/social-onboarding-database/flyway/sql/versioned/V20261107_001__social_onboarding_independent_account_email.sql"
+          test "$(git -C .ci/social-onboarding-database rev-parse HEAD)" = "6585662c2b417e4c0b1f70fa8b44cea598b10744"
+          test -s "$onboarding_migration"
           moderation_dir=".ci/moderation-database/flyway/sql/versioned"
           for migration in \
             V20261029_002__expand_user_ban_reasons.sql \
@@ -159,6 +172,7 @@ jobs:
             "$partner_migration" \
             "$recovery_migration" \
             "$identity_migration" \
+            "$onboarding_migration" \
             > src/test/resources/brafurries_schema_baseline.sql
           ./mvnw -B -Dtest=BaselineSchemaJpaMariaDbIntegrationTest,BaselineSchemaFullContextMariaDbIntegrationTest test
 
@@ -267,6 +281,9 @@ jobs:
           test -s "$identity_migration"
           cat "$recovery_migration" >> src/test/resources/recruitment_schema.sql
           cat "$identity_migration" >> src/test/resources/recruitment_schema.sql
+          onboarding_migration=".ci/social-onboarding-database/flyway/sql/versioned/V20261107_001__social_onboarding_independent_account_email.sql"
+          test -s "$onboarding_migration"
+          cat "$onboarding_migration" >> src/test/resources/recruitment_schema.sql
           ./mvnw -B -Dtest=RecruitmentDraftJdbcMariaDbIntegrationTest,RecruitmentStageEditorJdbcMariaDbIntegrationTest,RecruitmentPublicationJdbcMariaDbIntegrationTest,RecruitmentCandidateJdbcMariaDbIntegrationTest,RecruitmentTrackingJdbcMariaDbIntegrationTest,RecruitmentHumanReviewJdbcMariaDbIntegrationTest,RecruitmentStageDecisionJdbcMariaDbIntegrationTest,RecruitmentDecisionPolicyJdbcMariaDbIntegrationTest,RecruitmentDecisionDeskJdbcMariaDbIntegrationTest,RecruitmentStageVotingJdbcMariaDbIntegrationTest,RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest,RecruitmentObjectiveGradeJdbcMariaDbIntegrationTest test
 
       - name: Package without rerunning tests
