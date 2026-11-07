@@ -208,6 +208,13 @@ public class AuthSocialService {
             if (user.getMergedIntoUser() != null || !needsOnboarding(user)) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "ACCOUNT_RECONCILIATION_REQUIRED");
             }
+            // Reusing a legacy Discord/Google identity for first web access
+            // revokes any previous provider-issued sessions atomically.
+            if (user.getAuthVersion() == null || user.getAuthVersion() == Long.MAX_VALUE) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "ACCOUNT_CHANGED");
+            }
+            user.setAuthVersion(user.getAuthVersion() + 1);
+            userRefreshTokenRepository.deleteByUser(user);
         } else {
             user = new User();
         }
