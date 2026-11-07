@@ -17,6 +17,7 @@ import org.springframework.web.servlet.view.RedirectView;
 import com.Brafurries.API.auth.common.dto.AuthDtos.LoginResponse;
 import com.Brafurries.API.auth.common.dto.AuthDtos.RegisterResponse;
 import com.Brafurries.API.auth.social.dto.AuthSocialDtos.CompleteSocialRegisterRequest;
+import com.Brafurries.API.auth.social.dto.AuthSocialDtos.SocialRegistrationPreviewRequest;
 import com.Brafurries.API.auth.social.dto.AuthSocialDtos.SocialLoginRequest;
 import com.Brafurries.API.auth.social.dto.AuthSocialDtos.SocialRegisterRequest;
 import io.swagger.v3.oas.annotations.Operation;
@@ -77,9 +78,17 @@ public class AuthSocialController {
         return authSocialService.registerDiscord(request);
     }
 
-    @Operation(summary = "Finaliza cadastro social iniciado via OAuth2")
+    @Operation(summary = "Obtém sugestão opcional de e-mail do desafio OAuth, sem atribuí-la à conta")
+    @PostMapping("/auth/social-register/preview")
+    public SocialOnboardingChallengeService.Preview previewSocialRegistration(
+        @Valid @RequestBody SocialRegistrationPreviewRequest request
+    ) {
+        return authSocialService.previewSocialRegistration(request.registrationToken());
+    }
+
+    @Operation(summary = "Conclui cadastro social com e-mail e senha escolhidos e verificação local")
     @PostMapping("/auth/social-register")
-    public LoginResponse completeSocialRegistration(@Valid @RequestBody CompleteSocialRegisterRequest request) {
+    public RegisterResponse completeSocialRegistration(@Valid @RequestBody CompleteSocialRegisterRequest request) {
         return authSocialService.completeSocialRegistration(request);
     }
 
