@@ -36,7 +36,6 @@ public class SocialLoginControlService {
     private final UserRefreshTokenRepository refreshTokens;
     private final UserTokenRepository userTokens;
     private final PasswordEncoder passwords;
-    private final AuthSocialService social;
     private final DiscordSelfServiceLinkService discord;
     private final SocialLoginOAuthProofService oauthProofs;
 
@@ -47,7 +46,6 @@ public class SocialLoginControlService {
         UserRefreshTokenRepository refreshTokens,
         UserTokenRepository userTokens,
         PasswordEncoder passwords,
-        AuthSocialService social,
         DiscordSelfServiceLinkService discord,
         SocialLoginOAuthProofService oauthProofs
     ) {
@@ -57,7 +55,6 @@ public class SocialLoginControlService {
         this.refreshTokens = refreshTokens;
         this.userTokens = userTokens;
         this.passwords = passwords;
-        this.social = social;
         this.discord = discord;
         this.oauthProofs = oauthProofs;
     }
@@ -86,16 +83,6 @@ public class SocialLoginControlService {
         recordChange(actor, identity, false);
         auditAfterCommit("DISABLED", actor, identity);
         return new ChangeResult("RELOGIN_REQUIRED");
-    }
-
-    @Transactional
-    public ChangeResult enableGoogle(Authentication authentication, String idToken, String password) {
-        // Verify the fresh Google ID token (including OAuth audience) before
-        // taking the account lock. An e-mail match is never sufficient.
-        String subject = social.verifiedGoogleSubject(idToken);
-        User actor = requireLockedActor(authentication, password);
-        UserSocialIdentity identity = ownedIdentity(actor, "google", subject);
-        return enable(actor, identity);
     }
 
     /** A fresh server-side Google OAuth callback proves the stable subject. */
