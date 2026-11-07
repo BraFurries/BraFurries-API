@@ -57,6 +57,14 @@ public class AuthController {
         return authService.confirmEmail(request);
     }
 
+    @Operation(summary = "Reenvia confirmação de e-mail BraFurries com autenticação local e limitação de frequência")
+    @PostMapping("/auth/resend-confirmation")
+    public ConfirmEmailResponse resendConfirmation(
+        @Valid @RequestBody ResendEmailConfirmationRequest request
+    ) {
+        return authService.resendEmailConfirmation(request);
+    }
+
     @Operation(summary = "Solicita redefinição de senha")
     @PostMapping("/auth/forgot-password")
     public ForgotPasswordResponse forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
