@@ -156,6 +156,6 @@ class RecruitmentDraftJdbcMariaDbIntegrationTest {
             Integer.class
         );
         // Canonical pinned schema includes the two incident-notice tables (Database #25).
-        assertEquals(128, count); // 107 baseline + recruitment schema incl. appeals + 3 OAuth identity tables
+        assertEquals(129, count); // 107 baseline + recruitment schema incl. appeals + 3 OAuth identity tables
     }
 }
