@@ -35,7 +35,6 @@ class SocialLoginControlServiceTest {
     @Mock UserRefreshTokenRepository refreshTokens;
     @Mock UserTokenRepository userTokens;
     @Mock PasswordEncoder passwords;
-    @Mock AuthSocialService social;
     @Mock DiscordSelfServiceLinkService discord;
     @Mock SocialLoginOAuthProofService oauthProofs;
 
@@ -46,7 +45,7 @@ class SocialLoginControlServiceTest {
     @BeforeEach
     void setup() {
         service = new SocialLoginControlService(users, identities, events, refreshTokens, userTokens,
-            passwords, social, discord, oauthProofs);
+            passwords, discord, oauthProofs);
         owner = new User();
         owner.setId(9);
         owner.setEmail("site@example.com");
@@ -133,33 +132,19 @@ class SocialLoginControlServiceTest {
     }
 
     @Test
-    void GoogleReactivationNeedsFreshGoogleSubjectOwnedBySession() {
+    void CrossOwnedGoogleOAuthProofCannotTransferProviderIdentity() {
         confirmedLocalAccount();
-        when(social.verifiedGoogleSubject("fresh-id-token")).thenReturn("provider-subject");
-        var linked = identity(12L, "google", owner, false);
-        when(identities.findByProviderAndProviderSubject("google", "provider-subject"))
-            .thenReturn(Optional.of(linked));
-        assertEquals("RELOGIN_REQUIRED",
-            service.enableGoogle(auth, "fresh-id-token", "local-password").status());
-        assertTrue(linked.getLoginEnabled());
-        assertEquals(5L, owner.getAuthVersion());
-        verify(refreshTokens).deleteByUser(owner);
-    }
-
-    @Test
-    void CrossOwnedGoogleTokenCannotReenableOrTransferIdentity() {
-        confirmedLocalAccount();
-        when(social.verifiedGoogleSubject("fresh-id-token")).thenReturn("provider-subject");
+        when(oauthProofs.consumeVerifiedGoogle(owner, "one-use-ticket")).thenReturn("provider-subject");
         User other = new User();
         other.setId(99);
         var linked = identity(12L, "google", other, false);
         when(identities.findByProviderAndProviderSubject("google", "provider-subject"))
             .thenReturn(Optional.of(linked));
         ResponseStatusException ex = assertThrows(ResponseStatusException.class,
-            () -> service.enableGoogle(auth, "fresh-id-token", "local-password"));
+            () -> service.enableGoogleOAuth(auth, "one-use-ticket", "local-password"));
         assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
         assertFalse(linked.getLoginEnabled());
-        verify(refreshTokens, never()).deleteByUser(any());
+        verifyNoInteractions(events, refreshTokens);
     }
 
     @Test
