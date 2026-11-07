@@ -57,8 +57,7 @@ class SocialLoginControlServiceTest {
     }
 
     private void confirmedLocalAccount() {
-        when(users.findByEmail("site@example.com")).thenReturn(Optional.of(owner));
-        when(users.findByIdForUpdate(9)).thenReturn(Optional.of(owner));
+        when(users.findByEmailForUpdate("site@example.com")).thenReturn(Optional.of(owner));
         when(passwords.matches("local-password", "hashed-local")).thenReturn(true);
     }
 
@@ -93,8 +92,7 @@ class SocialLoginControlServiceTest {
 
     @Test
     void passwordIsRequiredEvenWithAnAuthenticatedSession() {
-        when(users.findByEmail("site@example.com")).thenReturn(Optional.of(owner));
-        when(users.findByIdForUpdate(9)).thenReturn(Optional.of(owner));
+        when(users.findByEmailForUpdate("site@example.com")).thenReturn(Optional.of(owner));
         assertThrows(BadCredentialsException.class, () -> service.disable(auth, 11L, "wrong"));
         verifyNoInteractions(identities, refreshTokens, events);
         assertEquals(4L, owner.getAuthVersion());
@@ -196,7 +194,7 @@ class SocialLoginControlServiceTest {
         User stranger = new User();
         stranger.setId(9);
         stranger.setMergedIntoUser(owner);
-        when(users.findByEmail("site@example.com")).thenReturn(Optional.of(stranger));
+        when(users.findByEmailForUpdate("site@example.com")).thenReturn(Optional.of(stranger));
         assertThrows(ResponseStatusException.class,
             () -> service.disable(auth, 11L, "local-password"));
         verifyNoInteractions(identities, refreshTokens);
