@@ -155,7 +155,10 @@ public class SocialLoginControlService {
         User actor = users.findByEmailForUpdate(
                 authentication.getName().trim().toLowerCase(Locale.ROOT))
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão inválida"));
-        if (actor.getMergedIntoUser() != null || actor.getPasswordHash() == null
+        if (actor.getMergedIntoUser() != null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "ACCOUNT_CONSOLIDATED");
+        }
+        if (actor.getPasswordHash() == null
             || actor.getPasswordHash().isBlank() || password == null
             || !passwords.matches(password, actor.getPasswordHash())) {
             throw new BadCredentialsException("Confirme sua senha BraFurries para alterar o método de login");
