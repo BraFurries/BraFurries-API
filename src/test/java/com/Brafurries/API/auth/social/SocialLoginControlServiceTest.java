@@ -37,6 +37,7 @@ class SocialLoginControlServiceTest {
     @Mock PasswordEncoder passwords;
     @Mock AuthSocialService social;
     @Mock DiscordSelfServiceLinkService discord;
+    @Mock SocialLoginOAuthProofService oauthProofs;
 
     SocialLoginControlService service;
     User owner;
@@ -45,7 +46,7 @@ class SocialLoginControlServiceTest {
     @BeforeEach
     void setup() {
         service = new SocialLoginControlService(users, identities, events, refreshTokens, userTokens,
-            passwords, social, discord);
+            passwords, social, discord, oauthProofs);
         owner = new User();
         owner.setId(9);
         owner.setEmail("site@example.com");
@@ -161,6 +162,20 @@ class SocialLoginControlServiceTest {
         assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
         assertFalse(linked.getLoginEnabled());
         verify(refreshTokens, never()).deleteByUser(any());
+    }
+
+    @Test
+    void GoogleOAuthTicketReactivationRequiresSameLocallyVerifiedOwner() {
+        confirmedLocalAccount();
+        when(oauthProofs.consumeVerifiedGoogle(owner, "one-use-ticket")).thenReturn("provider-subject");
+        var linked = identity(12L, "google", owner, false);
+        when(identities.findByProviderAndProviderSubject("google", "provider-subject"))
+            .thenReturn(Optional.of(linked));
+        assertEquals("RELOGIN_REQUIRED",
+            service.enableGoogleOAuth(auth, "one-use-ticket", "local-password").status());
+        assertTrue(linked.getLoginEnabled());
+        verify(events).save(any());
+        verify(refreshTokens).deleteByUser(owner);
     }
 
     @Test
