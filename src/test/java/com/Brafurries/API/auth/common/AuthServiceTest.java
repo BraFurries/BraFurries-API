@@ -140,7 +140,6 @@ class AuthServiceTest {
 
     @Test
     void registerCommonCreatesPendingEmailVerificationTokenAndSendsEmail() {
-        when(userTokenRepository.findByTypeAndUsedAtIsNullAndRevokedAtIsNullAndExpiresAtBefore(any(), any())).thenReturn(List.of());
         when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.empty());
         when(passwordEncoder.encode("secret")).thenReturn("hash");
         when(tokenService.generateToken(48)).thenReturn("verification-token");
@@ -188,7 +187,6 @@ class AuthServiceTest {
 
     @Test
     void registerCommonReturnsServiceUnavailableWhenVerificationEmailCannotBeSent() {
-        when(userTokenRepository.findByTypeAndUsedAtIsNullAndRevokedAtIsNullAndExpiresAtBefore(any(), any())).thenReturn(List.of());
         when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.empty());
         when(passwordEncoder.encode("secret")).thenReturn("hash");
         when(tokenService.generateToken(48)).thenReturn("verification-token");
