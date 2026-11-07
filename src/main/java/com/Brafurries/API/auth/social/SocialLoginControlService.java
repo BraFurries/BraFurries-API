@@ -147,8 +147,13 @@ public class SocialLoginControlService {
     }
 
     private User requireLockedActor(Authentication authentication, String password) {
-        User found = requireActor(authentication);
-        User actor = users.findByIdForUpdate(found.getId())
+        if (authentication == null || !authentication.isAuthenticated()
+            || authentication.getName() == null || authentication.getName().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão inválida");
+        }
+        // Lock before reading auth_version or modifying any provider identity.
+        User actor = users.findByEmailForUpdate(
+                authentication.getName().trim().toLowerCase(Locale.ROOT))
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão inválida"));
         if (actor.getMergedIntoUser() != null || actor.getPasswordHash() == null
             || actor.getPasswordHash().isBlank() || password == null
