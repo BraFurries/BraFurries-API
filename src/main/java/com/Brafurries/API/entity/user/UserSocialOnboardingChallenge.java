@@ -21,7 +21,7 @@ public class UserSocialOnboardingChallenge {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "token_hash", length = 64, nullable = false, unique = true)
+    @Column(name = "token_hash", length = 64, nullable = false, unique = true, columnDefinition = "CHAR(64)")
     private String tokenHash;
 
     @Column(name = "provider", length = 16, nullable = false)
