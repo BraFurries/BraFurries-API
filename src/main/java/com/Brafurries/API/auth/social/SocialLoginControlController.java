@@ -26,7 +26,6 @@ public class SocialLoginControlController {
     }
 
     public record PasswordConfirmation(@NotBlank String password) {}
-    public record GoogleEnableRequest(@NotBlank String password, @NotBlank String idToken) {}
     public record GoogleEnableOAuthRequest(@NotBlank String password, @NotBlank String ticket) {}
     public record DiscordEnableRequest(@NotBlank String password, @NotBlank String ticket) {}
 
@@ -53,13 +52,6 @@ public class SocialLoginControlController {
         Authentication authentication, @Valid @RequestBody GoogleEnableOAuthRequest request
     ) {
         return controls.enableGoogleOAuth(authentication, request.ticket(), request.password());
-    }
-
-    @PostMapping("/google/enable")
-    public SocialLoginControlService.ChangeResult enableGoogle(
-        Authentication auth, @Valid @RequestBody GoogleEnableRequest request
-    ) {
-        return controls.enableGoogle(auth, request.idToken(), request.password());
     }
 
     @PostMapping("/discord/enable")
