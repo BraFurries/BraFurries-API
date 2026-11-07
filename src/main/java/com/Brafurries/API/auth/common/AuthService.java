@@ -382,7 +382,7 @@ public class AuthService {
                 "Para ativar sua conta, confirme o e-mail pelo link abaixo:\n" +
                 confirmationLink + "\n\n" +
                 "Este link e valido por " + emailVerificationExpirationHours + " horas. " +
-                "Cadastros nao confirmados dentro desse prazo sao removidos automaticamente.\n\n" +
+                "Se o link expirar, solicite um novo envio usando sua senha BraFurries.\n\n" +
                 "Se nao foi voce quem solicitou, ignore este e-mail.\n\n" +
                 "Atenciosamente,\n" +
                 "Equipe BraFurries"
@@ -427,37 +427,11 @@ public class AuthService {
     @Transactional
     public void cleanupExpiredPendingEmailRegistrations() {
         Instant now = Instant.now();
-        List<UserToken> expiredTokens = userTokenRepository
-            .findByTypeAndUsedAtIsNullAndRevokedAtIsNullAndExpiresAtBefore(
-                UserTokenType.EMAIL_VERIFICATION,
-                now
-            );
-
-        for (UserToken expiredToken : expiredTokens) {
-            User user = expiredToken.getUser();
-            if (user.getMergedIntoUser() != null) {
-                // Retain immutable absorbed users and historical attribution.
-                userTokenRepository.delete(expiredToken);
-                continue;
-            }
-            // The user may exist because Coddy has recorded years of Discord
-            // membership or historical activity. Never delete a Discord
-            // identity and its operational rows because site onboarding lapsed.
-            // For now retain ALL incomplete OAuth identities, including Google
-            // subjects; a future cleanup can be scoped to proven empty shells.
-            if (user.getId() != null && (userDiscordRepository.existsByUser(user)
-                || socialIdentitiesRepository.existsByUser(user))) {
-                // Keep the expired pending challenge as a durable negative
-                // authorization marker. Removing it would silently authorize
-                // a provider-backed account with an unverified local e-mail.
-                // The user can reissue a new code with local credentials.
-                continue;
-            }
-            userTokenRepository.deleteByUser(user);
-            userRefreshTokenRepository.deleteByUser(user);
-            userRepository.delete(user);
-        }
-
+        // Historical ownership cannot be inferred from expired sign-up tokens.
+        // Keep all unconfirmed e-mail tokens (including expired ones) as durable
+        // negative authorization markers; never delete a User or Community
+        // history as a side effect of e-mail verification timeout.
+        // Authenticated password owners may reissue a confirmation explicitly.
         userTokenRepository.deleteByTypeAndExpiresAtBefore(UserTokenType.PASSWORD_RESET, now);
         userTokenRepository.deleteByUsedAtIsNotNullAndExpiresAtBefore(now);
         userTokenRepository.deleteByRevokedAtIsNotNullAndExpiresAtBefore(now);
