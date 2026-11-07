@@ -11,14 +11,14 @@ import lombok.NoArgsConstructor;
 public final class AuthSocialDtos {
 
     public record SocialLoginRequest(
-        @Email @NotBlank String email,
+        @Email String email,
         String providerToken,
         String displayName
     ) {
     }
 
     public record SocialRegisterRequest(
-        @Email @NotBlank String email,
+        @Email String email,
         String providerToken,
         String displayName,
         @NotNull @AssertTrue Boolean termsAgreement
