@@ -48,7 +48,8 @@ public class SocialOnboardingChallengeService {
         row.setProvider(provider);
         row.setProviderSubject(subject);
         row.setSuggestedEmail(suggestedEmail);
-        row.setDisplayName(displayName);
+        row.setDisplayName(displayName == null ? null
+            : displayName.substring(0, Math.min(32, displayName.length())));
         row.setExpiresAt(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(TTL_MINUTES));
         challenges.saveAndFlush(row);
         return new Created(token, provider);
