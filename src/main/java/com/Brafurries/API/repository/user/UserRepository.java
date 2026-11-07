@@ -16,6 +16,11 @@ import org.springframework.stereotype.Repository;
 public interface UserRepository extends JpaRepository<User, Integer> {
     Optional<User> findByEmail(String email);
 
+    /** Lock by the JWT principal in one query, avoiding an earlier stale snapshot. */
+    @Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT user FROM User user WHERE user.email = :email")
+    Optional<User> findByEmailForUpdate(@Param("email") String email);
+
     /** Partner representatives: name/username only, never search private emails. */
     @Query("""
         SELECT u FROM User u
