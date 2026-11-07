@@ -131,6 +131,22 @@ public class DiscordSelfServiceLinkService {
         challenges.save(challenge);
     }
 
+    /**
+     * Consumes an independent OAuth proof only for the requesting local user.
+     * Caller verifies that the proved subject is already owned by that same
+     * user; an unowned/cross-owned Discord must not be enabled here.
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public String consumeVerifiedDiscordForLogin(User actor, String ticket) {
+        UserDiscordLinkChallenge challenge = requireLockedChallenge(ticket);
+        requireVerifiedChallenge(actor, challenge);
+        String subject = challenge.getDiscordUserId().toString();
+        challenge.setStatus("CONSUMED");
+        challenge.setConsumedAt(now());
+        challenges.save(challenge);
+        return subject;
+    }
+
     @Transactional(readOnly = true)
     public Preview preview(Authentication authentication, String ticket) {
         User actor = requireAuthenticated(authentication);
