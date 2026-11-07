@@ -182,10 +182,6 @@ public class AuthSocialService {
             throw new IllegalArgumentException("Confirme uma senha de pelo menos oito caracteres");
         }
         String chosenEmail = request.email().trim().toLowerCase(Locale.ROOT);
-        if (userRepository.findByEmail(chosenEmail).isPresent()) {
-            // An e-mail collision never claims another website user.
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "ACCOUNT_RECONCILIATION_REQUIRED");
-        }
         UserSocialOnboardingChallenge proof = onboarding.lockVerified(request.registrationToken());
         if (Boolean.FALSE.equals(verifiedIdentities.loginAllowed(
             proof.getProvider(), proof.getProviderSubject()))) {
@@ -195,14 +191,21 @@ public class AuthSocialService {
             proof.getProviderSubject(), proof.getSuggestedEmail(),
             request.displayName(), null);
         Optional<User> owner = findUserByProviderId(profile);
+        // The optional provider e-mail NEVER claims another website user.
+        // A pre-existing provider-owned legacy account may replace its old,
+        // provider-imported e-mail only through locally verified onboarding.
+        Optional<User> emailOwner = userRepository.findByEmail(chosenEmail);
+        if (emailOwner.isPresent() && (owner.isEmpty()
+            || !emailOwner.get().getId().equals(owner.get().getId()))) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "ACCOUNT_RECONCILIATION_REQUIRED");
+        }
         User user;
         if (owner.isPresent()) {
             // An existing Community-only Discord identity can be activated
             // in-place. Never overwrite an existing web login with OAuth.
             user = userRepository.findByIdForUpdate(owner.get().getId())
                 .orElseThrow(() -> new BadCredentialsException("ACCOUNT_CHANGED"));
-            if (user.getMergedIntoUser() != null || !needsOnboarding(user)
-                || (user.getEmail() != null && !user.getEmail().equalsIgnoreCase(chosenEmail))) {
+            if (user.getMergedIntoUser() != null || !needsOnboarding(user)) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "ACCOUNT_RECONCILIATION_REQUIRED");
             }
         } else {
