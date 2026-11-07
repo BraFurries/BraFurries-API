@@ -38,7 +38,7 @@ public class VerifiedSocialIdentityService {
 
     /** A disabled OAuth login never frees the provider subject or Community identity. */
     @Transactional(readOnly = true)
-    public boolean loginAllowed(String provider, String providerSubject) {
+    public Boolean loginAllowed(String provider, String providerSubject) {
         return identities.findByProviderAndProviderSubject(
                 normalizeProvider(provider), normalizeSubject(providerSubject))
             .map(identity -> Boolean.TRUE.equals(identity.getLoginEnabled()))
