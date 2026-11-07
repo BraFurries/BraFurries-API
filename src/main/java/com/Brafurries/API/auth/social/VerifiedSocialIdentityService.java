@@ -36,6 +36,15 @@ public class VerifiedSocialIdentityService {
             .map(UserSocialIdentity::getUser);
     }
 
+    /** A disabled OAuth login never frees the provider subject or Community identity. */
+    @Transactional(readOnly = true)
+    public boolean loginAllowed(String provider, String providerSubject) {
+        return identities.findByProviderAndProviderSubject(
+                normalizeProvider(provider), normalizeSubject(providerSubject))
+            .map(identity -> Boolean.TRUE.equals(identity.getLoginEnabled()))
+            .orElse(true);
+    }
+
     /**
      * Caller is responsible for OAuth verification and proving site-account
      * ownership. Both identities must be checked before invoking this method.
