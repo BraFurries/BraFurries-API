@@ -2,10 +2,12 @@ package com.Brafurries.API.auth.social;
 
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.entity.user.UserSocialIdentity;
+import com.Brafurries.API.entity.user.UserSocialLoginEvent;
 import com.Brafurries.API.entity.user.UserTokenType;
 import com.Brafurries.API.repository.user.UserRefreshTokenRepository;
 import com.Brafurries.API.repository.user.UserRepository;
 import com.Brafurries.API.repository.user.UserSocialIdentityRepository;
+import com.Brafurries.API.repository.user.UserSocialLoginEventRepository;
 import com.Brafurries.API.repository.user.UserTokenRepository;
 import java.util.List;
 import java.util.Locale;
@@ -30,6 +32,7 @@ public class SocialLoginControlService {
     private static final Logger LOGGER = LoggerFactory.getLogger(SocialLoginControlService.class);
     private final UserRepository users;
     private final UserSocialIdentityRepository identities;
+    private final UserSocialLoginEventRepository events;
     private final UserRefreshTokenRepository refreshTokens;
     private final UserTokenRepository userTokens;
     private final PasswordEncoder passwords;
@@ -39,6 +42,7 @@ public class SocialLoginControlService {
     public SocialLoginControlService(
         UserRepository users,
         UserSocialIdentityRepository identities,
+        UserSocialLoginEventRepository events,
         UserRefreshTokenRepository refreshTokens,
         UserTokenRepository userTokens,
         PasswordEncoder passwords,
@@ -47,6 +51,7 @@ public class SocialLoginControlService {
     ) {
         this.users = users;
         this.identities = identities;
+        this.events = events;
         this.refreshTokens = refreshTokens;
         this.userTokens = userTokens;
         this.passwords = passwords;
@@ -75,9 +80,7 @@ public class SocialLoginControlService {
         if (!Boolean.TRUE.equals(identity.getLoginEnabled())) {
             return new ChangeResult("ALREADY_DISABLED");
         }
-        identity.setLoginEnabled(false);
-        identities.save(identity);
-        revokeSessions(actor);
+        recordChange(actor, identity, false);
         auditAfterCommit("DISABLED", actor, identity);
         return new ChangeResult("RELOGIN_REQUIRED");
     }
@@ -106,9 +109,7 @@ public class SocialLoginControlService {
         if (Boolean.TRUE.equals(identity.getLoginEnabled())) {
             return new ChangeResult("ALREADY_ENABLED");
         }
-        identity.setLoginEnabled(true);
-        identities.save(identity);
-        revokeSessions(actor);
+        recordChange(actor, identity, true);
         auditAfterCommit("ENABLED", actor, identity);
         return new ChangeResult("RELOGIN_REQUIRED");
     }
@@ -143,11 +144,31 @@ public class SocialLoginControlService {
             throw new BadCredentialsException("Confirme sua senha BraFurries para alterar o método de login");
         }
         if (actor.getEmail() == null || actor.getEmail().isBlank()
+            || actor.getEmailVerifiedAt() == null
             || userTokens.existsByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(
                 actor, UserTokenType.EMAIL_VERIFICATION)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "LOCAL_EMAIL_CONFIRMATION_REQUIRED");
         }
         return actor;
+    }
+
+    private void recordChange(User actor, UserSocialIdentity identity, boolean enabled) {
+        Long priorVersion = actor.getAuthVersion();
+        boolean previousState = Boolean.TRUE.equals(identity.getLoginEnabled());
+        identity.setLoginEnabled(enabled);
+        identities.save(identity);
+        revokeSessions(actor);
+
+        UserSocialLoginEvent event = new UserSocialLoginEvent();
+        event.setUser(actor);
+        event.setIdentity(identity);
+        event.setProvider(identity.getProvider());
+        event.setPreviousLoginEnabled(previousState);
+        event.setNextLoginEnabled(enabled);
+        event.setPreviousAuthVersion(priorVersion);
+        event.setNextAuthVersion(actor.getAuthVersion());
+        // The event and account mutation must commit or roll back together.
+        events.save(event);
     }
 
     private void revokeSessions(User actor) {
