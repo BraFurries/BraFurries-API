@@ -1,6 +1,8 @@
 package com.Brafurries.API.auth.social;
 
 import com.Brafurries.API.auth.common.AccessTokenService;
+import com.Brafurries.API.auth.common.AuthService;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import com.Brafurries.API.auth.common.TokenService;
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.repository.api.ApiRolePermissionRepository;
@@ -42,10 +44,14 @@ class GoogleSelfServiceLinkServiceTest {
     @Mock UserTokenRepository userTokens;
     @Mock DiscordSelfServiceLinkService discordLinks;
     @Mock VerifiedSocialIdentityService identities;
+    @Mock SocialOnboardingChallengeService onboarding;
+    @Mock AuthService localAuth;
+    @Mock PasswordEncoder passwords;
 
     private AuthSocialService service() {
         return new AuthSocialService(users, refreshTokens, tokens, accessTokens,
-            roles, permissions, discord, userTokens, discordLinks, identities);
+            roles, permissions, discord, userTokens, discordLinks, identities,
+            onboarding, localAuth, passwords);
     }
 
     private User siteUser(int id, String email) {
