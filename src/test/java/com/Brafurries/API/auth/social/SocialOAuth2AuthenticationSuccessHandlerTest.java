@@ -5,6 +5,9 @@ import java.util.List;
 import com.Brafurries.API.auth.common.dto.AuthDtos.LoginResponse;
 import com.Brafurries.API.auth.common.dto.AuthDtos.UserResponse;
 import com.Brafurries.API.auth.social.AuthSocialService.ExistingUserLogin;
+import com.Brafurries.API.auth.social.AuthSocialService.RegistrationRequired;
+import com.Brafurries.API.auth.social.AuthSocialService.PendingSocialRegistration;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -49,6 +52,28 @@ class SocialOAuth2AuthenticationSuccessHandlerTest {
         assertEquals(302, response.getStatus());
         assertTrue(response.getRedirectedUrl().startsWith("https://brafurries.com.br/social-login?error="));
         assertTrue(response.getRedirectedUrl().contains("Falha%20inesperada%20ao%20finalizar%20login%20social"));
+    }
+
+    @Test
+    void oauthSignupRedirectNeverPublishesSuggestedProviderEmail() throws Exception {
+        OAuth2AuthenticationToken auth = authentication();
+        PendingSocialRegistration challenge = new PendingSocialRegistration(
+            "opaque-registration-ticket", "discord", "123456789",
+            "private-provider@example.com", true, "Dragon", null,
+            Instant.now().plusSeconds(600));
+        when(authSocialService.loginOAuth2(auth)).thenReturn(new RegistrationRequired(challenge));
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService)
+            .onAuthenticationSuccess(new MockHttpServletRequest(), response, auth);
+
+        String url = response.getRedirectedUrl();
+        assertTrue(url.startsWith("https://brafurries.com.br/social-login#"));
+        assertTrue(url.contains("registration_token=opaque-registration-ticket"));
+        assertTrue(!url.contains("private-provider@example.com"));
+        assertTrue(!url.contains("email="));
+        assertTrue(!url.contains("display_name="));
+        assertTrue(!url.contains("access_token="));
     }
 
     @Test
