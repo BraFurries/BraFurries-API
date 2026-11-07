@@ -16,13 +16,18 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/user/me/social-logins")
 public class SocialLoginControlController {
     private final SocialLoginControlService controls;
+    private final SocialLoginOAuthProofService oauthProofs;
 
-    public SocialLoginControlController(SocialLoginControlService controls) {
+    public SocialLoginControlController(
+        SocialLoginControlService controls, SocialLoginOAuthProofService oauthProofs
+    ) {
         this.controls = controls;
+        this.oauthProofs = oauthProofs;
     }
 
     public record PasswordConfirmation(@NotBlank String password) {}
     public record GoogleEnableRequest(@NotBlank String password, @NotBlank String idToken) {}
+    public record GoogleEnableOAuthRequest(@NotBlank String password, @NotBlank String ticket) {}
     public record DiscordEnableRequest(@NotBlank String password, @NotBlank String ticket) {}
 
     @GetMapping
@@ -36,6 +41,18 @@ public class SocialLoginControlController {
         @Valid @RequestBody PasswordConfirmation request
     ) {
         return controls.disable(auth, identityId, request.password());
+    }
+
+    @PostMapping("/google/start")
+    public SocialLoginOAuthProofService.Start beginGoogle(Authentication authentication) {
+        return oauthProofs.beginGoogle(authentication);
+    }
+
+    @PostMapping("/google/enable-oauth")
+    public SocialLoginControlService.ChangeResult enableGoogleWithOAuth(
+        Authentication authentication, @Valid @RequestBody GoogleEnableOAuthRequest request
+    ) {
+        return controls.enableGoogleOAuth(authentication, request.ticket(), request.password());
     }
 
     @PostMapping("/google/enable")
