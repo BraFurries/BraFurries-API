@@ -14,6 +14,7 @@ import com.Brafurries.API.auth.common.dto.AuthDtos.ClientTokenRequest;
 import com.Brafurries.API.auth.common.dto.AuthDtos.ClientTokenResponse;
 import com.Brafurries.API.auth.common.dto.AuthDtos.ConfirmEmailRequest;
 import com.Brafurries.API.auth.common.dto.AuthDtos.ConfirmEmailResponse;
+import com.Brafurries.API.auth.common.dto.AuthDtos.ResendEmailConfirmationRequest;
 import com.Brafurries.API.auth.common.dto.AuthDtos.ForgotPasswordRequest;
 import com.Brafurries.API.auth.common.dto.AuthDtos.ForgotPasswordResponse;
 import com.Brafurries.API.auth.common.dto.AuthDtos.LoginRequest;
