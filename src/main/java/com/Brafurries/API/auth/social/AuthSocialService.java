@@ -460,11 +460,6 @@ public class AuthSocialService {
                 user, profile.provider(), profile.providerUserId(), profile.email()));
     }
 
-    /** Fresh Google proof for re-enabling an existing subject, never matching e-mail. */
-    public String verifiedGoogleSubject(String idToken) {
-        return validateGoogleToken(idToken, null, null).providerUserId();
-    }
-
     private ProviderProfile validateGoogleToken(String providerToken, String requestedEmail, String requestedDisplayName) {
         String token = requireProviderToken(providerToken);
         GoogleTokenInfoResponse response;
