@@ -25,9 +25,14 @@ public final class AuthSocialDtos {
     ) {
     }
 
+    public record SocialRegistrationPreviewRequest(@NotBlank String registrationToken) {}
+
     public record CompleteSocialRegisterRequest(
         @NotBlank String registrationToken,
         @NotBlank @Size(max = 32) String displayName,
+        @Email @NotBlank String email,
+        @NotBlank String password,
+        @NotBlank String passwordConfirmation,
         @NotNull @AssertTrue Boolean termsAgreement
     ) {
     }
