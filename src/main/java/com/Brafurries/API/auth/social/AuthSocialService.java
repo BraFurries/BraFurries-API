@@ -1,6 +1,7 @@
 package com.Brafurries.API.auth.social;
 
 import com.Brafurries.API.auth.common.AccessTokenService;
+import com.Brafurries.API.auth.common.AuthService;
 import com.Brafurries.API.auth.common.TokenService;
 import com.Brafurries.API.auth.common.dto.AuthDtos.LoginResponse;
 import com.Brafurries.API.auth.common.dto.AuthDtos.RegisterResponse;
@@ -12,6 +13,7 @@ import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.entity.user.UserDiscord;
 import com.Brafurries.API.entity.user.UserRefreshToken;
 import com.Brafurries.API.entity.user.UserTokenType;
+import com.Brafurries.API.entity.user.UserSocialOnboardingChallenge;
 import com.Brafurries.API.repository.api.ApiRolePermissionRepository;
 import com.Brafurries.API.repository.api.ApiUserRoleRepository;
 import com.Brafurries.API.repository.user.UserDiscordRepository;
@@ -27,9 +29,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.core.Authentication;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -51,7 +53,9 @@ public class AuthSocialService {
     private final UserTokenRepository userTokenRepository;
     private final DiscordSelfServiceLinkService accountLinks;
     private final VerifiedSocialIdentityService verifiedIdentities;
-    private final Map<String, PendingSocialRegistration> pendingRegistrations = new ConcurrentHashMap<>();
+    private final SocialOnboardingChallengeService onboarding;
+    private final AuthService localAuth;
+    private final PasswordEncoder passwordEncoder;
 
     @Value("${GOOGLE_CLIENT_ID:}")
     private String googleClientId;
@@ -68,7 +72,10 @@ public class AuthSocialService {
         UserDiscordRepository userDiscordRepository,
         UserTokenRepository userTokenRepository,
         DiscordSelfServiceLinkService accountLinks,
-        VerifiedSocialIdentityService verifiedIdentities
+        VerifiedSocialIdentityService verifiedIdentities,
+        SocialOnboardingChallengeService onboarding,
+        AuthService localAuth,
+        PasswordEncoder passwordEncoder
     ) {
         this.userRepository = userRepository;
         this.userRefreshTokenRepository = userRefreshTokenRepository;
@@ -80,6 +87,9 @@ public class AuthSocialService {
         this.userTokenRepository = userTokenRepository;
         this.accountLinks = accountLinks;
         this.verifiedIdentities = verifiedIdentities;
+        this.onboarding = onboarding;
+        this.localAuth = localAuth;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @Transactional
@@ -98,14 +108,14 @@ public class AuthSocialService {
     public RegisterResponse registerGoogle(SocialRegisterRequest request) {
         validateTermsAgreement(request.termsAgreement());
         ProviderProfile profile = validateGoogleToken(request.providerToken(), request.email(), request.displayName());
-        return registerSocial(profile);
+        throw new BadCredentialsException("SOCIAL_ONBOARDING_REQUIRED");
     }
 
     @Transactional
     public RegisterResponse registerDiscord(SocialRegisterRequest request) {
         validateTermsAgreement(request.termsAgreement());
         ProviderProfile profile = validateDiscordToken(request.providerToken(), request.email(), request.displayName());
-        return registerSocial(profile);
+        throw new BadCredentialsException("SOCIAL_ONBOARDING_REQUIRED");
     }
 
     /**
@@ -150,29 +160,72 @@ public class AuthSocialService {
 
         Optional<User> existingUser = findExistingSocialUser(profile);
         if (existingUser.isPresent()) {
-            User user = updateExistingSocialUser(existingUser.get(), profile);
+            User user = existingUser.get();
+            if (user.getMergedIntoUser() != null) {
+                throw new BadCredentialsException("ACCOUNT_CONSOLIDATED");
+            }
+            if (needsOnboarding(user)) {
+                return new RegistrationRequired(createPendingRegistration(profile));
+            }
+            updateExistingSocialUser(user, profile);
             return new ExistingUserLogin(issueLoginResponse(user));
         }
 
         return new RegistrationRequired(createPendingRegistration(profile));
     }
 
+    @Transactional(readOnly = true)
+    public SocialOnboardingChallengeService.Preview previewSocialRegistration(String token) {
+        return onboarding.preview(token);
+    }
+
     @Transactional
-    public LoginResponse completeSocialRegistration(CompleteSocialRegisterRequest request) {
+    public RegisterResponse completeSocialRegistration(CompleteSocialRegisterRequest request) {
         validateTermsAgreement(request.termsAgreement());
-
-        PendingSocialRegistration pending = consumePendingRegistration(request.registrationToken());
-        ProviderProfile profile = pending.toProviderProfile(request.displayName());
-        Optional<User> existingUser = findExistingSocialUser(profile);
-        if (existingUser.isPresent()) {
-            User user = updateExistingSocialUser(existingUser.get(), profile);
-            return issueLoginResponse(user);
+        if (!request.password().equals(request.passwordConfirmation())
+            || request.password().length() < 8) {
+            throw new IllegalArgumentException("Confirme uma senha de pelo menos oito caracteres");
         }
-
-        User user = createSocialUser(pending.email(), request.displayName());
+        String chosenEmail = request.email().trim().toLowerCase(Locale.ROOT);
+        if (userRepository.findByEmail(chosenEmail).isPresent()) {
+            // An e-mail collision never claims another website user.
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "ACCOUNT_RECONCILIATION_REQUIRED");
+        }
+        UserSocialOnboardingChallenge proof = onboarding.lockVerified(request.registrationToken());
+        ProviderProfile profile = new ProviderProfile(proof.getProvider(),
+            proof.getProviderSubject(), proof.getSuggestedEmail(),
+            request.displayName(), null);
+        Optional<User> owner = findUserByProviderId(profile);
+        User user;
+        if (owner.isPresent()) {
+            // An existing Community-only Discord identity can be activated
+            // in-place. Never overwrite an existing web login with OAuth.
+            user = userRepository.findByIdForUpdate(owner.get().getId())
+                .orElseThrow(() -> new BadCredentialsException("ACCOUNT_CHANGED"));
+            if (user.getMergedIntoUser() != null || !needsOnboarding(user)
+                || (user.getEmail() != null && !user.getEmail().equalsIgnoreCase(chosenEmail))) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "ACCOUNT_RECONCILIATION_REQUIRED");
+            }
+        } else {
+            user = new User();
+        }
+        user.setEmail(chosenEmail);
+        user.setDisplayName(normalizeDisplayName(request.displayName()));
+        user.setPasswordHash(passwordEncoder.encode(request.password()));
+        user = userRepository.saveAndFlush(user);
         linkProviderAccount(user, profile);
-        verifiedIdentities.bindProvenSubject(user, profile.provider(), profile.providerUserId(), profile.email());
-        return issueLoginResponse(user);
+        verifiedIdentities.bindProvenSubject(user, proof.getProvider(),
+            proof.getProviderSubject(), proof.getSuggestedEmail());
+        localAuth.requireLocalEmailConfirmation(user);
+        onboarding.consume(proof);
+        // Full login only after the chosen *local* e-mail is confirmed.
+        return new RegisterResponse(user.getId().longValue(), chosenEmail,
+            "Cadastro recebido. Confirme o e-mail escolhido antes de entrar.");
+    }
+
+    private boolean needsOnboarding(User user) {
+        return user.getEmail() == null || user.getEmail().isBlank()
+            || user.getPasswordHash() == null || user.getPasswordHash().isBlank();
     }
 
     private RegisterResponse registerSocial(ProviderProfile profile) {
@@ -230,11 +283,6 @@ public class AuthSocialService {
             throw new BadCredentialsException("ACCOUNT_CONSOLIDATED");
         }
         boolean changed = false;
-        if ((user.getEmail() == null || user.getEmail().isBlank()) && profile.email() != null && !profile.email().isBlank()) {
-            user.setEmail(profile.email());
-            changed = true;
-        }
-
         if ((user.getDisplayName() == null || user.getDisplayName().isBlank())
                 && profile.displayName() != null && !profile.displayName().isBlank()) {
             user.setDisplayName(normalizeDisplayName(profile.displayName()));
@@ -251,49 +299,11 @@ public class AuthSocialService {
     }
 
     private Optional<User> findExistingSocialUser(ProviderProfile profile) {
-        // Provider subject is the immutable authentication key; e-mail is
-        // profile metadata and must never justify silently joining two users.
-        Optional<User> byProviderId = findUserByProviderId(profile);
-        Optional<User> byEmail = userRepository.findByEmail(profile.email());
-
-        if ("google".equals(profile.provider())) {
-            if (byProviderId.isPresent()) {
-                if (byEmail.isPresent()
-                    && !byEmail.get().getId().equals(byProviderId.get().getId())) {
-                    throw new BadCredentialsException("ACCOUNT_RECONCILIATION_REQUIRED");
-                }
-                return byProviderId;
-            }
-            // Existing Google users created before immutable subjects were
-            // recorded need authenticated recovery, not e-mail-only claiming.
-            // The new Google-link endpoint will require an existing site
-            // session and a separately verified Google ID token.
-            if (byEmail.isPresent()) throw new BadCredentialsException("ACCOUNT_LINK_REQUIRED");
-            return Optional.empty();
+        // Provider subject, not provider e-mail, is the only OAuth identity.
+        if (!verifiedIdentities.loginAllowed(profile.provider(), profile.providerUserId())) {
+            throw new BadCredentialsException("PROVIDER_LOGIN_DISABLED");
         }
-
-        if ("discord".equals(profile.provider())) {
-            if (byProviderId.isEmpty()) {
-                if (byEmail.isPresent()) throw new BadCredentialsException("ACCOUNT_LINK_REQUIRED");
-                return Optional.empty();
-            }
-
-            Optional<User> recovered = accountLinks.recoveredLoginFor(byProviderId.get());
-            if (recovered.isPresent()) {
-                if (byEmail.isPresent() && !byEmail.get().getId().equals(recovered.get().getId())
-                    && !byEmail.get().getId().equals(byProviderId.get().getId())) {
-                    throw new BadCredentialsException("ACCOUNT_RECONCILIATION_REQUIRED");
-                }
-                return recovered;
-            }
-
-            if (byEmail.isPresent() && !byEmail.get().getId().equals(byProviderId.get().getId())) {
-                throw new BadCredentialsException("ACCOUNT_LINK_REQUIRED");
-            }
-            return byProviderId;
-        }
-
-        throw new BadCredentialsException("Unsupported provider");
+        return findUserByProviderId(profile);
     }
 
     private Optional<User> findUserByProviderId(ProviderProfile profile) {
@@ -316,11 +326,7 @@ public class AuthSocialService {
     }
 
     private User createSocialUser(String email, String displayName) {
-        User user = new User();
-        user.setEmail(email.trim().toLowerCase(Locale.ROOT));
-        user.setDisplayName(normalizeDisplayName(displayName));
-        user.setPasswordHash(null);
-        return userRepository.save(user);
+        throw new BadCredentialsException("SOCIAL_ONBOARDING_REQUIRED");
     }
 
     private void activateVerifiedProviderAccount(User user) {
@@ -334,38 +340,11 @@ public class AuthSocialService {
     }
 
     private PendingSocialRegistration createPendingRegistration(ProviderProfile profile) {
-        cleanupExpiredPendingRegistrations();
-        String token = tokenService.generateToken(32);
-        PendingSocialRegistration pending = new PendingSocialRegistration(
-            token,
-            profile.provider(),
-            profile.providerUserId(),
-            profile.email(),
-            true,
-            profile.displayName(),
-            profile.avatarUrl(),
-            Instant.now().plus(15, ChronoUnit.MINUTES)
-        );
-        pendingRegistrations.put(token, pending);
-        return pending;
-    }
-
-    private PendingSocialRegistration consumePendingRegistration(String registrationToken) {
-        if (registrationToken == null || registrationToken.isBlank()) {
-            throw new BadCredentialsException("Token de cadastro social obrigatorio");
-        }
-
-        PendingSocialRegistration pending = pendingRegistrations.remove(registrationToken.trim());
-        if (pending == null || pending.expiresAt().isBefore(Instant.now())) {
-            throw new BadCredentialsException("Token de cadastro social invalido ou expirado");
-        }
-
-        return pending;
-    }
-
-    private void cleanupExpiredPendingRegistrations() {
-        Instant now = Instant.now();
-        pendingRegistrations.entrySet().removeIf(entry -> entry.getValue().expiresAt().isBefore(now));
+        var challenge = onboarding.create(profile.provider(), profile.providerUserId(),
+            profile.email(), profile.displayName());
+        return new PendingSocialRegistration(challenge.token(), profile.provider(),
+            profile.providerUserId(), profile.email(), profile.email() != null,
+            profile.displayName(), profile.avatarUrl(), Instant.now().plus(15, ChronoUnit.MINUTES));
     }
 
     private LoginResponse issueLoginResponse(User user) {
@@ -422,15 +401,12 @@ public class AuthSocialService {
     }
 
     private ProviderProfile googleProfile(Map<String, Object> attributes) {
-        String email = requireVerifiedEmail(
-            attributeAsString(attributes, "email"),
-            attributeAsBoolean(attributes, "email_verified"),
-            "Google"
-        );
+        String email = suggestedEmail(attributeAsString(attributes, "email"),
+            attributeAsBoolean(attributes, "email_verified"));
         String displayName = firstNonBlank(
             attributeAsString(attributes, "name"),
             attributeAsString(attributes, "given_name"),
-            email.substring(0, email.indexOf('@'))
+            "Usuário"
         );
 
         return new ProviderProfile(
@@ -443,15 +419,12 @@ public class AuthSocialService {
     }
 
     private ProviderProfile discordProfile(Map<String, Object> attributes) {
-        String email = requireVerifiedEmail(
-            attributeAsString(attributes, "email"),
-            attributeAsBoolean(attributes, "verified"),
-            "Discord"
-        );
+        String email = suggestedEmail(attributeAsString(attributes, "email"),
+            attributeAsBoolean(attributes, "verified"));
         String displayName = firstNonBlank(
             attributeAsString(attributes, "global_name"),
             attributeAsString(attributes, "username"),
-            email.substring(0, email.indexOf('@'))
+            "Usuário"
         );
 
         return new ProviderProfile(
@@ -463,10 +436,9 @@ public class AuthSocialService {
         );
     }
 
-    private String requireVerifiedEmail(String email, boolean verified, String provider) {
-        if (email == null || email.isBlank() || !verified) {
-            throw new BadCredentialsException("Conta " + provider + " sem e-mail verificado");
-        }
+    private String suggestedEmail(String email, boolean verified) {
+        if (!verified || email == null || email.isBlank() || email.length() > 255
+            || !email.contains("@")) return null;
         return email.trim().toLowerCase(Locale.ROOT);
     }
 
@@ -538,15 +510,16 @@ public class AuthSocialService {
             throw new BadCredentialsException("Token Google invalido", ex);
         }
 
-        if (response == null || response.email() == null || !Boolean.parseBoolean(response.emailVerified())) {
+        if (response == null || response.subject() == null || response.subject().isBlank()) {
             throw new BadCredentialsException("Token Google invalido");
         }
 
-        if (requestedEmail != null && !response.email().equalsIgnoreCase(requestedEmail)) {
+        if (requestedEmail != null && response.email() != null
+            && !response.email().equalsIgnoreCase(requestedEmail)) {
             throw new BadCredentialsException("E-mail nao confere com o token Google");
         }
         if (response.subject() == null || response.subject().isBlank()
-            || response.subject().length() > 128 || !response.email().contains("@")) {
+            || response.subject().length() > 128) {
             throw new BadCredentialsException("Identidade Google incompleta");
         }
 
@@ -554,7 +527,8 @@ public class AuthSocialService {
             throw new BadCredentialsException("Token Google emitido para outro client_id");
         }
 
-        String normalizedEmail = response.email().trim().toLowerCase(Locale.ROOT);
+        String normalizedEmail = suggestedEmail(response.email(),
+            Boolean.parseBoolean(response.emailVerified()));
         String displayName = firstNonBlank(
             response.name(),
             response.givenName(),
@@ -577,15 +551,17 @@ public class AuthSocialService {
             throw new BadCredentialsException("Token Discord invalido", ex);
         }
 
-        if (response == null || response.email() == null || !response.verified()) {
-            throw new BadCredentialsException("Conta Discord sem e-mail verificado");
+        if (response == null || response.id() == null || response.id().isBlank()) {
+            throw new BadCredentialsException("Token Discord invalido");
         }
 
-        if (!response.email().equalsIgnoreCase(requestedEmail)) {
+        if (requestedEmail != null && response.email() != null
+            && !response.email().equalsIgnoreCase(requestedEmail)) {
             throw new BadCredentialsException("E-mail nao confere com o token Discord");
         }
 
-        String normalizedEmail = response.email().trim().toLowerCase(Locale.ROOT);
+        String normalizedEmail = suggestedEmail(response.email(),
+            response.verified());
         String displayName = firstNonBlank(
             response.globalName(),
             response.username(),
