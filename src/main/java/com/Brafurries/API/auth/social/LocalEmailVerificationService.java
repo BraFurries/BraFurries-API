@@ -49,8 +49,12 @@ public class LocalEmailVerificationService {
 
     @Transactional
     public RequestResult request(Authentication authentication, String chosenEmail, String password) {
-        User found = currentUser(authentication);
-        User user = users.findByIdForUpdate(found.getId())
+        if (authentication == null || !authentication.isAuthenticated()
+            || authentication.getName() == null || authentication.getName().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão inválida");
+        }
+        User user = users.findByEmailForUpdate(
+                authentication.getName().trim().toLowerCase(Locale.ROOT))
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sessão inválida"));
         if (user.getMergedIntoUser() != null || user.getPasswordHash() == null
             || user.getPasswordHash().isBlank() || password == null
