@@ -13,6 +13,7 @@ public interface UserSocialIdentityRepository extends JpaRepository<UserSocialId
     @EntityGraph(attributePaths = "user")
     Optional<UserSocialIdentity> findByProviderAndProviderSubject(String provider, String providerSubject);
 
+    List<UserSocialIdentity> findByUserId(Integer userId);
     List<UserSocialIdentity> findByUserIdAndProvider(Integer userId, String provider);
     boolean existsByUser(User user);
 }
