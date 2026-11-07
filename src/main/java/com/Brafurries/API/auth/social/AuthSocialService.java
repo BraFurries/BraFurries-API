@@ -141,11 +141,6 @@ public class AuthSocialService {
         User canonical = userRepository.findByIdForUpdate(actor.getId())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "Conta alterada"));
 
-        Optional<User> emailOwner = userRepository.findByEmail(verifiedGoogle.email());
-        if (emailOwner.isPresent() && !emailOwner.get().getId().equals(canonical.getId())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "ACCOUNT_RECONCILIATION_REQUIRED");
-        }
-
         verifiedIdentities.bindProvenSubject(canonical, "google",
             verifiedGoogle.providerUserId(), verifiedGoogle.email());
         return "VERIFIED";
@@ -192,6 +187,10 @@ public class AuthSocialService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "ACCOUNT_RECONCILIATION_REQUIRED");
         }
         UserSocialOnboardingChallenge proof = onboarding.lockVerified(request.registrationToken());
+        if (Boolean.FALSE.equals(verifiedIdentities.loginAllowed(
+            proof.getProvider(), proof.getProviderSubject()))) {
+            throw new BadCredentialsException("PROVIDER_LOGIN_DISABLED");
+        }
         ProviderProfile profile = new ProviderProfile(proof.getProvider(),
             proof.getProviderSubject(), proof.getSuggestedEmail(),
             request.displayName(), null);
@@ -241,8 +240,9 @@ public class AuthSocialService {
 
     private LoginResponse socialLogin(ProviderProfile profile) {
         User user = findExistingSocialUser(profile)
-            .map(existingUser -> updateExistingSocialUser(existingUser, profile))
-            .orElseThrow(() -> new BadCredentialsException("Credenciais invalidas"));
+            .orElseThrow(() -> new BadCredentialsException("SOCIAL_ONBOARDING_REQUIRED"));
+        if (needsOnboarding(user)) throw new BadCredentialsException("SOCIAL_ONBOARDING_REQUIRED");
+        updateExistingSocialUser(user, profile);
         return issueLoginResponse(user);
     }
 
@@ -269,7 +269,7 @@ public class AuthSocialService {
             user = userRepository.save(user);
         }
 
-        activateVerifiedProviderAccount(user);
+        // OAuth proof NEVER marks the independently chosen local e-mail verified.
         linkProviderAccount(user, profile);
         if (existing.isEmpty()) {
             verifiedIdentities.bindProvenSubject(user, profile.provider(), profile.providerUserId(), profile.email());
@@ -293,7 +293,7 @@ public class AuthSocialService {
             user = userRepository.save(user);
         }
 
-        activateVerifiedProviderAccount(user);
+        // OAuth proof NEVER marks the independently chosen local e-mail verified.
         linkProviderAccount(user, profile);
         return user;
     }
@@ -327,10 +327,6 @@ public class AuthSocialService {
 
     private User createSocialUser(String email, String displayName) {
         throw new BadCredentialsException("SOCIAL_ONBOARDING_REQUIRED");
-    }
-
-    private void activateVerifiedProviderAccount(User user) {
-        userTokenRepository.deleteByUserAndType(user, UserTokenType.EMAIL_VERIFICATION);
     }
 
     private void validateTermsAgreement(Boolean termsAgreement) {
