@@ -50,8 +50,7 @@ class LocalEmailVerificationServiceTest {
     }
 
     private void passwordVerified() {
-        authenticated();
-        when(users.findByIdForUpdate(9)).thenReturn(Optional.of(legacy));
+        when(users.findByEmailForUpdate("imported@example.com")).thenReturn(Optional.of(legacy));
         when(passwords.matches("correct-password", "hash")).thenReturn(true);
     }
 
@@ -87,8 +86,7 @@ class LocalEmailVerificationServiceTest {
     }
 
     @Test void missingLocalPasswordCannotProveLegacyEmail() {
-        authenticated();
-        when(users.findByIdForUpdate(9)).thenReturn(Optional.of(legacy));
+        when(users.findByEmailForUpdate("imported@example.com")).thenReturn(Optional.of(legacy));
         assertThrows(BadCredentialsException.class, () ->
             service.request(session, "new@example.com", "incorrect"));
         verifyNoInteractions(refreshTokens, auth);
