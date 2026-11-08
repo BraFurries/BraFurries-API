@@ -3,7 +3,9 @@ package com.Brafurries.API.auth.common;
 import com.Brafurries.API.auth.common.dto.AuthDtos.ConfirmEmailRequest;
 import com.Brafurries.API.auth.common.dto.AuthDtos.LoginRequest;
 import com.Brafurries.API.auth.common.dto.AuthDtos.RegisterRequest;
+import com.Brafurries.API.auth.common.dto.AuthDtos.RefreshTokenRequest;
 import com.Brafurries.API.entity.user.User;
+import com.Brafurries.API.entity.user.UserRefreshToken;
 import com.Brafurries.API.entity.user.UserToken;
 import com.Brafurries.API.entity.user.UserTokenType;
 import com.Brafurries.API.repository.api.ApiRolePermissionRepository;
@@ -98,6 +100,67 @@ class AuthServiceTest {
             24
         );
         validator = Validation.buildDefaultValidatorFactory().getValidator();
+    }
+
+    @Test
+    void refreshAcquiresUserLockBeforeAtomicallyConsumingOldCredential() {
+        User account = new User();
+        account.setId(23);
+        account.setEmail("verified@example.com");
+        account.setAuthVersion(7L);
+
+        UserRefreshToken old = new UserRefreshToken();
+        old.setUser(account);
+        old.setToken("old-refresh");
+        old.setExpiresAt(Instant.now().plusSeconds(3600));
+
+        when(userRefreshTokenRepository.findByToken("old-refresh")).thenReturn(Optional.of(old));
+        when(userRepository.findByIdForUpdate(23)).thenReturn(Optional.of(account));
+        when(userRefreshTokenRepository.revokeActiveToken(
+            org.mockito.ArgumentMatchers.eq("old-refresh"), any(Instant.class))).thenReturn(1);
+        when(tokenService.generateToken(64)).thenReturn("new-refresh");
+        when(tokenService.generateAccessToken("verified@example.com", List.of(), List.of(), 7L))
+            .thenReturn("new-access");
+        when(tokenService.accessExpiresAt()).thenReturn(Instant.now().plusSeconds(900));
+        when(tokenService.refreshExpiresAt()).thenReturn(Instant.now().plusSeconds(3600));
+        when(tokenService.accessExpiresInSeconds()).thenReturn(900);
+        when(apiUserRoleRepository.findRoleNamesByUserId(23)).thenReturn(List.of());
+        when(apiRolePermissionRepository.findPermissionNamesByUserId(23)).thenReturn(List.of());
+
+        var response = authService.refreshToken(new RefreshTokenRequest("old-refresh"));
+        assertEquals("new-access", response.accessToken());
+        assertEquals("new-refresh", response.refreshToken());
+        var order = org.mockito.Mockito.inOrder(userRepository, userRefreshTokenRepository);
+        order.verify(userRefreshTokenRepository).findByToken("old-refresh");
+        order.verify(userRepository).findByIdForUpdate(23);
+        order.verify(userRefreshTokenRepository).revokeActiveToken(
+            org.mockito.ArgumentMatchers.eq("old-refresh"), any(Instant.class));
+        verify(userRefreshTokenRepository).save(org.mockito.ArgumentMatchers.argThat(rotated ->
+            rotated.getUser() == account && "new-refresh".equals(rotated.getToken())));
+    }
+
+    @Test
+    void refreshCannotResurrectSessionAfterConcurrentProviderDisableDeletesToken() {
+        User account = new User();
+        account.setId(23);
+        account.setEmail("verified@example.com");
+        account.setAuthVersion(8L);
+        UserRefreshToken revokedBySecurityChange = new UserRefreshToken();
+        revokedBySecurityChange.setUser(account);
+        revokedBySecurityChange.setToken("revoked-refresh");
+
+        when(userRefreshTokenRepository.findByToken("revoked-refresh"))
+            .thenReturn(Optional.of(revokedBySecurityChange));
+        when(userRepository.findByIdForUpdate(23)).thenReturn(Optional.of(account));
+        // Bulk UPDATE no longer finds a live credential because the security
+        // transaction finished first, even though the earlier read saw it.
+        assertThrows(BadCredentialsException.class,
+            () -> authService.refreshToken(new RefreshTokenRequest("revoked-refresh")));
+        verify(userRefreshTokenRepository).revokeActiveToken(
+            org.mockito.ArgumentMatchers.eq("revoked-refresh"), any(Instant.class));
+        verify(userRefreshTokenRepository, never()).save(any(UserRefreshToken.class));
+        verify(tokenService, never()).generateAccessToken(
+            org.mockito.ArgumentMatchers.anyString(), any(), any(), org.mockito.ArgumentMatchers.anyLong());
     }
 
     @Test
