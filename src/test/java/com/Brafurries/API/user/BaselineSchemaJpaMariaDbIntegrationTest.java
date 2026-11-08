@@ -158,8 +158,8 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
         assertEquals(1, jdbc.update(
             "UPDATE user_social_identities SET login_enabled=0 WHERE provider=? AND provider_subject=?",
             "google", "synthetic-lock-proof"));
-        assertEquals(0, socialIdentities.currentLoginEnabledForUpdate(
-            "google", "synthetic-lock-proof").orElseThrow().intValue());
+        assertFalse(socialIdentities.currentLoginEnabledForUpdate(
+            "google", "synthetic-lock-proof").orElseThrow());
     }
 
     @Test
