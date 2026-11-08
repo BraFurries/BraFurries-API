@@ -4,6 +4,8 @@ import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.entity.user.UserDiscord;
 import com.Brafurries.API.entity.user.UserDiscordLinkChallenge;
 import com.Brafurries.API.entity.user.UserSocialIdentity;
+import com.Brafurries.API.entity.user.UserTokenType;
+import java.time.LocalDateTime;
 import com.Brafurries.API.entity.user.UserAccountConsolidation;
 import com.Brafurries.API.repository.user.UserAccountConsolidationRepository;
 import com.Brafurries.API.repository.user.UserDiscordRepository;
@@ -84,8 +86,12 @@ class SparseAccountConsolidationExecutorTest {
         when(identities.findByUserIdAndProvider(10, "discord"))
             .thenReturn(List.of());
 
+        LocalDateTime independentlyVerified = LocalDateTime.of(2026, 11, 7, 12, 0);
+        website.setEmailVerifiedAt(independentlyVerified);
         Integer canonicalId = service.consolidate(website, ticket);
 
+        assertEquals(independentlyVerified, legacy.getEmailVerifiedAt());
+        assertNull(website.getEmailVerifiedAt());
         assertEquals(20, canonicalId);
         verify(ownership).assertOnlyTransferableReferences(10);
         assertEquals("google@example.com", legacy.getEmail());
@@ -182,6 +188,40 @@ class SparseAccountConsolidationExecutorTest {
         verify(refresh).deleteByUser(legacy);
         verify(audit).saveAndFlush(any(UserAccountConsolidation.class));
         verify(identities, never()).save(any());
+    }
+
+    @Test
+    void mergeCannotErasePendingLocalVerificationAndAccidentallyGrantAccess() {
+        mockValidLockedPair();
+        website.setPasswordHash("local-password");
+        when(tokens.existsByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(
+            website, UserTokenType.EMAIL_VERIFICATION)).thenReturn(true);
+
+        var error = assertThrows(ResponseStatusException.class,
+            () -> service.consolidate(website, ticket));
+
+        assertEquals("LOCAL_EMAIL_CONFIRMATION_REQUIRED", error.getReason());
+        assertEquals("google@example.com", website.getEmail());
+        assertNull(legacy.getEmail());
+        verify(users, never()).saveAndFlush(any());
+        verify(refresh, never()).deleteByUser(any());
+        verify(tokens, never()).deleteByUser(any());
+    }
+
+    @Test
+    void mergePreservesAlreadyVerifiedCanonicalEmailWithoutGuessingWebOwnership() {
+        mockValidLockedPair();
+        website.setPasswordHash("local-password");
+        website.setEmail("same@example.com");
+        legacy.setEmail("same@example.com");
+        LocalDateTime proof = LocalDateTime.of(2026, 11, 7, 10, 0);
+        legacy.setEmailVerifiedAt(proof);
+
+        Integer canonicalId = service.consolidate(website, ticket);
+
+        assertEquals(20, canonicalId);
+        assertEquals(proof, legacy.getEmailVerifiedAt());
+        assertNull(website.getEmailVerifiedAt());
     }
 
     @Test
