@@ -85,6 +85,12 @@ public final class AuthDtos {
     }
 
 
+    public record ResendEmailConfirmationRequest(
+        @Email @NotBlank String email,
+        @NotBlank String password
+    ) {
+    }
+
     public record ForgotPasswordRequest(
         @Email @NotBlank String email
     ) {

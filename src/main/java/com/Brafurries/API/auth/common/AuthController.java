@@ -14,6 +14,7 @@ import com.Brafurries.API.auth.common.dto.AuthDtos.ClientTokenRequest;
 import com.Brafurries.API.auth.common.dto.AuthDtos.ClientTokenResponse;
 import com.Brafurries.API.auth.common.dto.AuthDtos.ConfirmEmailRequest;
 import com.Brafurries.API.auth.common.dto.AuthDtos.ConfirmEmailResponse;
+import com.Brafurries.API.auth.common.dto.AuthDtos.ResendEmailConfirmationRequest;
 import com.Brafurries.API.auth.common.dto.AuthDtos.ForgotPasswordRequest;
 import com.Brafurries.API.auth.common.dto.AuthDtos.ForgotPasswordResponse;
 import com.Brafurries.API.auth.common.dto.AuthDtos.LoginRequest;
@@ -54,6 +55,14 @@ public class AuthController {
     @PostMapping("/auth/confirm-email")
     public ConfirmEmailResponse confirmEmail(@Valid @RequestBody ConfirmEmailRequest request) {
         return authService.confirmEmail(request);
+    }
+
+    @Operation(summary = "Reenvia confirmação de e-mail BraFurries com autenticação local e limitação de frequência")
+    @PostMapping("/auth/resend-confirmation")
+    public ConfirmEmailResponse resendConfirmation(
+        @Valid @RequestBody ResendEmailConfirmationRequest request
+    ) {
+        return authService.resendEmailConfirmation(request);
     }
 
     @Operation(summary = "Solicita redefinição de senha")

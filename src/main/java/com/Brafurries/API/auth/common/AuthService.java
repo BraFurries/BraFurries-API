@@ -25,6 +25,8 @@ import com.Brafurries.API.repository.api.ApiRolePermissionRepository;
 import com.Brafurries.API.repository.api.ApiUserRoleRepository;
 import com.Brafurries.API.repository.user.UserRefreshTokenRepository;
 import com.Brafurries.API.repository.user.UserRepository;
+import com.Brafurries.API.repository.user.UserDiscordRepository;
+import com.Brafurries.API.repository.user.UserSocialIdentityRepository;
 import com.Brafurries.API.repository.user.UserTokenRepository;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -46,6 +48,8 @@ import org.springframework.web.server.ResponseStatusException;
 public class AuthService {
 
     private final UserRepository userRepository;
+    private final UserDiscordRepository userDiscordRepository;
+    private final UserSocialIdentityRepository socialIdentitiesRepository;
     private final UserTokenRepository userTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final UserRefreshTokenRepository userRefreshTokenRepository;
@@ -60,6 +64,8 @@ public class AuthService {
 
     public AuthService(
         UserRepository userRepository,
+        UserDiscordRepository userDiscordRepository,
+        UserSocialIdentityRepository socialIdentitiesRepository,
         UserTokenRepository userTokenRepository,
         PasswordEncoder passwordEncoder,
         UserRefreshTokenRepository userRefreshTokenRepository,
@@ -73,6 +79,8 @@ public class AuthService {
         @Value("${app.auth.email-verification-expiration-hours:24}") long emailVerificationExpirationHours
     ) {
         this.userRepository = userRepository;
+        this.userDiscordRepository = userDiscordRepository;
+        this.socialIdentitiesRepository = socialIdentitiesRepository;
         this.userTokenRepository = userTokenRepository;
         this.passwordEncoder = passwordEncoder;
         this.userRefreshTokenRepository = userRefreshTokenRepository;
@@ -101,7 +109,7 @@ public class AuthService {
 
         List<String> roles = apiUserRoleRepository.findRoleNamesByUserId(user.getId());
         List<String> permissions = apiRolePermissionRepository.findPermissionNamesByUserId(user.getId());
-        String accessToken = tokenService.generateAccessToken(user.getEmail(), roles, permissions);
+        String accessToken = tokenService.generateAccessToken(user.getEmail(), roles, permissions, user.getAuthVersion());
 
         String refreshToken = null;
         if (request.rememberMe() == null || request.rememberMe()) {
@@ -169,6 +177,28 @@ public class AuthService {
         );
     }
 
+    /**
+     * Issue the same locally verified e-mail flow for a user who completed
+     * independently verified OAuth onboarding. The caller must already hold
+     * the transaction that creates/activates the site account.
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public void requireLocalEmailConfirmation(User user) {
+        if (user == null || user.getId() == null || user.getEmail() == null
+            || user.getEmail().isBlank() || user.getPasswordHash() == null
+            || user.getPasswordHash().isBlank()) {
+            throw new IllegalArgumentException("Local e-mail and password required");
+        }
+        userTokenRepository.deleteByUserAndType(user, UserTokenType.EMAIL_VERIFICATION);
+        UserToken verification = new UserToken();
+        verification.setUser(user);
+        verification.setType(UserTokenType.EMAIL_VERIFICATION);
+        verification.setToken(tokenService.generateToken(48));
+        verification.setExpiresAt(Instant.now().plus(emailVerificationExpirationHours, ChronoUnit.HOURS));
+        userTokenRepository.save(verification);
+        sendEmailVerificationEmail(user.getEmail(), verification.getToken());
+    }
+
     @Transactional
     public ConfirmEmailResponse confirmEmail(ConfirmEmailRequest request) {
         UserToken verificationToken = userTokenRepository.findByTokenAndType(request.token(), UserTokenType.EMAIL_VERIFICATION)
@@ -181,6 +211,9 @@ public class AuthService {
         }
 
         User user = verificationToken.getUser();
+        // A locally redeemed token is positive proof. Legacy accounts without
+        // this durable marker remain UNKNOWN until they reconfirm their e-mail.
+        user.setEmailVerifiedAt(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
         verificationToken.setUsedAt(Instant.now());
         userTokenRepository.save(verificationToken);
         userTokenRepository.deleteByUserAndType(user, UserTokenType.EMAIL_VERIFICATION);
@@ -189,11 +222,36 @@ public class AuthService {
     }
 
 
+    @Transactional
+    public ConfirmEmailResponse resendEmailConfirmation(
+        com.Brafurries.API.auth.common.dto.AuthDtos.ResendEmailConfirmationRequest request
+    ) {
+        // Do not disclose whether a site e-mail exists.
+        String response = "Se houver um cadastro pendente válido, enviaremos uma nova confirmação.";
+        String email = request.email().trim().toLowerCase(java.util.Locale.ROOT);
+        var found = userRepository.findByEmail(email);
+        if (found.isEmpty()) return new ConfirmEmailResponse(response);
+        User user = userRepository.findByIdForUpdate(found.get().getId()).orElse(found.get());
+        if (user.getMergedIntoUser() != null || user.getPasswordHash() == null
+            || !passwordEncoder.matches(request.password(), user.getPasswordHash())
+            || !isEmailVerificationPending(user)) {
+            return new ConfirmEmailResponse(response);
+        }
+        var outstanding = userTokenRepository
+            .findByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(user, UserTokenType.EMAIL_VERIFICATION);
+        boolean tooSoon = outstanding.stream().anyMatch(token -> token.getCreatedAt() != null
+            && token.getCreatedAt().isAfter(Instant.now().minus(2, ChronoUnit.MINUTES)));
+        if (tooSoon) return new ConfirmEmailResponse(response);
+        userTokenRepository.deleteByUserAndType(user, UserTokenType.EMAIL_VERIFICATION);
+        requireLocalEmailConfirmation(user);
+        return new ConfirmEmailResponse(response);
+    }
+
     public ForgotPasswordResponse forgotPassword(ForgotPasswordRequest request) {
         String normalizedEmail = request.email().trim().toLowerCase();
 
         userRepository.findByEmail(normalizedEmail).ifPresent(user -> {
-            if (isEmailVerificationPending(user)) {
+            if (user.getMergedIntoUser() != null || isEmailVerificationPending(user)) {
                 return;
             }
 
@@ -224,6 +282,7 @@ public class AuthService {
         }
 
         User user = resetToken.getUser();
+        ensureNotMerged(user);
         user.setPasswordHash(passwordEncoder.encode(request.password()));
         userRepository.save(user);
 
@@ -233,30 +292,39 @@ public class AuthService {
         return new ResetPasswordResponse("Senha alterada com sucesso");
     }
 
+    @Transactional
     public RefreshTokenResponse refreshToken(RefreshTokenRequest request) {
-        UserRefreshToken savedToken = userRefreshTokenRepository.findByToken(request.refreshToken())
+        // Look up the opaque credential only to discover its owning account.
+        // All authorization and rotation happen AFTER locking the User row.
+        // The same lock serializes disable/enable of provider logins and
+        // invalidates a refresh racing with a security change.
+        UserRefreshToken candidate = userRefreshTokenRepository.findByToken(request.refreshToken())
+            .orElseThrow(() -> new BadCredentialsException("Refresh token inválido"));
+        User lockedOwner = userRepository.findByIdForUpdate(candidate.getUser().getId())
             .orElseThrow(() -> new BadCredentialsException("Refresh token inválido"));
 
-        if (savedToken.getRevokedAt() != null || savedToken.getExpiresAt().isBefore(Instant.now())) {
+        ensureAccountConfirmed(lockedOwner);
+        Instant now = Instant.now();
+        if (userRefreshTokenRepository.revokeActiveToken(request.refreshToken(), now) != 1) {
+            // The previous refresh was revoked, expired, removed by a concurrent
+            // security change or already consumed. Never recreate that session.
             throw new BadCredentialsException("Refresh token inválido ou expirado");
         }
 
-        ensureAccountConfirmed(savedToken.getUser());
-
-        savedToken.setRevokedAt(Instant.now());
-        userRefreshTokenRepository.save(savedToken);
-
         String newRefreshToken = tokenService.generateToken(64);
-        List<String> roles = apiUserRoleRepository.findRoleNamesByUserId(savedToken.getUser().getId());
-        List<String> permissions = apiRolePermissionRepository.findPermissionNamesByUserId(savedToken.getUser().getId());
-        String newAccessToken = tokenService.generateAccessToken(savedToken.getUser().getEmail(), roles, permissions);
+        List<String> roles = apiUserRoleRepository.findRoleNamesByUserId(lockedOwner.getId());
+        List<String> permissions = apiRolePermissionRepository.findPermissionNamesByUserId(lockedOwner.getId());
+        String newAccessToken = tokenService.generateAccessToken(lockedOwner.getEmail(), roles,
+            permissions, lockedOwner.getAuthVersion());
+
         UserRefreshToken rotatedToken = new UserRefreshToken();
-        rotatedToken.setUser(savedToken.getUser());
+        rotatedToken.setUser(lockedOwner);
         rotatedToken.setToken(newRefreshToken);
         rotatedToken.setExpiresAt(tokenService.refreshExpiresAt());
         userRefreshTokenRepository.save(rotatedToken);
-        
-        accessTokenService.save(newAccessToken, savedToken.getUser().getEmail(), roles, permissions, tokenService.accessExpiresAt());
+
+        accessTokenService.save(newAccessToken, lockedOwner.getEmail(), roles,
+            permissions, tokenService.accessExpiresAt());
 
         return new RefreshTokenResponse(
             newAccessToken,
@@ -266,7 +334,7 @@ public class AuthService {
         );
     }
 
-    public LogoutResponse logout(LogoutRequest request) {
+        public LogoutResponse logout(LogoutRequest request) {
         userRefreshTokenRepository.findByToken(request.refreshToken()).ifPresent(token -> {
             token.setRevokedAt(Instant.now());
             userRefreshTokenRepository.save(token);
@@ -323,7 +391,7 @@ public class AuthService {
                 "Para ativar sua conta, confirme o e-mail pelo link abaixo:\n" +
                 confirmationLink + "\n\n" +
                 "Este link e valido por " + emailVerificationExpirationHours + " horas. " +
-                "Cadastros nao confirmados dentro desse prazo sao removidos automaticamente.\n\n" +
+                "Se o link expirar, solicite um novo envio usando sua senha BraFurries.\n\n" +
                 "Se nao foi voce quem solicitou, ignore este e-mail.\n\n" +
                 "Atenciosamente,\n" +
                 "Equipe BraFurries"
@@ -345,8 +413,15 @@ public class AuthService {
     }
 
     private void ensureAccountConfirmed(User user) {
+        ensureNotMerged(user);
         if (isEmailVerificationPending(user)) {
             throw new BadCredentialsException("Confirme seu e-mail antes de acessar a conta");
+        }
+    }
+
+    private void ensureNotMerged(User user) {
+        if (user.getMergedIntoUser() != null) {
+            throw new BadCredentialsException("ACCOUNT_CONSOLIDATED");
         }
     }
 
@@ -361,19 +436,11 @@ public class AuthService {
     @Transactional
     public void cleanupExpiredPendingEmailRegistrations() {
         Instant now = Instant.now();
-        List<UserToken> expiredTokens = userTokenRepository
-            .findByTypeAndUsedAtIsNullAndRevokedAtIsNullAndExpiresAtBefore(
-                UserTokenType.EMAIL_VERIFICATION,
-                now
-            );
-
-        for (UserToken expiredToken : expiredTokens) {
-            User user = expiredToken.getUser();
-            userTokenRepository.deleteByUser(user);
-            userRefreshTokenRepository.deleteByUser(user);
-            userRepository.delete(user);
-        }
-
+        // Historical ownership cannot be inferred from expired sign-up tokens.
+        // Keep all unconfirmed e-mail tokens (including expired ones) as durable
+        // negative authorization markers; never delete a User or Community
+        // history as a side effect of e-mail verification timeout.
+        // Authenticated password owners may reissue a confirmation explicitly.
         userTokenRepository.deleteByTypeAndExpiresAtBefore(UserTokenType.PASSWORD_RESET, now);
         userTokenRepository.deleteByUsedAtIsNotNullAndExpiresAtBefore(now);
         userTokenRepository.deleteByRevokedAtIsNotNullAndExpiresAtBefore(now);

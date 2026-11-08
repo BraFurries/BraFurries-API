@@ -24,8 +24,22 @@ public class User {
     @Column(nullable = true, unique = true, length = 255)
     private String email;
 
+    // Durable proof of the user's chosen BraFurries e-mail, never inherited from OAuth.
+    @Column(name = "email_verified_at")
+    private LocalDateTime emailVerifiedAt;
+
     @Column(name = "password_hash", nullable = true, length = 255)
     private String passwordHash;
+
+    // Inactive provenance alias after an explicitly authorized consolidation.
+    // A merged account must never retain its own independent login session.
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "merged_into_user_id")
+    private User mergedIntoUser;
+
+    // Reserved for token/session revocation on canonical-account changes.
+    @Column(name = "auth_version", nullable = false)
+    private Long authVersion = 0L;
 
     @Column(name = "first_access", nullable = false)
     private Boolean firstAccess = true;

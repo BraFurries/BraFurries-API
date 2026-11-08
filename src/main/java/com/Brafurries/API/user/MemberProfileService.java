@@ -2,6 +2,7 @@ package com.Brafurries.API.user;
 
 import static com.Brafurries.API.user.dto.MemberProfileDtos.*;
 
+import com.Brafurries.API.auth.social.DiscordSelfServiceLinkService;
 import com.Brafurries.API.entity.community.Community;
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.entity.user.UserCommunityStatus;
@@ -27,6 +28,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class MemberProfileService {
     private final UserRepository userRepository;
+    private final DiscordSelfServiceLinkService selfServiceLinks;
     private final UserBirthdayRepository userBirthdayRepository;
     private final UserDiscordRepository userDiscordRepository;
     private final UserTelegramRepository userTelegramRepository;
@@ -34,12 +36,14 @@ public class MemberProfileService {
 
     public MemberProfileService(
         UserRepository userRepository,
+        DiscordSelfServiceLinkService selfServiceLinks,
         UserBirthdayRepository userBirthdayRepository,
         UserDiscordRepository userDiscordRepository,
         UserTelegramRepository userTelegramRepository,
         UserCommunityStatusRepository userCommunityStatusRepository
     ) {
         this.userRepository = userRepository;
+        this.selfServiceLinks = selfServiceLinks;
         this.userBirthdayRepository = userBirthdayRepository;
         this.userDiscordRepository = userDiscordRepository;
         this.userTelegramRepository = userTelegramRepository;
@@ -49,7 +53,8 @@ public class MemberProfileService {
     @Transactional(readOnly = true)
     public MemberProfileResponse getLoggedUserProfile(String principal) {
         User user = findAuthenticatedUser(principal);
-        List<UserCommunityStatus> memberships = userCommunityStatusRepository.findByUser(user).stream()
+        User historyOwner = selfServiceLinks.legacyProfileFor(user);
+        List<UserCommunityStatus> memberships = userCommunityStatusRepository.findByUser(historyOwner).stream()
             .filter(status -> status.getCommunity().getDiscord() != null)
             .filter(status -> Boolean.TRUE.equals(status.getCommunity().getDiscord().getActive()))
             .toList();
@@ -72,9 +77,9 @@ public class MemberProfileService {
             user.getDisplayName(),
             user.getUsername(),
             user.getProfileImageUrl(),
-            onlyBirthday(user.getId()),
-            discordAccount(user.getId()),
-            telegramAccount(user.getId()),
+            onlyBirthday(historyOwner.getId()),
+            discordAccount(historyOwner.getId()),
+            telegramAccount(historyOwner.getId()),
             membershipsByCommunity.size(),
             firstKnownCommunity(membershipsByCommunity),
             communities

@@ -1,6 +1,7 @@
 package com.Brafurries.API.user;
 
 import static com.Brafurries.API.user.dto.UserCommunityContextDtos.*;
+import com.Brafurries.API.auth.social.DiscordSelfServiceLinkService;
 
 import com.Brafurries.API.entity.community.Community;
 import com.Brafurries.API.entity.user.User;
@@ -28,6 +29,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class UserCommunityContextService {
     private static final String CONTEXT_NOT_FOUND = "Contexto comunitário não encontrado";
     private final UserRepository userRepository;
+    private final DiscordSelfServiceLinkService selfServiceLinks;
     private final UserCommunityStatusRepository userCommunityStatusRepository;
     private final UserLevelRepository userLevelRepository;
     private final UserEconomyRepository userEconomyRepository;
@@ -37,6 +39,7 @@ public class UserCommunityContextService {
 
     public UserCommunityContextService(
         UserRepository userRepository,
+        DiscordSelfServiceLinkService selfServiceLinks,
         UserCommunityStatusRepository userCommunityStatusRepository,
         UserLevelRepository userLevelRepository,
         UserEconomyRepository userEconomyRepository,
@@ -45,6 +48,7 @@ public class UserCommunityContextService {
         UserBanRepository userBanRepository
     ) {
         this.userRepository = userRepository;
+        this.selfServiceLinks = selfServiceLinks;
         this.userCommunityStatusRepository = userCommunityStatusRepository;
         this.userLevelRepository = userLevelRepository;
         this.userEconomyRepository = userEconomyRepository;
@@ -55,7 +59,7 @@ public class UserCommunityContextService {
 
     @Transactional(readOnly = true)
     public MemberCommunityContextResponse getLoggedUserContext(String principal, Integer communityId) {
-        User user = findAuthenticatedUser(principal);
+        User user = selfServiceLinks.legacyProfileFor(findAuthenticatedUser(principal));
         List<UserCommunityStatus> memberships = userCommunityStatusRepository
             .findAllByUserIdAndCommunityIdOrderByMemberSinceAscIdAsc(user.getId(), communityId);
         if (memberships.isEmpty()) {

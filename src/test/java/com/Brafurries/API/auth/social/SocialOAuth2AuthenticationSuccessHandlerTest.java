@@ -5,6 +5,9 @@ import java.util.List;
 import com.Brafurries.API.auth.common.dto.AuthDtos.LoginResponse;
 import com.Brafurries.API.auth.common.dto.AuthDtos.UserResponse;
 import com.Brafurries.API.auth.social.AuthSocialService.ExistingUserLogin;
+import com.Brafurries.API.auth.social.AuthSocialService.RegistrationRequired;
+import com.Brafurries.API.auth.social.AuthSocialService.PendingSocialRegistration;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -25,9 +28,15 @@ class SocialOAuth2AuthenticationSuccessHandlerTest {
     @Mock
     private AuthSocialService authSocialService;
 
+    @Mock
+    private DiscordSelfServiceLinkService discordLinkService;
+
+    @Mock
+    private SocialLoginOAuthProofService googleLoginProofs;
+
     @Test
     void redirectsToFrontendErrorWhenUnexpectedOauthCompletionErrorHappens() throws Exception {
-        SocialOAuth2AuthenticationSuccessHandler handler = new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy());
+        SocialOAuth2AuthenticationSuccessHandler handler = new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService, googleLoginProofs);
         DefaultOAuth2User principal = new DefaultOAuth2User(
             java.util.List.of(),
             Map.of("id", "123456789"),
@@ -49,6 +58,28 @@ class SocialOAuth2AuthenticationSuccessHandlerTest {
     }
 
     @Test
+    void oauthSignupRedirectNeverPublishesSuggestedProviderEmail() throws Exception {
+        OAuth2AuthenticationToken auth = authentication();
+        PendingSocialRegistration challenge = new PendingSocialRegistration(
+            "opaque-registration-ticket", "discord", "123456789",
+            "private-provider@example.com", true, "Dragon", null,
+            Instant.now().plusSeconds(600));
+        when(authSocialService.loginOAuth2(auth)).thenReturn(new RegistrationRequired(challenge));
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService, googleLoginProofs)
+            .onAuthenticationSuccess(new MockHttpServletRequest(), response, auth);
+
+        String url = response.getRedirectedUrl();
+        assertTrue(url.startsWith("https://brafurries.com.br/social-login#"));
+        assertTrue(url.contains("registration_token=opaque-registration-ticket"));
+        assertTrue(!url.contains("private-provider@example.com"));
+        assertTrue(!url.contains("email="));
+        assertTrue(!url.contains("display_name="));
+        assertTrue(!url.contains("access_token="));
+    }
+
+    @Test
     void sendsEncodedGlobalProfileImageUrlInExistingUserCallback() throws Exception {
         OAuth2AuthenticationToken authentication = authentication();
         LoginResponse login = new LoginResponse(
@@ -58,7 +89,7 @@ class SocialOAuth2AuthenticationSuccessHandlerTest {
         when(authSocialService.loginOAuth2(authentication)).thenReturn(new ExistingUserLogin(login));
 
         MockHttpServletResponse response = new MockHttpServletResponse();
-        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy())
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService, googleLoginProofs)
             .onAuthenticationSuccess(new MockHttpServletRequest(), response, authentication);
 
         assertEquals(302, response.getStatus());
@@ -75,7 +106,7 @@ class SocialOAuth2AuthenticationSuccessHandlerTest {
         when(authSocialService.loginOAuth2(authentication)).thenReturn(new ExistingUserLogin(login));
 
         MockHttpServletResponse response = new MockHttpServletResponse();
-        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy())
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService, googleLoginProofs)
             .onAuthenticationSuccess(new MockHttpServletRequest(), response, authentication);
 
         assertEquals(302, response.getStatus());
@@ -98,7 +129,7 @@ class SocialOAuth2AuthenticationSuccessHandlerTest {
         );
         MockHttpServletResponse response = new MockHttpServletResponse();
 
-        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy())
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService, googleLoginProofs)
             .onAuthenticationSuccess(request, response, authentication);
 
         assertTrue(
@@ -124,13 +155,79 @@ class SocialOAuth2AuthenticationSuccessHandlerTest {
         );
         MockHttpServletResponse response = new MockHttpServletResponse();
 
-        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy())
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService, googleLoginProofs)
             .onAuthenticationSuccess(request, response, authentication);
 
         assertTrue(
             response.getRedirectedUrl().startsWith("https://brafurries.com.br/social-login#"),
             response.getRedirectedUrl()
         );
+    }
+
+    @Test
+    void proofCallbackVerifiesDiscordWithoutSwitchingGoogleSessionOrIssuingTokens() throws Exception {
+        OAuth2AuthenticationToken auth = authentication();
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        String ticket = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH";
+        request.getSession(true).setAttribute(
+            DiscordSelfServiceLinkService.SESSION_TICKET, ticket
+        );
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService, googleLoginProofs)
+            .onAuthenticationSuccess(request, response, auth);
+
+        org.mockito.Mockito.verify(discordLinkService).verifiedDiscordOAuth(ticket, auth);
+        org.mockito.Mockito.verifyNoInteractions(authSocialService);
+        assertEquals(302, response.getStatus());
+        assertTrue(response.getRedirectedUrl().startsWith(
+            "https://brafurries.com.br/painel/perfil#discord_link_ticket="));
+        assertTrue(response.getRedirectedUrl().contains(ticket));
+        assertNull(request.getSession(false).getAttribute(DiscordSelfServiceLinkService.SESSION_TICKET));
+        assertTrue(!response.getRedirectedUrl().contains("access_token="));
+    }
+
+    @Test
+    void failedDiscordProofDoesNotLeakProviderOrSessionToken() throws Exception {
+        OAuth2AuthenticationToken auth = authentication();
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        String ticket = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH";
+        request.getSession(true).setAttribute(DiscordSelfServiceLinkService.SESSION_TICKET, ticket);
+        org.mockito.Mockito.doThrow(new IllegalArgumentException("untrusted discord value"))
+            .when(discordLinkService).verifiedDiscordOAuth(ticket, auth);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        new SocialOAuth2AuthenticationSuccessHandler(authSocialService, policy(), discordLinkService, googleLoginProofs)
+            .onAuthenticationSuccess(request, response, auth);
+
+        org.mockito.Mockito.verifyNoInteractions(authSocialService);
+        assertTrue(response.getRedirectedUrl().startsWith(
+            "https://brafurries.com.br/painel/perfil?discord_link_error="));
+        assertTrue(!response.getRedirectedUrl().contains(ticket));
+        assertTrue(!response.getRedirectedUrl().contains("untrusted"));
+    }
+
+    @Test
+    void freshGoogleProofCallbackDoesNotCreateASessionOrSendProviderEmail() throws Exception {
+        DefaultOAuth2User principal = new DefaultOAuth2User(
+            List.of(), Map.of("sub", "immutable-google-sub", "email", "private@provider.test"), "sub");
+        OAuth2AuthenticationToken google = new OAuth2AuthenticationToken(principal, List.of(), "google");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        String ticket = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH";
+        request.getSession(true).setAttribute(SocialLoginOAuthProofService.GOOGLE_SESSION_TICKET, ticket);
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        new SocialOAuth2AuthenticationSuccessHandler(
+            authSocialService, policy(), discordLinkService, googleLoginProofs)
+            .onAuthenticationSuccess(request, response, google);
+
+        org.mockito.Mockito.verify(googleLoginProofs).verifiedGoogleOAuth(ticket, google);
+        org.mockito.Mockito.verifyNoInteractions(authSocialService, discordLinkService);
+        assertTrue(response.getRedirectedUrl().startsWith(
+            "https://brafurries.com.br/painel/perfil#google_login_ticket="));
+        assertTrue(!response.getRedirectedUrl().contains("private@provider.test"));
+        assertTrue(!response.getRedirectedUrl().contains("access_token="));
+        assertNull(request.getSession(false).getAttribute(SocialLoginOAuthProofService.GOOGLE_SESSION_TICKET));
     }
 
     private SocialFrontendOriginPolicy policy() {

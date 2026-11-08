@@ -58,7 +58,11 @@ class BaselineSchemaFullContextMariaDbIntegrationTest {
             "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='BASE TABLE'",
             Integer.class
         );
-        assertEquals(107, tables);
+        assertEquals(113, tables);
+        assertEquals(2, jdbc.queryForObject(
+            "SELECT COUNT(*) FROM information_schema.TABLES " +
+            "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN " +
+            "('user_social_login_events', 'user_social_login_proofs')", Integer.class));
         mvc.perform(get("/meta/locales")).andExpect(status().isOk());
     }
 }

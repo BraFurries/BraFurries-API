@@ -3,13 +3,17 @@ package com.Brafurries.API.auth.common;
 import com.Brafurries.API.auth.common.dto.AuthDtos.ConfirmEmailRequest;
 import com.Brafurries.API.auth.common.dto.AuthDtos.LoginRequest;
 import com.Brafurries.API.auth.common.dto.AuthDtos.RegisterRequest;
+import com.Brafurries.API.auth.common.dto.AuthDtos.RefreshTokenRequest;
 import com.Brafurries.API.entity.user.User;
+import com.Brafurries.API.entity.user.UserRefreshToken;
 import com.Brafurries.API.entity.user.UserToken;
 import com.Brafurries.API.entity.user.UserTokenType;
 import com.Brafurries.API.repository.api.ApiRolePermissionRepository;
 import com.Brafurries.API.repository.api.ApiUserRoleRepository;
 import com.Brafurries.API.repository.user.UserRefreshTokenRepository;
 import com.Brafurries.API.repository.user.UserRepository;
+import com.Brafurries.API.repository.user.UserDiscordRepository;
+import com.Brafurries.API.repository.user.UserSocialIdentityRepository;
 import com.Brafurries.API.repository.user.UserTokenRepository;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -46,6 +50,11 @@ class AuthServiceTest {
     private UserRepository userRepository;
 
     @Mock
+    private UserDiscordRepository userDiscordRepository;
+    @Mock
+    private UserSocialIdentityRepository socialIdentityRepository;
+
+    @Mock
     private UserTokenRepository userTokenRepository;
 
     @Mock
@@ -76,6 +85,8 @@ class AuthServiceTest {
     void setUp() {
         authService = new AuthService(
             userRepository,
+            userDiscordRepository,
+            socialIdentityRepository,
             userTokenRepository,
             passwordEncoder,
             userRefreshTokenRepository,
@@ -92,8 +103,106 @@ class AuthServiceTest {
     }
 
     @Test
+    void refreshAcquiresUserLockBeforeAtomicallyConsumingOldCredential() {
+        User account = new User();
+        account.setId(23);
+        account.setEmail("verified@example.com");
+        account.setAuthVersion(7L);
+
+        UserRefreshToken old = new UserRefreshToken();
+        old.setUser(account);
+        old.setToken("old-refresh");
+        old.setExpiresAt(Instant.now().plusSeconds(3600));
+
+        when(userRefreshTokenRepository.findByToken("old-refresh")).thenReturn(Optional.of(old));
+        when(userRepository.findByIdForUpdate(23)).thenReturn(Optional.of(account));
+        when(userRefreshTokenRepository.revokeActiveToken(
+            org.mockito.ArgumentMatchers.eq("old-refresh"), any(Instant.class))).thenReturn(1);
+        when(tokenService.generateToken(64)).thenReturn("new-refresh");
+        when(tokenService.generateAccessToken("verified@example.com", List.of(), List.of(), 7L))
+            .thenReturn("new-access");
+        when(tokenService.accessExpiresAt()).thenReturn(Instant.now().plusSeconds(900));
+        when(tokenService.refreshExpiresAt()).thenReturn(Instant.now().plusSeconds(3600));
+        when(tokenService.accessExpiresInSeconds()).thenReturn(900);
+        when(apiUserRoleRepository.findRoleNamesByUserId(23)).thenReturn(List.of());
+        when(apiRolePermissionRepository.findPermissionNamesByUserId(23)).thenReturn(List.of());
+
+        var response = authService.refreshToken(new RefreshTokenRequest("old-refresh"));
+        assertEquals("new-access", response.accessToken());
+        assertEquals("new-refresh", response.refreshToken());
+        var order = org.mockito.Mockito.inOrder(userRepository, userRefreshTokenRepository);
+        order.verify(userRefreshTokenRepository).findByToken("old-refresh");
+        order.verify(userRepository).findByIdForUpdate(23);
+        order.verify(userRefreshTokenRepository).revokeActiveToken(
+            org.mockito.ArgumentMatchers.eq("old-refresh"), any(Instant.class));
+        verify(userRefreshTokenRepository).save(org.mockito.ArgumentMatchers.argThat(rotated ->
+            rotated.getUser() == account && "new-refresh".equals(rotated.getToken())));
+    }
+
+    @Test
+    void refreshCannotResurrectSessionAfterConcurrentProviderDisableDeletesToken() {
+        User account = new User();
+        account.setId(23);
+        account.setEmail("verified@example.com");
+        account.setAuthVersion(8L);
+        UserRefreshToken revokedBySecurityChange = new UserRefreshToken();
+        revokedBySecurityChange.setUser(account);
+        revokedBySecurityChange.setToken("revoked-refresh");
+
+        when(userRefreshTokenRepository.findByToken("revoked-refresh"))
+            .thenReturn(Optional.of(revokedBySecurityChange));
+        when(userRepository.findByIdForUpdate(23)).thenReturn(Optional.of(account));
+        // Bulk UPDATE no longer finds a live credential because the security
+        // transaction finished first, even though the earlier read saw it.
+        assertThrows(BadCredentialsException.class,
+            () -> authService.refreshToken(new RefreshTokenRequest("revoked-refresh")));
+        verify(userRefreshTokenRepository).revokeActiveToken(
+            org.mockito.ArgumentMatchers.eq("revoked-refresh"), any(Instant.class));
+        verify(userRefreshTokenRepository, never()).save(any(UserRefreshToken.class));
+        verify(tokenService, never()).generateAccessToken(
+            org.mockito.ArgumentMatchers.anyString(), any(), any(), org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    void expiredLocalEmailConfirmationMustNotDeleteAnyLegacyAccount() {
+        authService.cleanupExpiredPendingEmailRegistrations();
+        verify(userRepository, never()).delete(org.mockito.ArgumentMatchers.any(User.class));
+        verify(userTokenRepository, never()).deleteByUser(org.mockito.ArgumentMatchers.any(User.class));
+        verify(userRefreshTokenRepository, never()).deleteByUser(org.mockito.ArgumentMatchers.any(User.class));
+        verify(userTokenRepository, never())
+            .findByTypeAndUsedAtIsNullAndRevokedAtIsNullAndExpiresAtBefore(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void passwordOwnerCanRequestNewVerificationAfterEarlierTokenExpired() {
+        User pending = new User();
+        pending.setId(42);
+        pending.setEmail("chosen@example.com");
+        pending.setPasswordHash("hash");
+        when(userRepository.findByEmail("chosen@example.com")).thenReturn(Optional.of(pending));
+        when(userRepository.findByIdForUpdate(42)).thenReturn(Optional.of(pending));
+        when(passwordEncoder.matches("strong-password", "hash")).thenReturn(true);
+        when(userTokenRepository.existsByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(
+            pending, UserTokenType.EMAIL_VERIFICATION)).thenReturn(true);
+        when(userTokenRepository.findByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(
+            pending, UserTokenType.EMAIL_VERIFICATION)).thenReturn(List.of());
+        when(tokenService.generateToken(48)).thenReturn("new-verification-token");
+        when(userTokenRepository.save(org.mockito.ArgumentMatchers.any(UserToken.class)))
+            .thenAnswer(call -> call.getArgument(0));
+
+        var result = authService.resendEmailConfirmation(
+            new com.Brafurries.API.auth.common.dto.AuthDtos.ResendEmailConfirmationRequest(
+                "chosen@example.com", "strong-password"));
+
+        assertTrue(result.message().contains("enviarmos") || result.message().contains("enviaremos"));
+        verify(userTokenRepository, org.mockito.Mockito.atLeastOnce())
+            .deleteByUserAndType(pending, UserTokenType.EMAIL_VERIFICATION);
+        verify(mailSender).send(org.mockito.ArgumentMatchers.any(SimpleMailMessage.class));
+    }
+
+    @Test
     void registerCommonCreatesPendingEmailVerificationTokenAndSendsEmail() {
-        when(userTokenRepository.findByTypeAndUsedAtIsNullAndRevokedAtIsNullAndExpiresAtBefore(any(), any())).thenReturn(List.of());
         when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.empty());
         when(passwordEncoder.encode("secret")).thenReturn("hash");
         when(tokenService.generateToken(48)).thenReturn("verification-token");
@@ -141,7 +250,6 @@ class AuthServiceTest {
 
     @Test
     void registerCommonReturnsServiceUnavailableWhenVerificationEmailCannotBeSent() {
-        when(userTokenRepository.findByTypeAndUsedAtIsNullAndRevokedAtIsNullAndExpiresAtBefore(any(), any())).thenReturn(List.of());
         when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.empty());
         when(passwordEncoder.encode("secret")).thenReturn("hash");
         when(tokenService.generateToken(48)).thenReturn("verification-token");
@@ -186,6 +294,82 @@ class AuthServiceTest {
         );
 
         verify(userRefreshTokenRepository, never()).deleteByUser(user);
+    }
+
+    @Test
+    void socialOnlyAccountCanRecoverSiteAccessByExistingEmailResetFlow() {
+        User originalGoogle = new User();
+        originalGoogle.setId(10);
+        originalGoogle.setEmail("google@example.com");
+        originalGoogle.setPasswordHash(null);
+        when(userRepository.findByEmail("google@example.com")).thenReturn(Optional.of(originalGoogle));
+        when(tokenService.generateToken(48)).thenReturn("recovery-token");
+        when(userTokenRepository.save(any(UserToken.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        var resetRequest = new com.Brafurries.API.auth.common.dto.AuthDtos.ForgotPasswordRequest(
+            "GOOGLE@EXAMPLE.COM");
+
+        authService.forgotPassword(resetRequest);
+
+        ArgumentCaptor<UserToken> created = ArgumentCaptor.forClass(UserToken.class);
+        verify(userTokenRepository).save(created.capture());
+        assertEquals(UserTokenType.PASSWORD_RESET, created.getValue().getType());
+        assertEquals(originalGoogle, created.getValue().getUser());
+        assertEquals("recovery-token", created.getValue().getToken());
+        assertTrue(created.getValue().getExpiresAt().isAfter(Instant.now()));
+        ArgumentCaptor<SimpleMailMessage> sent = ArgumentCaptor.forClass(SimpleMailMessage.class);
+        verify(mailSender).send(sent.capture());
+        assertTrue(sent.getValue().getText().contains("/reset-password?token=recovery-token"));
+
+        when(userTokenRepository.findByTokenAndType("recovery-token", UserTokenType.PASSWORD_RESET))
+            .thenReturn(Optional.of(created.getValue()));
+        when(passwordEncoder.encode("new-secure-password")).thenReturn("new-password-hash");
+        authService.resetPassword(
+            new com.Brafurries.API.auth.common.dto.AuthDtos.ResetPasswordRequest(
+                "recovery-token", "new-secure-password"));
+
+        assertEquals("new-password-hash", originalGoogle.getPasswordHash());
+        assertTrue(created.getValue().getUsedAt() != null);
+        verify(userRepository).save(originalGoogle);
+    }
+
+    @Test
+    void previouslyMergedAccountCannotAuthenticateWithOldPassword() {
+        User absorbed = new User();
+        absorbed.setId(10);
+        absorbed.setEmail("absorbed@example.com");
+        absorbed.setPasswordHash("legacy-hash");
+        User canonical = new User();
+        canonical.setId(20);
+        absorbed.setMergedIntoUser(canonical);
+        when(userRepository.findByEmail("absorbed@example.com"))
+            .thenReturn(Optional.of(absorbed));
+        when(passwordEncoder.matches("secret", "legacy-hash")).thenReturn(true);
+
+        assertThrows(BadCredentialsException.class, () ->
+            authService.loginCommon(new LoginRequest("absorbed@example.com", "secret", true)));
+        verify(userRefreshTokenRepository, never()).deleteByUser(absorbed);
+    }
+
+    @Test
+    void passwordResetCannotReactivateHistoricalAbsorbedIdentity() {
+        User absorbed = new User();
+        absorbed.setId(10);
+        User canonical = new User();
+        canonical.setId(20);
+        absorbed.setMergedIntoUser(canonical);
+        UserToken oldRecovery = new UserToken();
+        oldRecovery.setUser(absorbed);
+        oldRecovery.setType(UserTokenType.PASSWORD_RESET);
+        oldRecovery.setExpiresAt(Instant.now().plusSeconds(60));
+        when(userTokenRepository.findByTokenAndType("old-token", UserTokenType.PASSWORD_RESET))
+            .thenReturn(Optional.of(oldRecovery));
+
+        assertThrows(BadCredentialsException.class, () ->
+            authService.resetPassword(
+                new com.Brafurries.API.auth.common.dto.AuthDtos.ResetPasswordRequest(
+                    "old-token", "new-password")));
+        verify(userRepository, never()).save(absorbed);
     }
 
     @Test

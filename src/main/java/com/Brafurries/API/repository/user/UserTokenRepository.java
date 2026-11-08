@@ -14,6 +14,8 @@ public interface UserTokenRepository extends JpaRepository<UserToken, Long> {
 
     boolean existsByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(User user, UserTokenType type);
 
+    List<UserToken> findByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(User user, UserTokenType type);
+
     List<UserToken> findByTypeAndUsedAtIsNullAndRevokedAtIsNullAndExpiresAtBefore(UserTokenType type, Instant instant);
 
     @Transactional
