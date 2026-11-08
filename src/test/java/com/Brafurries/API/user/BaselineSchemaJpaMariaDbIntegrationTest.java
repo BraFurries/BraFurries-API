@@ -128,6 +128,9 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
             "synthetic-refresh-race", java.time.Instant.now()));
         assertEquals(0, refreshTokens.revokeActiveToken(
             "synthetic-refresh-race", java.time.Instant.now()));
+        // Bulk JPQL updates bypass the first-level JPA cache.
+        entityManager.flush();
+        entityManager.clear();
         assertNotNull(refreshTokens.findByToken("synthetic-refresh-race")
             .orElseThrow().getRevokedAt());
     }
