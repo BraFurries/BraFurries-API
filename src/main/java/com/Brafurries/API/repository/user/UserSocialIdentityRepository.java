@@ -24,7 +24,7 @@ public interface UserSocialIdentityRepository extends JpaRepository<UserSocialId
          WHERE provider = :provider AND provider_subject = :subject
          FOR UPDATE
         """, nativeQuery = true)
-    Optional<Integer> currentLoginEnabledForUpdate(
+    Optional<Boolean> currentLoginEnabledForUpdate(
         @Param("provider") String provider, @Param("subject") String subject);
 
     List<UserSocialIdentity> findByUserId(Integer userId);
