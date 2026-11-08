@@ -72,8 +72,10 @@ class AuthSocialServiceConflictTest {
         principal("discord", Map.of(
             "id", "123456789", "email", "person@example.com",
             "verified", true, "username", "person"));
-        when(verifiedIdentities.loginAllowed("discord", "123456789")).thenReturn(true);
         when(discord.findByDiscordUserId(123456789L)).thenReturn(Optional.of(record));
+        when(users.findByIdForUpdate(20)).thenReturn(Optional.of(legacy));
+        when(verifiedIdentities.loginAllowedAfterUserLock("discord", "123456789"))
+            .thenReturn(true);
         when(onboarding.create(eq("discord"), eq("123456789"), eq("person@example.com"), anyString()))
             .thenReturn(new SocialOnboardingChallengeService.Created("secure-ticket", "discord"));
 
@@ -125,7 +127,31 @@ class AuthSocialServiceConflictTest {
             () -> service().loginOAuth2(authentication));
 
         assertEquals("PROVIDER_LOGIN_DISABLED", ex.getMessage());
-        verifyNoInteractions(onboarding, users, discord);
+        verifyNoInteractions(onboarding, users);
+        verify(discord).findByDiscordUserId(9999L);
+    }
+
+    @Test
+    void oauthCallbackStartedBeforeDisableCannotRecreateSessionsAfterLoginWasDisabled() {
+        User previouslyLinked = user(20, "site@example.com");
+        previouslyLinked.setPasswordHash("hash");
+        UserDiscord record = new UserDiscord();
+        record.setUser(previouslyLinked);
+        record.setDiscordUserId(123456789L);
+        principal("discord", Map.of("id", "123456789", "username", "Member"));
+        when(discord.findByDiscordUserId(123456789L)).thenReturn(Optional.of(record));
+        when(users.findByIdForUpdate(20)).thenReturn(Optional.of(previouslyLinked));
+        // The current locking read sees the disable transaction's committed state.
+        when(verifiedIdentities.loginAllowedAfterUserLock("discord", "123456789"))
+            .thenReturn(false);
+
+        BadCredentialsException error = assertThrows(BadCredentialsException.class,
+            () -> service().loginOAuth2(authentication));
+
+        assertEquals("PROVIDER_LOGIN_DISABLED", error.getMessage());
+        verify(verifiedIdentities).loginAllowedAfterUserLock("discord", "123456789");
+        verifyNoInteractions(refreshTokens, tokens, accessTokens);
+        verify(onboarding, never()).create(any(), any(), any(), any());
     }
 
     @Test
@@ -133,8 +159,10 @@ class AuthSocialServiceConflictTest {
         User oldOwner = user(20, "legacy@example.com");
         principal("google", Map.of(
             "sub", "g-sub", "email", "provider@example.com", "email_verified", true));
-        when(verifiedIdentities.loginAllowed("google", "g-sub")).thenReturn(true);
         when(verifiedIdentities.ownerOf("google", "g-sub")).thenReturn(Optional.of(oldOwner));
+        when(users.findByIdForUpdate(20)).thenReturn(Optional.of(oldOwner));
+        when(verifiedIdentities.loginAllowedAfterUserLock("google", "g-sub"))
+            .thenReturn(true);
         when(onboarding.create(eq("google"), eq("g-sub"), eq("provider@example.com"), anyString()))
             .thenReturn(new SocialOnboardingChallengeService.Created("secure-ticket", "google"));
 
