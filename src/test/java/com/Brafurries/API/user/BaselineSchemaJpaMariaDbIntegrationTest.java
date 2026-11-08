@@ -12,6 +12,8 @@ import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.entity.user.UserDiscord;
 import com.Brafurries.API.entity.user.UserDiscordLinkChallenge;
 import com.Brafurries.API.entity.user.UserSocialIdentity;
+import com.Brafurries.API.entity.user.UserRefreshToken;
+import com.Brafurries.API.repository.user.UserRefreshTokenRepository;
 import com.Brafurries.API.entity.user.UserCommunityStatus;
 import com.Brafurries.API.repository.user.UserRepository;
 import com.Brafurries.API.repository.user.UserDiscordRepository;
@@ -81,6 +83,7 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
     @Autowired private UserRepository users;
     @Autowired private UserDiscordRepository discords;
     @Autowired private UserSocialIdentityRepository socialIdentities;
+    @Autowired private UserRefreshTokenRepository refreshTokens;
     @Autowired private UserAccountConsolidationRepository consolidationAudit;
     @Autowired private UserCommunityStatusRepository memberships;
     @Autowired private SparseAccountConsolidationExecutor sparseMerge;
@@ -106,6 +109,27 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
         community = communities.saveAndFlush(community);
         assertNotNull(community.getId());
         assertEquals("Synthetic tenant", communities.findById(community.getId()).orElseThrow().getName());
+    }
+
+    @Test
+    void refreshTokenCompareAndRevokeRejectsDuplicateRotationOnMariaDb() {
+        User owner = new User();
+        owner.setEmail("refresh-race@example.invalid");
+        owner.setDisplayName("Synthetic refresh case");
+        owner = users.saveAndFlush(owner);
+
+        UserRefreshToken old = new UserRefreshToken();
+        old.setUser(owner);
+        old.setToken("synthetic-refresh-race");
+        old.setExpiresAt(java.time.Instant.now().plusSeconds(900));
+        refreshTokens.saveAndFlush(old);
+
+        assertEquals(1, refreshTokens.revokeActiveToken(
+            "synthetic-refresh-race", java.time.Instant.now()));
+        assertEquals(0, refreshTokens.revokeActiveToken(
+            "synthetic-refresh-race", java.time.Instant.now()));
+        assertNotNull(refreshTokens.findByToken("synthetic-refresh-race")
+            .orElseThrow().getRevokedAt());
     }
 
     @Test
