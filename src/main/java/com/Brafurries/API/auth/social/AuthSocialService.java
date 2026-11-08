@@ -269,11 +269,30 @@ public class AuthSocialService {
     }
 
     private Optional<User> findExistingSocialUser(ProviderProfile profile) {
-        // Provider subject, not provider e-mail, is the only OAuth identity.
-        if (Boolean.FALSE.equals(verifiedIdentities.loginAllowed(profile.provider(), profile.providerUserId()))) {
+        // Resolve immutable provider subject, not provider e-mail. Lock the
+        // owning User BEFORE checking the login_enabled permission. This
+        // serializes new OAuth sessions against provider disable/enable and
+        // ensures an old callback cannot restore a refresh token afterward.
+        Optional<User> found = findUserByProviderId(profile);
+        if (found.isPresent()) {
+            User actor = userRepository.findByIdForUpdate(found.get().getId())
+                .orElseThrow(() -> new BadCredentialsException("ACCOUNT_CHANGED"));
+            if (actor.getMergedIntoUser() != null) {
+                throw new BadCredentialsException("ACCOUNT_CONSOLIDATED");
+            }
+            if (!verifiedIdentities.loginAllowedAfterUserLock(
+                    profile.provider(), profile.providerUserId())) {
+                throw new BadCredentialsException("PROVIDER_LOGIN_DISABLED");
+            }
+            return Optional.of(actor);
+        }
+        // A migrated identity can exist without its historic Discord link.
+        // In that case it must still never be claimed via a new signup.
+        if (Boolean.FALSE.equals(verifiedIdentities.loginAllowed(
+                profile.provider(), profile.providerUserId()))) {
             throw new BadCredentialsException("PROVIDER_LOGIN_DISABLED");
         }
-        return findUserByProviderId(profile);
+        return Optional.empty();
     }
 
     private Optional<User> findUserByProviderId(ProviderProfile profile) {
