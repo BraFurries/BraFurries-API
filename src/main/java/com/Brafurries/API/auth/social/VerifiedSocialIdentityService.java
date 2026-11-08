@@ -36,6 +36,20 @@ public class VerifiedSocialIdentityService {
             .map(UserSocialIdentity::getUser);
     }
 
+    /**
+     * Must only be called after the caller has acquired a pessimistic lock on
+     * the owner User. A native FOR UPDATE read sees current committed state
+     * even if an earlier JPA owner lookup cached an identity.
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public boolean loginAllowedAfterUserLock(String provider, String providerSubject) {
+        String p = normalizeProvider(provider);
+        String subject = normalizeSubject(providerSubject);
+        return identities.currentLoginEnabledForUpdate(p, subject)
+            .map(value -> value != 0)
+            .orElse(true); // Pre-migration Discord subjects have no OAuth login row.
+    }
+
     /** A disabled OAuth login never frees the provider subject or Community identity. */
     @Transactional(readOnly = true)
     public Boolean loginAllowed(String provider, String providerSubject) {
