@@ -109,6 +109,33 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
     }
 
     @Test
+    void oauthLoginCurrentReadSeesDatabaseDisabledFlagDespiteCachedJpaIdentity() {
+        User owner = new User();
+        owner.setEmail("oauth-locking@example.invalid");
+        owner.setDisplayName("Synthetic OAuth lock case");
+        owner = users.saveAndFlush(owner);
+
+        UserSocialIdentity identity = new UserSocialIdentity();
+        identity.setUser(owner);
+        identity.setProvider("google");
+        identity.setProviderSubject("synthetic-lock-proof");
+        identity.setLoginEnabled(true);
+        socialIdentities.saveAndFlush(identity);
+
+        // Simulate an identity loaded earlier in the session, before a
+        // security-state update. A fresh locking read must not reuse its
+        // cached enabled=true field.
+        assertTrue(socialIdentities.findByProviderAndProviderSubject(
+            "google", "synthetic-lock-proof").orElseThrow().getLoginEnabled());
+        users.findByIdForUpdate(owner.getId()).orElseThrow();
+        assertEquals(1, jdbc.update(
+            "UPDATE user_social_identities SET login_enabled=0 WHERE provider=? AND provider_subject=?",
+            "google", "synthetic-lock-proof"));
+        assertEquals(0, socialIdentities.currentLoginEnabledForUpdate(
+            "google", "synthetic-lock-proof").orElseThrow().intValue());
+    }
+
+    @Test
     void retainsPhysicalCharAndIntegerColumnTypesAfterJpaMappingCorrections() {
         // Verify physical schema remains unchanged: mapping fixes belong in API only.
         String nameType = jdbc.queryForObject(
