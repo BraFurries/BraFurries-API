@@ -56,7 +56,7 @@ class BaselineCoddyLiveHttpIntegrationTest {
     @Test
     void reconcilesTwoGuildsThroughActualCoddyPythonClientAndSpringHttp() throws Exception {
         assertTrue(port > 0);
-        assertEquals(111, jdbc.queryForObject(
+        assertEquals(113, jdbc.queryForObject(
             "SELECT COUNT(*) FROM information_schema.TABLES " +
                 "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='BASE TABLE'",
             Integer.class
