@@ -5,6 +5,7 @@ import com.Brafurries.API.entity.user.UserAccountConsolidation;
 import com.Brafurries.API.entity.user.UserDiscord;
 import com.Brafurries.API.entity.user.UserDiscordLinkChallenge;
 import com.Brafurries.API.entity.user.UserSocialIdentity;
+import com.Brafurries.API.entity.user.UserTokenType;
 import com.Brafurries.API.repository.user.UserAccountConsolidationRepository;
 import com.Brafurries.API.repository.user.UserDiscordRepository;
 import com.Brafurries.API.repository.user.UserIdentityLinkRepository;
@@ -138,6 +139,16 @@ public class SparseAccountConsolidationExecutor {
             throw blocked("AUTH_VERSION_INVALID");
         }
 
+        // A pending confirmation is an explicit negative authorization marker,
+        // even when the token has expired. A merge must never erase that gate
+        // and silently activate a new e-mail login.
+        if (recoveryTokens.existsByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(
+                web, UserTokenType.EMAIL_VERIFICATION)
+            || recoveryTokens.existsByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(
+                canonical, UserTokenType.EMAIL_VERIFICATION)) {
+            throw blocked("LOCAL_EMAIL_CONFIRMATION_REQUIRED");
+        }
+
         // Revoke credentials in BOTH accounts before transferring site login.
         refreshTokens.deleteByUser(web);
         refreshTokens.deleteByUser(canonical);
@@ -145,16 +156,26 @@ public class SparseAccountConsolidationExecutor {
         recoveryTokens.deleteByUser(canonical);
 
         String email = web.getEmail();
+        java.time.LocalDateTime provenLocalEmailAt = web.getEmailVerifiedAt();
         String localPasswordHash = web.getPasswordHash();
         // The absorbed row is an immutable provenance alias, not a usable
         // login identity. Keep the original author and user IDs for audits,
         // but do not retain a second copy of live login credentials.
         web.setEmail(null);
+        web.setEmailVerifiedAt(null);
         web.setPasswordHash(null);
         web.setAuthVersion(web.getAuthVersion() + 1);
         users.saveAndFlush(web);
 
-        if (canonical.getEmail() == null) canonical.setEmail(email);
+        if (canonical.getEmail() == null) {
+            canonical.setEmail(email);
+            // Transfer only the positive BraFurries proof for this exact
+            // locally chosen e-mail; never infer proof from Google/Discord.
+            canonical.setEmailVerifiedAt(provenLocalEmailAt);
+        } else if (canonical.getEmailVerifiedAt() == null) {
+            // E-mail conflict is rejected above. The addresses are equal.
+            canonical.setEmailVerifiedAt(provenLocalEmailAt);
+        }
         if (canonical.getPasswordHash() == null || canonical.getPasswordHash().isBlank()) {
             canonical.setPasswordHash(localPasswordHash);
         }
