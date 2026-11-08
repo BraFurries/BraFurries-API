@@ -292,30 +292,39 @@ public class AuthService {
         return new ResetPasswordResponse("Senha alterada com sucesso");
     }
 
+    @Transactional
     public RefreshTokenResponse refreshToken(RefreshTokenRequest request) {
-        UserRefreshToken savedToken = userRefreshTokenRepository.findByToken(request.refreshToken())
+        // Look up the opaque credential only to discover its owning account.
+        // All authorization and rotation happen AFTER locking the User row.
+        // The same lock serializes disable/enable of provider logins and
+        // invalidates a refresh racing with a security change.
+        UserRefreshToken candidate = userRefreshTokenRepository.findByToken(request.refreshToken())
+            .orElseThrow(() -> new BadCredentialsException("Refresh token inválido"));
+        User lockedOwner = userRepository.findByIdForUpdate(candidate.getUser().getId())
             .orElseThrow(() -> new BadCredentialsException("Refresh token inválido"));
 
-        if (savedToken.getRevokedAt() != null || savedToken.getExpiresAt().isBefore(Instant.now())) {
+        ensureAccountConfirmed(lockedOwner);
+        Instant now = Instant.now();
+        if (userRefreshTokenRepository.revokeActiveToken(request.refreshToken(), now) != 1) {
+            // The previous refresh was revoked, expired, removed by a concurrent
+            // security change or already consumed. Never recreate that session.
             throw new BadCredentialsException("Refresh token inválido ou expirado");
         }
 
-        ensureAccountConfirmed(savedToken.getUser());
-
-        savedToken.setRevokedAt(Instant.now());
-        userRefreshTokenRepository.save(savedToken);
-
         String newRefreshToken = tokenService.generateToken(64);
-        List<String> roles = apiUserRoleRepository.findRoleNamesByUserId(savedToken.getUser().getId());
-        List<String> permissions = apiRolePermissionRepository.findPermissionNamesByUserId(savedToken.getUser().getId());
-        String newAccessToken = tokenService.generateAccessToken(savedToken.getUser().getEmail(), roles, permissions, savedToken.getUser().getAuthVersion());
+        List<String> roles = apiUserRoleRepository.findRoleNamesByUserId(lockedOwner.getId());
+        List<String> permissions = apiRolePermissionRepository.findPermissionNamesByUserId(lockedOwner.getId());
+        String newAccessToken = tokenService.generateAccessToken(lockedOwner.getEmail(), roles,
+            permissions, lockedOwner.getAuthVersion());
+
         UserRefreshToken rotatedToken = new UserRefreshToken();
-        rotatedToken.setUser(savedToken.getUser());
+        rotatedToken.setUser(lockedOwner);
         rotatedToken.setToken(newRefreshToken);
         rotatedToken.setExpiresAt(tokenService.refreshExpiresAt());
         userRefreshTokenRepository.save(rotatedToken);
-        
-        accessTokenService.save(newAccessToken, savedToken.getUser().getEmail(), roles, permissions, tokenService.accessExpiresAt());
+
+        accessTokenService.save(newAccessToken, lockedOwner.getEmail(), roles,
+            permissions, tokenService.accessExpiresAt());
 
         return new RefreshTokenResponse(
             newAccessToken,
@@ -325,7 +334,7 @@ public class AuthService {
         );
     }
 
-    public LogoutResponse logout(LogoutRequest request) {
+        public LogoutResponse logout(LogoutRequest request) {
         userRefreshTokenRepository.findByToken(request.refreshToken()).ifPresent(token -> {
             token.setRevokedAt(Instant.now());
             userRefreshTokenRepository.save(token);
