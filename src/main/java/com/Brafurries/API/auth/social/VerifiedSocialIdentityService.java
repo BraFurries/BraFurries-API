@@ -46,7 +46,6 @@ public class VerifiedSocialIdentityService {
         String p = normalizeProvider(provider);
         String subject = normalizeSubject(providerSubject);
         return identities.currentLoginEnabledForUpdate(p, subject)
-            .map(value -> value != 0)
             // Historical Discord-only users predate the OAuth-identity ledger.
             // A Google owner without a stored subject must fail closed.
             .orElse("discord".equals(p));
