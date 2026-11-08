@@ -47,7 +47,9 @@ public class VerifiedSocialIdentityService {
         String subject = normalizeSubject(providerSubject);
         return identities.currentLoginEnabledForUpdate(p, subject)
             .map(value -> value != 0)
-            .orElse(true); // Pre-migration Discord subjects have no OAuth login row.
+            // Historical Discord-only users predate the OAuth-identity ledger.
+            // A Google owner without a stored subject must fail closed.
+            .orElse("discord".equals(p));
     }
 
     /** A disabled OAuth login never frees the provider subject or Community identity. */
