@@ -233,7 +233,7 @@ public class CommerceOrderService {
         String hash=fingerprint(List.of(
             Long.toString(orderId),amount.toPlainString(),date.toString(),method,
             ref==null?"":ref,notes==null?"":notes,"RECEIPT"));
-        var existing=findPaymentKey(key,false);
+        var existing=findPaymentKey(key,true);
         if(!existing.isEmpty()) return replay(existing.get(0),hash);
         if("CANCELLED".equals(order.get("status"))) throw conflict("Encomenda cancelada");
         BigDecimal total=(BigDecimal)order.get("totalAmount");
@@ -277,7 +277,7 @@ public class CommerceOrderService {
         String method=(String)origin.get(0).get("paymentMethod");
         String hash=fingerprint(List.of(Long.toString(orderId),Long.toString(receiptId),
             amount.toPlainString(),date.toString(),reason,"REVERSAL"));
-        var existing=findPaymentKey(key,false);
+        var existing=findPaymentKey(key,true);
         if(!existing.isEmpty()) return replay(existing.get(0),hash);
         long id;
         try {
@@ -325,10 +325,19 @@ public class CommerceOrderService {
         return new Created(((Number)row.get("id")).longValue());
     }
     private BigDecimal paidAmount(long orderId) {
-        return jdbc.queryForObject("""
-            SELECT COALESCE(SUM(amount),0)
-              FROM commerce_order_payment_events WHERE order_id=?
-            """,BigDecimal.class,orderId);
+        // MariaDB REPEATABLE READ: permission lookups may already have opened
+        // a consistent-read snapshot BEFORE the order FOR UPDATE lock.
+        // A plain SUM would reuse that stale snapshot even after another
+        // payment commits while this transaction waits for the order mutex.
+        // Locking read sees the latest committed events and serializes checks.
+        BigDecimal paid=BigDecimal.ZERO;
+        for(BigDecimal amount:jdbc.queryForList("""
+            SELECT amount FROM commerce_order_payment_events
+             WHERE order_id=? FOR UPDATE
+            """,BigDecimal.class,orderId)) {
+            paid=paid.add(amount);
+        }
+        return paid;
     }
     private LocalDate validReceiptDate(LocalDate date) {
         if(date==null||date.getYear()<2000||date.isAfter(today()))
