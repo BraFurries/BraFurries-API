@@ -77,6 +77,20 @@ class CommerceProductionBatchCorrectionServiceTest {
                                     any(Object[].class));
     }
 
+    @Test void nonzeroSoldCounterBlocksEconomicCorrectionEvenIfSaleItemsAreMissing() {
+        grant();
+        Map<String,Object> batch=new java.util.HashMap<>(row());
+        batch.put("soldQuantity",1);
+        when(jdbc.queryForList(contains("FROM commerce_production_batches WHERE id=? FOR UPDATE"),
+             eq(5L))).thenReturn(List.of(batch));
+        when(jdbc.queryForList(contains("FROM commerce_sale_items"),
+             eq(Long.class),eq(5L))).thenReturn(List.of());
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->service.correct(auth,5L,input(12,"L-2"))).getStatusCode());
+        verify(jdbc,never()).update(contains("UPDATE commerce_production_batches"),
+                                   any(Object[].class));
+    }
+
     @Test void allowsReferenceCorrectionAfterSaleWithBeforeAndAfterAudit() {
         grant();setupBatch();
         when(jdbc.queryForList(contains("FROM commerce_sale_items"),
