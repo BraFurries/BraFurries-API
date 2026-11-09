@@ -355,12 +355,22 @@ public class CommerceSettlementService {
     public List<Map<String,Object>> payments(Authentication auth,long settlementId) {
         authorization.require(auth,PlatformPermission.FINANCE_VIEW);
         return jdbc.queryForList("""
-            SELECT id,amount,paid_on AS paidOn,external_reference AS externalReference,
-                   notes,created_at AS createdAt,
-                   event_kind AS eventKind,original_payment_id AS originalPaymentId,
-                   reversal_reason AS reversalReason,reversed_at AS reversedAt
-              FROM commerce_payments WHERE settlement_id=?
-             ORDER BY id
+            SELECT p.id,p.amount,p.paid_on AS paidOn,
+                   CASE WHEN r.id IS NULL THEN p.external_reference
+                        ELSE r.updated_reference END AS externalReference,
+                   CASE WHEN r.id IS NULL THEN p.notes
+                        ELSE r.updated_notes END AS notes,
+                   (r.id IS NOT NULL) AS metadataCorrected,
+                   p.created_at AS createdAt,
+                   p.event_kind AS eventKind,p.original_payment_id AS originalPaymentId,
+                   p.reversal_reason AS reversalReason,p.reversed_at AS reversedAt
+              FROM commerce_payments p
+              LEFT JOIN commerce_payment_metadata_revisions r
+                ON r.id=(SELECT MAX(latest.id)
+                           FROM commerce_payment_metadata_revisions latest
+                          WHERE latest.payment_id=p.id)
+             WHERE p.settlement_id=?
+             ORDER BY p.id
             """,settlementId);
     }
 
