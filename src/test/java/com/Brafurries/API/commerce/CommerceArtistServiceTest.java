@@ -240,8 +240,10 @@ class CommerceArtistServiceTest {
             eq(101L),eq(77))).thenReturn(List.of(Map.of("id",31L)));
         when(jdbc.update(contains("UPDATE commerce_artist_claim_requests"),
             any(),any(),any())).thenReturn(1);
+        // Concrete numeric matchers select JdbcTemplate.update(String,Object...)
+        // rather than the overloaded update(String,Object[],int[]).
         when(jdbc.update(contains("UPDATE commerce_artist_profiles"),
-            any(),any())).thenReturn(1);
+            eq(101L),eq(77))).thenReturn(1);
 
         artists.revoke(auth,101,new RevokeClaim("Pedido expresso da artista"));
 
