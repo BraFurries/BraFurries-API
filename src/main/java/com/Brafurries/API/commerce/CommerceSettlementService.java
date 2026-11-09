@@ -233,7 +233,7 @@ public class CommerceSettlementService {
         if (year<2000 || year>2200 || month<1 || month>12) throw invalid("Período inválido");
         return jdbc.queryForList("""
             SELECT statement.id,statement.artist_user_id AS artistUserId,
-                   COALESCE(u.display_name,u.username,
+                   COALESCE(p.artist_name,u.display_name,u.username,
                        CONCAT('Usuário ',u.id)) AS artistName,
                    statement.period_year AS periodYear,
                    statement.period_month AS periodMonth,
@@ -245,6 +245,7 @@ public class CommerceSettlementService {
                    statement.approved_at AS approvedAt
               FROM commerce_settlements statement
               JOIN users u ON u.id=statement.artist_user_id
+              LEFT JOIN commerce_artist_profiles p ON p.user_id=statement.artist_user_id
              WHERE statement.period_year=? AND statement.period_month=?
              ORDER BY statement.artist_user_id LIMIT 500
             """,year,month);
