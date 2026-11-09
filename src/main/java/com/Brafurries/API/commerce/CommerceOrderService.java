@@ -124,9 +124,7 @@ public class CommerceOrderService {
             String size=text(line.size(),64,"Tamanho",false);
             Long product=line.productId();
             if(product!=null) {
-                if(product<1||jdbc.queryForList(
-                    "SELECT id FROM commerce_products WHERE id=? AND active=1",
-                    Long.class,product).size()!=1) throw invalid("Produto do catálogo inválido");
+                if(product<1) throw invalid("Produto do catálogo inválido");
             }
             BigDecimal unit=money(line.unitPrice(),"Preço unitário");
             BigDecimal amount=money(unit.multiply(BigDecimal.valueOf(line.quantity())),
@@ -139,32 +137,47 @@ public class CommerceOrderService {
             signature.add(unit.toPlainString());
         }
         String hash=fingerprint(signature);
-        var existing=findByRequestKey(key);
+        var existing=findByRequestKey(key,false);
         if(!existing.isEmpty()) return replay(existing.get(0),hash);
+
+        // An idempotent retry still works when a catalog item is retired.
+        // Validate active catalog products only before the FIRST insertion.
+        for(ValidatedLine line:lines) {
+            if(line.productId()!=null && jdbc.queryForList(
+                "SELECT id FROM commerce_products WHERE id=? AND active=1",
+                Long.class,line.productId()).size()!=1) {
+                throw invalid("Produto do catálogo inválido");
+            }
+        }
+        long id;
         try {
-            long id=support.insert("""
+            id=support.insert("""
                 INSERT INTO commerce_orders
                     (request_key,request_sha256,channel,external_reference,buyer_label,
                      ordered_on,expected_delivery_on,total_amount,notes,created_by_user_id)
                 VALUES (?,?,?,?,?,?,?,?,?,?)
                 """,key,hash,channel,reference,buyer,ordered,due,total,notes,actor);
-            for(ValidatedLine line:lines) {
-                jdbc.update("""
-                    INSERT INTO commerce_order_items
-                        (order_id,product_id,item_label,size_label,quantity,
-                         unit_price_snapshot,line_amount)
-                    VALUES (?,?,?,?,?,?,?)
-                    """,id,line.productId(),line.label(),line.size(),line.quantity(),
-                    line.unitPrice(),line.lineTotal());
-            }
-            support.audit(actor,"ORDER",id,"CREATED");
-            return new Created(id);
         } catch(DataIntegrityViolationException ex) {
-            var concurrent=findByRequestKey(key);
+            // Current read bypasses an older REPEATABLE READ snapshot after
+            // waiting for a concurrently committed unique request key.
+            var concurrent=findByRequestKey(key,true);
             if(!concurrent.isEmpty()) return replay(concurrent.get(0),hash);
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                 "Referência da encomenda já registrada ou dados inválidos",ex);
         }
+        // Never swallow item or audit insert errors as an idempotent replay.
+        // Such errors MUST roll back the whole order.
+        for(ValidatedLine line:lines) {
+            jdbc.update("""
+                INSERT INTO commerce_order_items
+                    (order_id,product_id,item_label,size_label,quantity,
+                     unit_price_snapshot,line_amount)
+                VALUES (?,?,?,?,?,?,?)
+                """,id,line.productId(),line.label(),line.size(),line.quantity(),
+                line.unitPrice(),line.lineTotal());
+        }
+        support.audit(actor,"ORDER",id,"CREATED");
+        return new Created(id);
     }
 
     @Transactional
@@ -219,27 +232,28 @@ public class CommerceOrderService {
         String hash=fingerprint(List.of(
             Long.toString(orderId),amount.toPlainString(),date.toString(),method,
             ref==null?"":ref,notes==null?"":notes,"RECEIPT"));
-        var existing=findPaymentKey(key);
+        var existing=findPaymentKey(key,false);
         if(!existing.isEmpty()) return replay(existing.get(0),hash);
         if("CANCELLED".equals(order.get("status"))) throw conflict("Encomenda cancelada");
         BigDecimal total=(BigDecimal)order.get("totalAmount");
         BigDecimal paid=paidAmount(orderId);
         if(paid.add(amount).compareTo(total)>0)
             throw invalid("Pagamento não pode ultrapassar o total da encomenda");
+        long id;
         try {
-            long id=support.insert("""
+            id=support.insert("""
                 INSERT INTO commerce_order_payment_events
                     (order_id,request_key,request_sha256,event_kind,amount,
                      received_on,payment_method,external_reference,notes,recorded_by_user_id)
                 VALUES (?,?,?,'RECEIPT',?,?,?,?,?,?)
                 """,orderId,key,hash,amount,date,method,ref,notes,actor);
-            support.audit(actor,"ORDER_PAYMENT",id,"RECEIVED");
-            return new Created(id);
         } catch(DataIntegrityViolationException ex) {
-            var concurrent=findPaymentKey(key);
+            var concurrent=findPaymentKey(key,true);
             if(!concurrent.isEmpty()) return replay(concurrent.get(0),hash);
             throw conflict("Registro de pagamento em conflito");
         }
+        support.audit(actor,"ORDER_PAYMENT",id,"RECEIVED");
+        return new Created(id);
     }
 
     @Transactional
@@ -262,22 +276,23 @@ public class CommerceOrderService {
         String method=(String)origin.get(0).get("paymentMethod");
         String hash=fingerprint(List.of(Long.toString(orderId),Long.toString(receiptId),
             amount.toPlainString(),date.toString(),reason,"REVERSAL"));
-        var existing=findPaymentKey(key);
+        var existing=findPaymentKey(key,false);
         if(!existing.isEmpty()) return replay(existing.get(0),hash);
+        long id;
         try {
-            long id=support.insert("""
+            id=support.insert("""
                 INSERT INTO commerce_order_payment_events
                     (order_id,request_key,request_sha256,event_kind,original_event_id,
                      amount,received_on,payment_method,notes,recorded_by_user_id)
                 VALUES (?,?,?,'REVERSAL',?,?,?,?,?,?)
                 """,orderId,key,hash,receiptId,amount,date,method,reason,actor);
-            support.audit(actor,"ORDER_PAYMENT",id,"REVERSED");
-            return new Created(id);
         } catch(DataIntegrityViolationException ex) {
-            var concurrent=findPaymentKey(key);
+            var concurrent=findPaymentKey(key,true);
             if(!concurrent.isEmpty()) return replay(concurrent.get(0),hash);
             throw conflict("Este recebimento já foi estornado");
         }
+        support.audit(actor,"ORDER_PAYMENT",id,"REVERSED");
+        return new Created(id);
     }
 
     private int require(Authentication auth) {
@@ -291,16 +306,16 @@ public class CommerceOrderService {
         if(rows.size()!=1) throw missing("Encomenda não encontrada");
         return rows.get(0);
     }
-    private List<Map<String,Object>> findByRequestKey(String key) {
+    private List<Map<String,Object>> findByRequestKey(String key,boolean locking) {
         return jdbc.queryForList("""
             SELECT id,request_sha256 AS requestHash FROM commerce_orders WHERE request_key=?
-            """,key);
+            """+(locking?" FOR UPDATE":""),key);
     }
-    private List<Map<String,Object>> findPaymentKey(String key) {
+    private List<Map<String,Object>> findPaymentKey(String key,boolean locking) {
         return jdbc.queryForList("""
             SELECT id,request_sha256 AS requestHash
               FROM commerce_order_payment_events WHERE request_key=?
-            """,key);
+            """+(locking?" FOR UPDATE":""),key);
     }
     private Created replay(Map<String,Object> row,String hash) {
         if(!hash.equals(row.get("requestHash")))
