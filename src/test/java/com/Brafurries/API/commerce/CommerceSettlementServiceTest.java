@@ -162,6 +162,23 @@ class CommerceSettlementServiceTest {
     }
 
     @Test
+    void refusesNewPayoutWhenReferenceMatchesAnotherCorrectedEffectiveReference() {
+        when(jdbc.queryForList(contains("FROM commerce_payments WHERE request_key"),
+            eq(PAYMENT_KEY))).thenReturn(List.of());
+        givenStatement("APPROVED",new BigDecimal("100.00"));
+        when(jdbc.queryForList(contains("SELECT amount FROM commerce_payments"),
+            eq(BigDecimal.class),eq(90L))).thenReturn(List.of());
+        when(jdbc.queryForList(contains("LEFT JOIN commerce_payment_metadata_revisions"),
+            eq(Long.class),eq(90L),eq("PIX-CORRIGIDO")))
+            .thenReturn(List.of(101L));
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->service.recordPayment(auth,90L,new RecordPayment(
+                PAYMENT_KEY,new BigDecimal("20.00"),LocalDate.of(2025,12,5),
+                "PIX-CORRIGIDO",null))).getStatusCode());
+        verify(support,never()).insert(anyString(),any(Object[].class));
+    }
+
+    @Test
     void paymentCannotBeRecordedAgainstUnapprovedDraft() {
         givenStatement("DRAFT",new BigDecimal("100.00"));
         assertEquals(HttpStatus.CONFLICT,
