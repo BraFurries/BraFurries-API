@@ -221,7 +221,7 @@ public class CommerceSettlementService {
              WHERE p.settlement_id=?
                AND (CASE WHEN r.id IS NULL THEN p.external_reference
                          ELSE r.updated_reference END)=?
-             LIMIT 1
+             LIMIT 1 FOR UPDATE
             """,Long.class,settlementId,reference);
         if(!effectiveDuplicates.isEmpty()) {
             throw conflict("Esta referência já está em uso neste fechamento");
