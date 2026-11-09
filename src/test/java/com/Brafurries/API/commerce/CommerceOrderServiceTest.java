@@ -64,6 +64,51 @@ class CommerceOrderServiceTest {
     }
 
     @Test
+    void auditingFailureCannotBeMistakenForSuccessfulOrderReplay() {
+        var data=new Create(KEY,"Kéti","DIRECT",null,LocalDate.of(2026,11,3),
+            null,null,List.of(new Line(null,"Camiseta","GG",2,new BigDecimal("55.00"))));
+        when(jdbc.queryForList(contains("FROM commerce_orders WHERE request_key"),
+            eq(KEY))).thenReturn(List.of());
+        when(support.insert(contains("INSERT INTO commerce_orders"),any(Object[].class)))
+            .thenReturn(25L);
+        doThrow(new org.springframework.dao.DataIntegrityViolationException("audit failed"))
+            .when(support).audit(7,"ORDER",25L,"CREATED");
+        assertThrows(org.springframework.dao.DataIntegrityViolationException.class,
+            ()->orders.create(auth,data));
+        verify(jdbc,times(1)).queryForList(
+            contains("FROM commerce_orders WHERE request_key"),eq(KEY));
+    }
+
+    @Test
+    void concurrentDuplicateUsesLockingReadToAvoidRepeatableReadSnapshot() {
+        var data=new Create(KEY,"Kéti","DIRECT",null,LocalDate.of(2026,11,3),
+            null,null,List.of(new Line(null,"Poster",null,1,new BigDecimal("45.00"))));
+        String hash=CommerceFinanceSupport.fingerprint(java.util.Arrays.asList(
+            "Kéti","DIRECT","2026-11-03",null,null,null,null,"Poster",null,"1","45.00"));
+        when(jdbc.queryForList(contains("FROM commerce_orders WHERE request_key"),
+            eq(KEY))).thenReturn(List.of(),List.of(Map.of("id",50L,"requestHash",hash)));
+        when(support.insert(contains("INSERT INTO commerce_orders"),any(Object[].class)))
+            .thenThrow(new org.springframework.dao.DataIntegrityViolationException("duplicate key"));
+        assertEquals(50L,orders.create(auth,data).id());
+        verify(jdbc).queryForList(argThat(sql->sql.contains("FROM commerce_orders WHERE request_key")
+            && sql.contains("FOR UPDATE")),eq(KEY));
+        verify(support,never()).audit(anyInt(),anyString(),anyLong(),anyString());
+    }
+
+    @Test
+    void retriesPreviouslyCreatedOrderAfterItsCatalogProductIsRetired() {
+        var data=new Create(KEY,"Kéti","DIRECT",null,LocalDate.of(2026,11,3),
+            null,null,List.of(new Line(30L,"Camiseta","GG",1,new BigDecimal("55.00"))));
+        String hash=CommerceFinanceSupport.fingerprint(java.util.Arrays.asList(
+            "Kéti","DIRECT","2026-11-03",null,null,null,"30","Camiseta","GG","1","55.00"));
+        when(jdbc.queryForList(contains("FROM commerce_orders WHERE request_key"),
+            eq(KEY))).thenReturn(List.of(Map.of("id",50L,"requestHash",hash)));
+        assertEquals(50L,orders.create(auth,data).id());
+        verify(jdbc,never()).queryForList(contains("commerce_products"),eq(Long.class),anyLong());
+        verifyNoInteractions(support);
+    }
+
+    @Test
     void forbidsUnauthorizedOrderReadsBeforeAnySql() {
         when(authorization.require(auth,PlatformPermission.SALES_MANAGE))
             .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
