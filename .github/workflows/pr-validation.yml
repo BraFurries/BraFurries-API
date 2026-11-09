@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feat/self-service-discord-account-recovery-20261105
+      - feat/commerce-artwork-files-20261109
 
 permissions:
   contents: read
