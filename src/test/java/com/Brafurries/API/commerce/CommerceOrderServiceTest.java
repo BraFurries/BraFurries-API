@@ -41,6 +41,29 @@ class CommerceOrderServiceTest {
     }
 
     @Test
+    void salesManagerCanSeeProductChoicesWithoutSupplierCost() {
+        orders.productChoices(auth);
+        verify(authorization).require(auth,PlatformPermission.SALES_MANAGE);
+        verify(jdbc).queryForList(argThat(sql->sql.contains("commerce_products")
+            && sql.contains("suggested_price")
+            && !sql.contains("estimated_unit_cost")
+            && !sql.contains("supplier")));
+    }
+
+    @Test
+    void cancellationRequiresReceiptReversalFirst() {
+        when(jdbc.queryForList(contains("FROM commerce_orders WHERE id="),eq(25L)))
+            .thenReturn(List.of(Map.of("id",25L,"status","OPEN",
+                "totalAmount",new BigDecimal("100.00"))));
+        when(jdbc.queryForObject(contains("COALESCE(SUM(amount),0)"),
+            eq(BigDecimal.class),eq(25L))).thenReturn(new BigDecimal("10.00"));
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->orders.transition(auth,25L,new Transition("CANCELLED",null,
+                "Cliente desistiu"))).getStatusCode());
+        verify(jdbc,never()).update(contains("UPDATE commerce_orders"),any(Object[].class));
+    }
+
+    @Test
     void forbidsUnauthorizedOrderReadsBeforeAnySql() {
         when(authorization.require(auth,PlatformPermission.SALES_MANAGE))
             .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
