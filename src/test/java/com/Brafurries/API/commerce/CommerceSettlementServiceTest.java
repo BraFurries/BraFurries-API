@@ -41,6 +41,7 @@ class CommerceSettlementServiceTest {
     void setup() {
         service=new CommerceSettlementService(authorization,support,jdbc);
         User owner=new User();owner.setId(2);
+        lenient().when(authorization.requireOwner(auth)).thenReturn(owner);
         lenient().when(authorization.require(eq(auth),any())).thenReturn(
             new PlatformAuthorizationService.Actor(owner,
                 new PlatformAuthorizationService.Access(true,true,Set.of()))
@@ -180,5 +181,72 @@ class CommerceSettlementServiceTest {
         assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
             ()->service.payments(auth,90L)).getStatusCode());
         verifyNoInteractions(jdbc);
+    }
+
+    @Test
+    void onlyCommercialOwnerMayReverseRecordedArtistPayouts() {
+        when(authorization.requireOwner(auth)).thenThrow(
+            new ResponseStatusException(HttpStatus.FORBIDDEN));
+        assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
+            ()->service.reversePayment(auth,90L,12L,
+                new ReversePayment(LocalDate.of(2026,11,9),"Pagamento em duplicidade")))
+            .getStatusCode());
+        verifyNoInteractions(jdbc,support);
+    }
+
+    @Test
+    void reversingPreviouslyReversedPaymentIsIdempotent() {
+        givenStatement("PAID",new BigDecimal("100.00"));
+        when(jdbc.queryForList(contains("FROM commerce_payments"),
+                eq(12L),eq(90L))).thenReturn(List.of(Map.of(
+            "id",12L,"amount",new BigDecimal("100.00"),
+            "paid_on",java.sql.Date.valueOf("2026-11-02"),"event_kind","PAYMENT")));
+        when(jdbc.queryForList(contains("WHERE original_payment_id=?"),
+                eq(Long.class),eq(12L))).thenReturn(List.of(71L));
+        assertEquals(71L,service.reversePayment(auth,90L,12L,
+            new ReversePayment(LocalDate.of(2026,11,9),"Pagamento duplicado")).id());
+        verify(support,never()).insert(anyString(),any(Object[].class));
+        verify(jdbc,never()).update(contains("UPDATE commerce_settlements"),
+            any(Object[].class));
+    }
+
+    @Test
+    void negativeReversalKeepsOriginalAndReopensPaidStatement() {
+        givenStatement("PAID",new BigDecimal("100.00"));
+        when(jdbc.queryForList(contains("FROM commerce_payments"),
+                eq(12L),eq(90L))).thenReturn(List.of(Map.of(
+            "id",12L,"amount",new BigDecimal("100.00"),
+            "paid_on",java.sql.Date.valueOf("2026-11-02"),"event_kind","PAYMENT")));
+        when(jdbc.queryForList(contains("WHERE original_payment_id=?"),
+                eq(Long.class),eq(12L))).thenReturn(List.of());
+        when(jdbc.queryForList(contains("SELECT amount FROM commerce_payments"),
+                eq(BigDecimal.class),eq(90L))).thenReturn(List.of(new BigDecimal("100.00")));
+        when(support.insert(contains("INSERT INTO commerce_payments"),
+                any(Object[].class))).thenReturn(71L);
+        assertEquals(71L,service.reversePayment(auth,90L,12L,
+            new ReversePayment(LocalDate.of(2026,11,9),"Transferência duplicada")).id());
+        verify(support).insert(contains("INSERT INTO commerce_payments"),
+            eq(90L),anyString(),eq(new BigDecimal("-100.00")),
+            eq(12L),eq("Transferência duplicada"),eq(2),
+            eq(LocalDate.of(2026,11,9)),anyString(),isNull(),eq(2));
+        verify(jdbc).update(contains("UPDATE commerce_settlements"),
+            eq("APPROVED"),eq(90L));
+        verify(support).audit(2,"PAYMENT",71L,"REVERSED");
+        verify(jdbc,never()).update(contains("DELETE FROM commerce_payments"),
+            any(Object[].class));
+    }
+
+    @Test
+    void neverReversesAnAlreadyNegativeReversalEvent() {
+        givenStatement("APPROVED",new BigDecimal("100.00"));
+        when(jdbc.queryForList(contains("FROM commerce_payments"),
+                eq(12L),eq(90L))).thenReturn(List.of(Map.of(
+            "id",12L,"amount",new BigDecimal("-20.00"),
+            "paid_on",java.sql.Date.valueOf("2026-11-02"),"event_kind","REVERSAL")));
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->service.reversePayment(auth,90L,12L,
+                new ReversePayment(LocalDate.of(2026,11,9),"Estorno de estorno")))
+            .getStatusCode());
+        verify(support,never()).insert(anyString(),any(Object[].class));
     }
 }
