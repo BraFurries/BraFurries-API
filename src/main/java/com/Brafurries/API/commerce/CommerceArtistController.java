@@ -32,8 +32,11 @@ public class CommerceArtistController {
     }
 
     @GetMapping("/profiles")
-    public List<Map<String,Object>> profiles(Authentication auth) {
-        return artists.artists(auth);
+    public ResponseEntity<List<Map<String,Object>>> profiles(Authentication auth) {
+        // Administrative contacts are private even when the page is shared
+        // or the same browser later signs in with a different account.
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+            .body(artists.artists(auth));
     }
 
     @PostMapping("/profiles")
