@@ -460,7 +460,7 @@ public class CommerceSalesService {
         if (year<2000 || year>2200 || month<1 || month>12) throw invalid("Mês inválido");
         return jdbc.queryForList("""
             SELECT acc.id,acc.artist_user_id AS artistUserId,
-                   COALESCE(u.display_name,u.username,
+                   COALESCE(p.artist_name,u.display_name,u.username,
                        CONCAT('Usuário ',u.id)) AS artistName,
                    acc.artwork_id AS artworkId,acc.contract_id AS contractId,
                    acc.period_year AS periodYear,acc.period_month AS periodMonth,
@@ -473,6 +473,7 @@ public class CommerceSalesService {
                    i.sale_id AS saleId,acc.created_at AS createdAt
               FROM commerce_royalty_accruals acc
               JOIN users u ON u.id=acc.artist_user_id
+              LEFT JOIN commerce_artist_profiles p ON p.user_id=acc.artist_user_id
               JOIN commerce_sale_items i ON i.id=acc.sale_item_id
              WHERE acc.period_year=? AND acc.period_month=?
              ORDER BY acc.artist_user_id,acc.id LIMIT 2000
