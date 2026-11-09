@@ -41,6 +41,16 @@ public class CommerceOrderService {
     }
 
     @Transactional(readOnly=true)
+    public List<Map<String,Object>> productChoices(Authentication auth) {
+        require(auth);
+        // Only sellable product name and suggested price; never supplier costs.
+        return jdbc.queryForList("""
+            SELECT id,name,suggested_price AS suggestedPrice
+              FROM commerce_products WHERE active=1 ORDER BY name,id LIMIT 500
+            """);
+    }
+
+    @Transactional(readOnly=true)
     public List<Map<String,Object>> list(Authentication auth) {
         require(auth);
         return jdbc.queryForList("""
@@ -94,7 +104,7 @@ public class CommerceOrderService {
         String key=requestId(input.requestKey());
         String buyer=text(input.buyerLabel(),160,"Comprador",true);
         String channel=input.channel();
-        if(!CHANNELS.contains(channel)) throw invalid("Canal de encomenda inválido");
+        if(channel==null||!CHANNELS.contains(channel)) throw invalid("Canal de encomenda inválido");
         String reference=text(input.externalReference(),120,"Referência",false);
         String notes=text(input.notes(),5000,"Observações",false);
         LocalDate ordered=input.orderedOn(),due=input.expectedDeliveryOn();
@@ -180,6 +190,9 @@ public class CommerceOrderService {
                 """,delivery,actor,orderId);
         } else if("CANCELLED".equals(next)&&Set.of("OPEN","READY").contains(current)) {
             String reason=text(input.reason(),500,"Justificativa de cancelamento",true);
+            if(paidAmount(orderId).signum()>0) {
+                throw conflict("Estorne os recebimentos da encomenda antes do cancelamento");
+            }
             jdbc.update("""
                 UPDATE commerce_orders SET status='CANCELLED',
                     cancelled_at=CURRENT_TIMESTAMP(6),cancellation_reason=?,
@@ -306,7 +319,7 @@ public class CommerceOrderService {
         return date;
     }
     private String paymentMethod(String method) {
-        if(!PAYMENT_METHODS.contains(method)) throw invalid("Forma de pagamento inválida");
+        if(method==null||!PAYMENT_METHODS.contains(method)) throw invalid("Forma de pagamento inválida");
         return method;
     }
 }
