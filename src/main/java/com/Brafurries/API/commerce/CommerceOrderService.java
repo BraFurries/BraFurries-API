@@ -194,8 +194,9 @@ public class CommerceOrderService {
                 """,actor,orderId);
         } else if("DELIVERED".equals(next)&&"READY".equals(current)) {
             LocalDate delivery=input.deliveredOn();
-            if(delivery==null||delivery.isAfter(today())||delivery.getYear()<2000) {
-                throw invalid("Informe a data real de entrega");
+            if(delivery==null||delivery.isAfter(today())||delivery.getYear()<2000||
+               delivery.isBefore(LocalDate.parse(order.get("orderedOn").toString()))) {
+                throw invalid("Data de entrega deve estar entre a data da encomenda e hoje");
             }
             jdbc.update("""
                 UPDATE commerce_orders SET status='DELIVERED',delivered_on=?,
