@@ -103,9 +103,11 @@ public class CommerceCatalogService {
         }
         return jdbc.queryForList("""
             SELECT art.id,art.title,art.description,art.artist_user_id AS artistUserId,
-                   COALESCE(u.display_name,u.username,CONCAT('Usuário ',u.id)) AS artistName,
+                   COALESCE(p.artist_name,u.display_name,u.username,CONCAT('Usuário ',u.id)) AS artistName,
                    art.creation_cost AS creationCost,art.status,art.created_at AS createdAt
-              FROM commerce_artworks art JOIN users u ON u.id=art.artist_user_id
+              FROM commerce_artworks art
+              JOIN users u ON u.id=art.artist_user_id
+              LEFT JOIN commerce_artist_profiles p ON p.user_id=art.artist_user_id
              ORDER BY art.id DESC LIMIT 500
             """);
     }
@@ -118,19 +120,20 @@ public class CommerceCatalogService {
         }
         String like = "%" + search.trim().replace("%","").replace("_","") + "%";
         return jdbc.queryForList("""
-            SELECT u.id,COALESCE(u.display_name,u.username,
+            SELECT u.id,COALESCE(p.artist_name,u.display_name,u.username,
                 CONCAT('Usuário ',u.id)) AS name
               FROM users u
-              JOIN user_community_status member
-                ON member.user_id=u.id
-               AND member.community_id=?
-             WHERE member.is_present=1
-               AND COALESCE(member.banned,0)=0
-               AND (LOWER(COALESCE(u.display_name,'')) LIKE LOWER(?)
+              LEFT JOIN commerce_artist_profiles p ON p.user_id=u.id
+              LEFT JOIN user_community_status member
+                ON member.user_id=u.id AND member.community_id=?
+             WHERE (p.user_id IS NOT NULL
+                    OR (member.is_present=1 AND COALESCE(member.banned,0)=0))
+               AND (LOWER(COALESCE(p.artist_name,'')) LIKE LOWER(?)
+                    OR LOWER(COALESCE(u.display_name,'')) LIKE LOWER(?)
                     OR LOWER(COALESCE(u.username,'')) LIKE LOWER(?)
                     OR LOWER(COALESCE(member.display_name,'')) LIKE LOWER(?))
              ORDER BY u.id DESC LIMIT 30
-            """,authorization.officialCommunityId(),like,like,like);
+            """,authorization.officialCommunityId(),like,like,like,like);
     }
 
     @Transactional
