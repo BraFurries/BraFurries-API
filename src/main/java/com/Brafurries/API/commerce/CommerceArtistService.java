@@ -17,16 +17,13 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * BraFurries-only commercial artist profiles. The legacy artist_user_id stays
- * immutable in artwork/contract/royalty/settlement history. Claiming grants
- * account-scoped READ access through a separately approved owner link, never
- * OAuth ownership, login credentials, role grants or Community permissions.
+ * BraFurries-only commercial artist profiles.
+ * A staff-issued invitation activates the same user id or consolidates all
+ * current commerce ownership into the existing canonical account. Historical
+ * signed artist signatory snapshots remain immutable.
  */
 @Service
 public class CommerceArtistService {
-    private static final Set<String> VERIFICATION_METHODS =
-        Set.of("TELEGRAM", "EMAIL", "IN_PERSON", "OTHER");
-
     private final PlatformAuthorizationService authorization;
     private final JdbcTemplate jdbc;
     private final CommerceFinanceSupport finance;
@@ -123,12 +120,12 @@ public class CommerceArtistService {
             SELECT COALESCE(SUM(pay.amount),0) FROM commerce_payments pay
               JOIN commerce_settlements s ON s.id=pay.settlement_id
              WHERE s.artist_user_id=? AND s.period_year=? AND s.period_month=?
-            """,id,id,year,month);
+            """,id,year,month);
         BigDecimal paidTotal=scalar("""
             SELECT COALESCE(SUM(pay.amount),0) FROM commerce_payments pay
               JOIN commerce_settlements s ON s.id=pay.settlement_id
              WHERE s.artist_user_id=?
-            """,id,id);
+            """,id);
         List<Map<String,Object>> statements=jdbc.queryForList("""
             SELECT s.id,s.artist_user_id AS artistUserId,
                    COALESCE(p.artist_name,u.display_name,u.username,'Artista') AS artistName,
@@ -143,7 +140,7 @@ public class CommerceArtistService {
              GROUP BY s.id,s.artist_user_id,p.artist_name,u.display_name,u.username,
                       s.period_year,s.period_month,s.status,s.total_amount
              ORDER BY s.period_year DESC,s.period_month DESC,s.id DESC LIMIT 200
-            """,id,id);
+            """,id);
         return new Portfolio(year,month,accruedMonth,accruedTotal,
             paidForPeriod,paidTotal,artworks,statements);
     }
