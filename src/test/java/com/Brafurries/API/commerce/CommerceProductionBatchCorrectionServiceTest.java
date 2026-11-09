@@ -123,8 +123,7 @@ class CommerceProductionBatchCorrectionServiceTest {
 
     @Test void noOpDoesNotWriteAnAuditEntry() {
         grant();setupBatch();
-        assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
-            ()->service.correct(auth,5L,input(10,"L-1"))).getStatusCode());
+        service.correct(auth,5L,input(10,"L-1")); // retry is a safe no-op
         verify(jdbc,never()).update(anyString(),any(Object[].class));
     }
 }
