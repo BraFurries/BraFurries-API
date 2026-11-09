@@ -130,6 +130,29 @@ class CommerceArtworkFileServiceTest {
     }
 
     @Test
+    void preservesR2FileWhenTransactionOutcomeIsUnknown() {
+        when(jdbc.queryForList(anyString(),eq(Long.class),eq(14L)))
+            .thenReturn(List.of(14L));
+        var stored=new CommerceArtworkFileStorage.StoredFile(
+            "commerce/artworks/14/00000000-0000-4000-8000-000000000000.psd",
+            "source.psd","psd","application/octet-stream","a".repeat(64),1000);
+        when(storage.upload(14L,multipart)).thenReturn(stored);
+        when(support.insert(anyString(),any(Object[].class))).thenReturn(25L);
+        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.upload(auth,14,"SOURCE",null,multipart);
+            org.springframework.transaction.support.TransactionSynchronizationManager
+                .getSynchronizations().get(0).afterCompletion(
+                    org.springframework.transaction.support.TransactionSynchronization.STATUS_UNKNOWN);
+            // Unknown is not proof of rollback; avoid deleting an object
+            // which may have a committed record in the SQL database.
+            verify(storage,never()).deleteUnregistered(anyLong(),anyString());
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
     void deniesDownloadBeforeSelectingAnyObject() {
         when(authorization.require(auth,PlatformPermission.ARTWORKS_MANAGE))
             .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
