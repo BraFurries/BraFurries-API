@@ -8,7 +8,6 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
-/** Never accept actor, owner or Community IDs from the browser. */
 public final class CommerceArtistDtos {
     private CommerceArtistDtos() {}
 
@@ -22,18 +21,30 @@ public final class CommerceArtistDtos {
         @Size(max = 5000) String internalNotes
     ) {}
 
-    public record RequestClaim(
-        @NotNull @Min(1) Integer artistUserId,
-        @Size(max = 1000) String message
+    // Admin-only. Never accept an actor/Community ID from the browser.
+    public record IssueInvitation(@NotNull @Min(1) Integer artistUserId) {}
+
+    // Token and secret are only returned to the issuer once, never stored raw.
+    public record IssuedInvitation(
+        long id, String token, String confirmationCode, String expiresAt
     ) {}
 
-    public record ApproveClaim(
-        @NotBlank String verificationMethod,
-        @NotBlank @Size(max = 1000) String verificationNotes
+    public record RedeemInvitation(
+        @NotBlank String token,
+        @NotBlank String confirmationCode,
+        @NotBlank String accountPassword
     ) {}
 
-    public record RejectClaim(@NotBlank @Size(max = 1000) String reason) {}
-    public record RevokeClaim(@NotBlank @Size(max = 1000) String reason) {}
+    public record ActivateInvitation(
+        @NotBlank String token,
+        @NotBlank String confirmationCode,
+        @NotBlank @Size(max = 255) String email,
+        @NotBlank @Size(min = 8) String password,
+        @NotBlank String passwordConfirmation,
+        @NotNull Boolean termsAgreement
+    ) {}
+
+    public record InvitationResult(String status, String message) {}
 
     public record Portfolio(
         int year, int month,
