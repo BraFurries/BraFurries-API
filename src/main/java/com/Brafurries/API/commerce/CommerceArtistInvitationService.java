@@ -78,7 +78,7 @@ public class CommerceArtistInvitationService {
             "Convite ou confirmação inválidos; solicite um novo convite à equipe"); }
     }
 
-    @Transactional
+    @Transactional(isolation=Isolation.SERIALIZABLE)
     public IssuedInvitation issue(Authentication auth,IssueInvitation input) {
         User owner=authorization.requireOwner(auth);
         if(input==null || input.artistUserId()==null || input.artistUserId()<=0) {
@@ -92,6 +92,9 @@ public class CommerceArtistInvitationService {
             SELECT user_id FROM commerce_artist_profiles WHERE user_id=? FOR UPDATE
             """,id);
         if(profile.isEmpty()) throw missing("Artista externa não encontrada");
+        // Never issue a link that could claim a legacy Discord/Community/OAuth
+        // account or a sparse row with unclassified user-owned data.
+        ownership.assertOnlyArtistCommerceReferences(id);
 
         // Explicit reissue revokes any previous active invitation atomically.
         jdbc.update("""
