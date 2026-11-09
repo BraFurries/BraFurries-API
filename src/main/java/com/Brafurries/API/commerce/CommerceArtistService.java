@@ -206,6 +206,10 @@ public class CommerceArtistService {
            || exists("SELECT id FROM user_telegram WHERE user_id=? LIMIT 1 FOR UPDATE",artistId)
            || exists("SELECT id FROM user_patreon WHERE user_id=? LIMIT 1 FOR UPDATE",artistId)
            || exists("SELECT user_id FROM user_permissions WHERE user_id=? LIMIT 1 FOR UPDATE",artistId)
+           // A sparse commercial record must never have issued session,
+           // password-reset or verification tokens, even if later revoked.
+           || exists("SELECT id FROM user_refresh_tokens WHERE user_id=? LIMIT 1 FOR UPDATE",artistId)
+           || exists("SELECT id FROM user_tokens WHERE user_id=? LIMIT 1 FOR UPDATE",artistId)
            || exists("SELECT id FROM user_identity_links WHERE (user_a_id=? OR user_b_id=?) AND revoked_at IS NULL LIMIT 1 FOR UPDATE",artistId,artistId)) {
             throw conflict("O artista já possui identidade ou permissões; requer conciliação");
         }
