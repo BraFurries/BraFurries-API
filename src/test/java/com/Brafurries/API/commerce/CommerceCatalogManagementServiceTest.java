@@ -134,4 +134,17 @@ class CommerceCatalogManagementServiceTest {
                 new BigDecimal("12.00"),new BigDecimal("15.00"),null))).getStatusCode());
         verify(jdbc,never()).update(contains("UPDATE commerce_products"),any(Object[].class));
     }
+
+    @Test void archiveUnusedArtworkPreservesRecordAndWritesAudit() {
+        grant(PlatformPermission.ARTWORKS_MANAGE);
+        when(jdbc.queryForList(contains("FROM commerce_artworks WHERE id=? FOR UPDATE"),
+                               eq(3L))).thenReturn(List.of(Map.of("status","DRAFT")));
+        when(jdbc.queryForObject(contains("status='ACTIVE'"),eq(Number.class),eq(3L)))
+            .thenReturn(0);
+        service.setArtworkArchived(auth,3,true);
+        verify(jdbc).update(contains("SET status='ARCHIVED'"),eq(3L));
+        verify(jdbc).update(contains("INSERT INTO commerce_catalog_audit"),
+            eq(2),eq("ARTWORK"),eq(3L),eq("ARCHIVED"));
+        verify(jdbc,never()).update(contains("DELETE FROM commerce_artworks"),eq(3L));
+    }
 }
