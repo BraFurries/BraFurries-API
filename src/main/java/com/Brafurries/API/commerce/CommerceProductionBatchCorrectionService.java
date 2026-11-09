@@ -69,7 +69,7 @@ public class CommerceProductionBatchCorrectionService {
 
         List<Map<String,Object>> found=jdbc.queryForList("""
             SELECT product_id AS productId,supplier_id AS supplierId,
-                   quantity,unit_cost AS unitCost,additional_cost AS additionalCost,
+                   quantity,sold_quantity AS soldQuantity,unit_cost AS unitCost,additional_cost AS additionalCost,
                    produced_on AS producedOn,reference
               FROM commerce_production_batches WHERE id=? FOR UPDATE
             """,id);
@@ -106,7 +106,8 @@ public class CommerceProductionBatchCorrectionService {
             SELECT id FROM commerce_sale_items
              WHERE production_batch_id=? LIMIT 1 FOR UPDATE
             """,Long.class,id);
-        if(changedEconomics && !historicalSales.isEmpty()) {
+        if(changedEconomics && (!historicalSales.isEmpty() ||
+           (row.get("soldQuantity") instanceof Number sold && sold.longValue()>0))) {
             throw conflict("Lote utilizado em venda (inclusive cancelada): somente a referência pode ser corrigida");
         }
         if(changedEconomics) {
