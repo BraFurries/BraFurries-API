@@ -209,18 +209,20 @@ public class CommerceArtistService {
            || exists("SELECT id FROM user_identity_links WHERE (user_a_id=? OR user_b_id=?) AND revoked_at IS NULL LIMIT 1 FOR UPDATE",artistId,artistId)) {
             throw conflict("O artista já possui identidade ou permissões; requer conciliação");
         }
-        jdbc.update("""
+        int approved=jdbc.update("""
             UPDATE commerce_artist_claim_requests
                SET status='APPROVED',verification_method=?,review_notes=?,
                    reviewed_by_user_id=?,reviewed_at=CURRENT_TIMESTAMP(6)
              WHERE id=? AND status='PENDING'
             """,method,notes,owner.getId(),claimId);
-        jdbc.update("""
+        if(approved!=1) throw conflict("Esta reivindicação mudou durante a revisão");
+        int linked=jdbc.update("""
             UPDATE commerce_artist_profiles
                SET claimed_by_user_id=?,claimed_at=CURRENT_TIMESTAMP(6),
                    claim_approved_by_user_id=?
              WHERE user_id=? AND claimed_by_user_id IS NULL
             """,applicantId,owner.getId(),artistId);
+        if(linked!=1) throw conflict("A titularidade do artista mudou durante a revisão");
         audit(owner.getId(),"ARTIST_CLAIM",claimId,"APPROVED");
     }
 
@@ -235,12 +237,13 @@ public class CommerceArtistService {
         if(!"PENDING".equals(claim.get("status"))) {
             throw conflict("Esta solicitação já foi analisada");
         }
-        jdbc.update("""
+        int rejected=jdbc.update("""
             UPDATE commerce_artist_claim_requests
                SET status='REJECTED',review_notes=?,reviewed_by_user_id=?,
                    reviewed_at=CURRENT_TIMESTAMP(6)
              WHERE id=? AND status='PENDING'
             """,reason,owner.getId(),claimId);
+        if(rejected!=1) throw conflict("Esta reivindicação mudou durante a revisão");
         audit(owner.getId(),"ARTIST_CLAIM",claimId,"REJECTED");
     }
 
@@ -261,18 +264,20 @@ public class CommerceArtistService {
         if(approved.isEmpty()) throw conflict("Registro de aprovação não encontrado");
         long claimId=number(approved.get(0),"id");
         // Do not overwrite the ORIGINAL approval reviewer, proof or date.
-        jdbc.update("""
+        int revoked=jdbc.update("""
             UPDATE commerce_artist_claim_requests
                SET status='REVOKED',revocation_reason=?,revoked_by_user_id=?,
                    revoked_at=CURRENT_TIMESTAMP(6)
              WHERE id=? AND status='APPROVED'
             """,reason,owner.getId(),claimId);
-        jdbc.update("""
+        if(revoked!=1) throw conflict("Esta reivindicação mudou durante a revogação");
+        int unlinked=jdbc.update("""
             UPDATE commerce_artist_profiles
                SET claimed_by_user_id=NULL,claimed_at=NULL,
                    claim_approved_by_user_id=NULL
              WHERE user_id=? AND claimed_by_user_id=?
             """,artistId,applicantId);
+        if(unlinked!=1) throw conflict("Não foi possível remover a titularidade do artista");
         audit(owner.getId(),"ARTIST_CLAIM",claimId,"REVOKED");
     }
 
