@@ -260,7 +260,7 @@ class CommerceSettlementServiceTest {
                 eq(Long.class),eq(12L))).thenReturn(List.of());
         assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
             ()->service.reversePayment(auth,90L,12L,
-                new ReversePayment(LocalDate.of(2026,11,07),"Data incorreta")))
+                new ReversePayment(LocalDate.of(2026,11,7),"Data incorreta")))
             .getStatusCode());
         verify(support,never()).insert(anyString(),any(Object[].class));
     }
