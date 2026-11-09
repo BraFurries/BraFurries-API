@@ -302,7 +302,8 @@ public class CommerceOrderService {
     private Map<String,Object> requireOrder(long id,boolean lock) {
         if(id<1) throw missing("Encomenda não encontrada");
         var rows=jdbc.queryForList("""
-            SELECT id,status,total_amount AS totalAmount FROM commerce_orders WHERE id=?
+            SELECT id,status,ordered_on AS orderedOn,total_amount AS totalAmount
+              FROM commerce_orders WHERE id=?
             """+(lock?" FOR UPDATE":""),id);
         if(rows.size()!=1) throw missing("Encomenda não encontrada");
         return rows.get(0);
