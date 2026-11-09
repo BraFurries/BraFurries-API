@@ -160,6 +160,20 @@ class CommerceOrderServiceTest {
     }
 
     @Test
+    void rejectsDeliveryDatedBeforeOrderWasCreated() {
+        when(jdbc.queryForList(contains("FROM commerce_orders WHERE id="),eq(25L)))
+            .thenReturn(List.of(Map.of("id",25L,"status","READY",
+                "totalAmount",new BigDecimal("110.00"),
+                "orderedOn",LocalDate.of(2026,11,5))));
+        assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
+            ()->orders.transition(auth,25L,
+                new Transition("DELIVERED",LocalDate.of(2026,11,3),null)))
+            .getStatusCode());
+        verify(jdbc,never()).update(contains("UPDATE commerce_orders"),any(Object[].class));
+        verifyNoInteractions(support);
+    }
+
+    @Test
     void failedReceiptAuditIsNotSilentlyReturnedAsSuccessfulIdempotentReplay() {
         when(jdbc.queryForList(contains("FROM commerce_orders WHERE id="),eq(25L)))
             .thenReturn(List.of(Map.of("id",25L,"status","OPEN",
