@@ -203,7 +203,10 @@ public class CommerceArtistService {
            || exists("SELECT id FROM user_social_identities WHERE user_id=? LIMIT 1 FOR UPDATE",artistId)
            || exists("SELECT id FROM user_community_status WHERE user_id=? LIMIT 1 FOR UPDATE",artistId)
            || exists("SELECT role_id FROM api_user_roles WHERE user_id=? LIMIT 1 FOR UPDATE",artistId)
-           || exists("SELECT id FROM user_identity_links WHERE (user_a_id=? OR user_b_id=?) AND status='CONFIRMED' LIMIT 1 FOR UPDATE",artistId,artistId)) {
+           || exists("SELECT id FROM user_telegram WHERE user_id=? LIMIT 1 FOR UPDATE",artistId)
+           || exists("SELECT id FROM user_patreon WHERE user_id=? LIMIT 1 FOR UPDATE",artistId)
+           || exists("SELECT id FROM user_permissions WHERE user_id=? LIMIT 1 FOR UPDATE",artistId)
+           || exists("SELECT id FROM user_identity_links WHERE (user_a_id=? OR user_b_id=?) AND revoked_at IS NULL LIMIT 1 FOR UPDATE",artistId,artistId)) {
             throw conflict("O artista já possui identidade ou permissões; requer conciliação");
         }
         jdbc.update("""
