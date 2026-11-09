@@ -237,6 +237,35 @@ class CommerceSettlementServiceTest {
     }
 
     @Test
+    void refusesPaymentThatBelongsToAnotherSettlement() {
+        givenStatement("PARTIALLY_PAID",new BigDecimal("200.00"));
+        when(jdbc.queryForList(contains("FROM commerce_payments"),
+                eq(12L),eq(90L))).thenReturn(List.of());
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
+            ()->service.reversePayment(auth,90L,12L,
+                new ReversePayment(LocalDate.of(2026,11,9),"Pagamento de outra pessoa")))
+            .getStatusCode());
+        verify(support,never()).insert(anyString(),any(Object[].class));
+        verify(support,never()).audit(anyInt(),anyString(),anyLong(),anyString());
+    }
+
+    @Test
+    void refusesReversalDatedBeforeOriginalPayment() {
+        givenStatement("PAID",new BigDecimal("100.00"));
+        when(jdbc.queryForList(contains("FROM commerce_payments"),
+                eq(12L),eq(90L))).thenReturn(List.of(Map.of(
+            "id",12L,"amount",new BigDecimal("100.00"),
+            "paid_on",java.sql.Date.valueOf("2026-11-08"),"event_kind","PAYMENT")));
+        when(jdbc.queryForList(contains("WHERE original_payment_id=?"),
+                eq(Long.class),eq(12L))).thenReturn(List.of());
+        assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
+            ()->service.reversePayment(auth,90L,12L,
+                new ReversePayment(LocalDate.of(2026,11,07),"Data incorreta")))
+            .getStatusCode());
+        verify(support,never()).insert(anyString(),any(Object[].class));
+    }
+
+    @Test
     void neverReversesAnAlreadyNegativeReversalEvent() {
         givenStatement("APPROVED",new BigDecimal("100.00"));
         when(jdbc.queryForList(contains("FROM commerce_payments"),
