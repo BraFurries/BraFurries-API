@@ -217,19 +217,19 @@ class CommerceArtistServiceTest {
         when(jdbc.queryForList(contains("SELECT id,email_verified_at,merged_into_user_id"),
             eq(77))).thenReturn(List.of(Map.of(
                 "id",77,"email_verified_at",java.time.LocalDateTime.of(2026,11,9,10,30))));
-        when(jdbc.queryForList(contains("SELECT email,password_hash,merged_into_user_id"),
-            eq(104))).thenReturn(List.of(Map.of()));
-        // Intermediate identity checks are expected to return empty lists.
-        // Use a broad harmless default before the targeted positive result,
-        // avoiding Mockito STRICT_STUBS interpreting earlier calls as an error.
+        // Stub the broad empty reads BEFORE specific legacy checks:
+        // otherwise the default stub shadows the sparse artist account row.
         lenient().when(jdbc.queryForList(anyString(),eq(104)))
             .thenReturn(List.of());
+        doReturn(List.of(Map.of())).when(jdbc)
+            .queryForList(contains("SELECT email,password_hash,merged_into_user_id"),eq(104));
         doReturn(List.of(Map.of("id",20))).when(jdbc)
             .queryForList(contains("SELECT id FROM user_refresh_tokens"),eq(104));
 
         assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
             () -> artists.approve(auth,34L,new ApproveClaim(
                 "IN_PERSON","Confirmado pessoalmente"))).getStatusCode());
+        verify(jdbc).queryForList(contains("SELECT id FROM user_refresh_tokens"),eq(104));
         verify(jdbc,never()).update(contains("UPDATE commerce_artist_claim_requests"),
             any(Object[].class));
         verify(jdbc,never()).update(contains("UPDATE commerce_artist_profiles"),
