@@ -135,6 +135,28 @@ class CommerceCatalogManagementServiceTest {
         verify(jdbc,never()).update(contains("UPDATE commerce_products"),any(Object[].class));
     }
 
+    @Test void onlyOwnerOrExplicitProductManagerCanArchiveProduct() {
+        when(authorization.require(auth,PlatformPermission.PRODUCTS_MANAGE))
+            .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
+        assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
+            ()->service.setProductActive(auth,25L,false)).getStatusCode());
+        verifyNoInteractions(jdbc);
+    }
+
+    @Test void changingSupplierContactsKeepsFinancialHistoryUntouched() {
+        grant(PlatformPermission.SUPPLIERS_MANAGE);
+        when(jdbc.queryForList(contains("FROM commerce_suppliers"),
+                               eq(14L))).thenReturn(List.of(Map.of("id",14L)));
+        service.updateSupplier(auth,14L,new CreateSupplier(
+            "Oficina revisada","Contato","contato@example.org","11999999999","Novo telefone"));
+        verify(jdbc).update(contains("UPDATE commerce_suppliers"),
+            eq("Oficina revisada"),eq("Contato"),eq("contato@example.org"),
+            eq("11999999999"),eq("Novo telefone"),eq(14L));
+        verify(jdbc).update(contains("INSERT INTO commerce_catalog_audit"),
+            eq(2),eq("SUPPLIER"),eq(14L),eq("UPDATED"));
+        verify(jdbc,never()).update(contains("commerce_sales"),any(Object[].class));
+    }
+
     @Test void archiveUnusedArtworkPreservesRecordAndWritesAudit() {
         grant(PlatformPermission.ARTWORKS_MANAGE);
         when(jdbc.queryForList(contains("FROM commerce_artworks WHERE id=? FOR UPDATE"),
