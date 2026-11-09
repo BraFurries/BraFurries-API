@@ -72,8 +72,11 @@ public class CommerceArtistService {
                    p.instagram_handle AS instagramHandle,
                    p.contact_email AS contactEmail,
                    p.internal_notes AS internalNotes,
+                   (CASE WHEN u.email IS NULL AND u.password_hash IS NULL
+                        AND u.merged_into_user_id IS NULL THEN 1 ELSE 0 END) AS canInvite,
                    p.created_at AS createdAt
               FROM commerce_artist_profiles p
+              JOIN users u ON u.id=p.user_id
              ORDER BY p.user_id DESC LIMIT 500
             """);
     }
