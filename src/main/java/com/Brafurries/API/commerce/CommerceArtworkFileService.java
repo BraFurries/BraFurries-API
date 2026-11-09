@@ -63,7 +63,8 @@ public class CommerceArtworkFileService {
                                                MultipartFile file) {
         int actor=authorization.require(auth,PlatformPermission.ARTWORKS_MANAGE)
             .user().getId();
-        requireArtwork(artworkId,true);
+        // Foreign key enforces existence at insert; avoid holding a row lock during S3 upload.
+        requireArtwork(artworkId,false);
         if(!KINDS.contains(kind)) throw invalid("Tipo de arquivo inválido");
         String normalized=description==null||description.isBlank()?null:description.trim();
         if(normalized!=null&&normalized.length()>500) {
@@ -79,7 +80,7 @@ public class CommerceArtworkFileService {
                 TransactionSynchronizationManager.registerSynchronization(
                     new TransactionSynchronization() {
                         @Override public void afterCompletion(int completionStatus) {
-                            if(completionStatus!=STATUS_COMMITTED) {
+                            if(completionStatus==STATUS_ROLLED_BACK) {
                                 try {
                                     storage.deleteUnregistered(artworkId,stored.key());
                                 } catch(RuntimeException cleanupFailure) {
@@ -87,6 +88,12 @@ public class CommerceArtworkFileService {
                                     LOG.error("Falha ao compensar arte {} no R2 após rollback: {}",
                                         artworkId,cleanupFailure.getClass().getSimpleName());
                                 }
+                            } else if(completionStatus==STATUS_UNKNOWN) {
+                                // If DB commit might have succeeded, deleting would
+                                // leave a valid metadata record pointing to no file.
+                                // Preserve the object for explicit reconciliation.
+                                LOG.warn("Commit inconclusivo ao registrar arquivo da arte {}; "
+                                    +"objeto R2 retido para reconciliação",artworkId);
                             }
                         }
                     });
