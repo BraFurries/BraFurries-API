@@ -377,12 +377,12 @@ public class CommerceCatalogService {
         try {
             long id=insert("""
                 INSERT INTO commerce_artwork_contracts
-                    (artwork_id,template_id,artist_user_id,modality_snapshot,
-                     royalty_method_snapshot,royalty_percent_snapshot,
+                    (artwork_id,template_id,artist_user_id,signed_artist_user_id,
+                     modality_snapshot,royalty_method_snapshot,royalty_percent_snapshot,
                      royalty_fixed_snapshot,one_time_amount,effective_from,effective_until,
                      signed_storage_key,signed_sha256,signed_bytes,created_by_user_id)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,artworkId,templateId,artistId,template.get("modality"),
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,artworkId,templateId,artistId,artistId,template.get("modality"),
                 template.get("royalty_method"),template.get("royalty_percent"),
                 template.get("royalty_fixed_amount"),oneTime,effectiveFrom,effectiveUntil,
                 stored.key(),stored.sha256(),stored.sizeBytes(),actor.getId());
