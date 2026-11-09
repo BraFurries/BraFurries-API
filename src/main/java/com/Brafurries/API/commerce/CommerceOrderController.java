@@ -9,6 +9,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -37,6 +39,19 @@ public class CommerceOrderController {
     public Created create(Authentication auth,@Valid @RequestBody Create input) {
         return orders.create(auth,input);
     }
+    @PutMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void update(Authentication auth,@PathVariable long id,
+                       @Valid @RequestBody Update input) {
+        orders.update(auth,id,input);
+    }
+
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(Authentication auth,@PathVariable long id) {
+        orders.deleteUnused(auth,id);
+    }
+
     @GetMapping("/{id}/items")
     public List<Map<String,Object>> items(Authentication auth,@PathVariable long id) {
         return orders.items(auth,id);

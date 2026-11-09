@@ -180,6 +180,101 @@ public class CommerceOrderService {
         return new Created(id);
     }
 
+    /**
+     * Pre-payment correction of an operational order. No payments, shipments,
+     * stock sales or royalty events can be rewritten by this endpoint.
+     * The locked order row serializes edits against receipts and transitions.
+     */
+    @Transactional
+    public void update(Authentication auth,long orderId,Update input) {
+        int actor=require(auth);
+        Map<String,Object> current=requireOrder(orderId,true);
+        requireEditable(current,orderId);
+        if(input==null || input.items()==null || input.items().isEmpty() ||
+           input.items().size()>50) throw invalid("Encomenda precisa ter entre 1 e 50 itens");
+        String buyer=text(input.buyerLabel(),160,"Comprador",true);
+        String channel=input.channel();
+        if(channel==null || !CHANNELS.contains(channel)) throw invalid("Canal de encomenda inválido");
+        String reference=text(input.externalReference(),120,"Referência",false);
+        String notes=text(input.notes(),5000,"Observações",false);
+        LocalDate ordered=input.orderedOn(),due=input.expectedDeliveryOn();
+        if(ordered==null || ordered.getYear()<2000 || ordered.isAfter(today()) ||
+           (due!=null && due.isBefore(ordered))) {
+            throw invalid("Datas da encomenda inválidas");
+        }
+        BigDecimal total=BigDecimal.ZERO;
+        List<ValidatedLine> lines=new ArrayList<>();
+        for(Line line:input.items()) {
+            if(line==null || line.quantity()==null || line.quantity()<1 ||
+               line.quantity()>100000) throw invalid("Quantidade inválida");
+            String label=text(line.label(),180,"Produto da encomenda",true);
+            String size=text(line.size(),64,"Tamanho",false);
+            Long product=line.productId();
+            if(product!=null && (product<1 || jdbc.queryForList(
+                 "SELECT id FROM commerce_products WHERE id=? AND active=1",
+                 Long.class,product).size()!=1)) {
+                throw invalid("Produto inativo ou inexistente");
+            }
+            BigDecimal unit=money(line.unitPrice(),"Preço unitário");
+            BigDecimal amount=money(unit.multiply(BigDecimal.valueOf(line.quantity())),
+                                    "Valor total do item");
+            total=money(total.add(amount),"Total da encomenda");
+            lines.add(new ValidatedLine(product,label,size,line.quantity(),unit,amount));
+        }
+        try {
+            jdbc.update("""
+                UPDATE commerce_orders
+                   SET buyer_label=?,channel=?,external_reference=?,ordered_on=?,
+                       expected_delivery_on=?,total_amount=?,notes=?,updated_by_user_id=?
+                 WHERE id=? AND status='OPEN'
+                """,buyer,channel,reference,ordered,due,total,notes,actor,orderId);
+            jdbc.update("DELETE FROM commerce_order_items WHERE order_id=?",orderId);
+            for(ValidatedLine line:lines) {
+                jdbc.update("""
+                    INSERT INTO commerce_order_items
+                      (order_id,product_id,item_label,size_label,quantity,
+                       unit_price_snapshot,line_amount)
+                    VALUES (?,?,?,?,?,?,?)
+                    """,orderId,line.productId(),line.label(),line.size(),line.quantity(),
+                        line.unitPrice(),line.lineTotal());
+            }
+        } catch(DataIntegrityViolationException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Referência de encomenda duplicada ou produto em uso inválido",ex);
+        }
+        support.audit(actor,"ORDER",orderId,"UPDATED");
+    }
+
+    @Transactional
+    public void deleteUnused(Authentication auth,long orderId) {
+        int actor=require(auth);
+        Map<String,Object> current=requireOrder(orderId,true);
+        requireEditable(current,orderId);
+        jdbc.update("DELETE FROM commerce_order_items WHERE order_id=?",orderId);
+        try {
+            jdbc.update("DELETE FROM commerce_orders WHERE id=?",orderId);
+        } catch(DataIntegrityViolationException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Encomenda com referências históricas; cancele em vez de excluir",ex);
+        }
+        support.audit(actor,"ORDER",orderId,"DELETED");
+    }
+
+    private void requireEditable(Map<String,Object> order,long orderId) {
+        if(!"OPEN".equals(order.get("status"))) {
+            throw conflict("Somente encomendas abertas podem ser corrigidas ou excluídas");
+        }
+        // Any receipt event, even if later reversed, freezes the order amount
+        // and line snapshots so the receipt history retains its original basis.
+        List<Long> payments=jdbc.queryForList("""
+            SELECT id FROM commerce_order_payment_events
+             WHERE order_id=? LIMIT 1 FOR UPDATE
+            """,Long.class,orderId);
+        if(!payments.isEmpty()) {
+            throw conflict("Esta encomenda já tem histórico de recebimentos; cancele ou concilie");
+        }
+    }
+
     @Transactional
     public void transition(Authentication auth,long orderId,Transition input) {
         int actor=require(auth);
