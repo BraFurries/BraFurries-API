@@ -167,17 +167,17 @@ public class CommerceArtistService {
         // verified OUTSIDE the website. The applicant's typed note or
         // artist nickname is never proof. No auto-approval.
         Map<String,Object> observed=requireClaim(claimId,false);
-        int artistId=number(observed,"artist_user_id").intValue();
+        int artistId=Math.toIntExact(number(observed,"artist_user_id"));
         Map<String,Object> profile=lockProfile(artistId);
         Map<String,Object> claim=requireClaim(claimId,true);
         if(!"PENDING".equals(claim.get("status"))) {
             throw conflict("Esta solicitação já foi analisada");
         }
-        if(number(claim,"artist_user_id").intValue()!=artistId
+        if(Math.toIntExact(number(claim,"artist_user_id"))!=artistId
             || profile.get("claimed_by_user_id")!=null) {
             throw conflict("A titularidade do artista mudou");
         }
-        int applicantId=number(claim,"requester_user_id").intValue();
+        int applicantId=Math.toIntExact(number(claim,"requester_user_id"));
         if(applicantId==artistId) throw conflict("O titular já corresponde à conta");
         List<Map<String,Object>> applicants=jdbc.queryForList("""
             SELECT id,email_verified_at,merged_into_user_id
@@ -225,7 +225,7 @@ public class CommerceArtistService {
         User owner=authorization.requireOwner(auth);
         String reason=text(input==null?null:input.reason(),1000,"Motivo da recusa",true);
         Map<String,Object> observed=requireClaim(claimId,false);
-        int artistId=number(observed,"artist_user_id").intValue();
+        int artistId=Math.toIntExact(number(observed,"artist_user_id"));
         lockProfile(artistId);
         Map<String,Object> claim=requireClaim(claimId,true);
         if(!"PENDING".equals(claim.get("status"))) {
@@ -248,7 +248,7 @@ public class CommerceArtistService {
         if(profile.get("claimed_by_user_id")==null) {
             throw conflict("O artista não possui reivindicação ativa");
         }
-        int applicantId=number(profile,"claimed_by_user_id").intValue();
+        int applicantId=Math.toIntExact(number(profile,"claimed_by_user_id"));
         List<Map<String,Object>> approved=jdbc.queryForList("""
             SELECT id FROM commerce_artist_claim_requests
              WHERE artist_user_id=? AND requester_user_id=? AND status='APPROVED'
