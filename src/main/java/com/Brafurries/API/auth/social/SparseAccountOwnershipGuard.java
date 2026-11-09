@@ -28,6 +28,18 @@ public class SparseAccountOwnershipGuard {
         "user_tokens.user_id",
         "user_discord_link_challenges.requesting_user_id"
     );
+    // Only these specific commerce ownership columns may be reparented.
+    // Historical signed signatories and issued invitations remain provenance.
+    private static final Set<String> ARTIST_COMMERCE_REFERENCES = Set.of(
+        "commerce_artist_profiles.user_id",
+        "commerce_artist_invitations.artist_user_id",
+        "commerce_artworks.artist_user_id",
+        "commerce_artwork_contracts.artist_user_id",
+        "commerce_artwork_contracts.signed_artist_user_id",
+        "commerce_royalty_accruals.artist_user_id",
+        "commerce_settlements.artist_user_id",
+        "commerce_period_locks.artist_user_id"
+    );
     private static final String REFERENCES = """
         SELECT c.TABLE_NAME AS table_name, c.COLUMN_NAME AS column_name,
                EXISTS(SELECT 1 FROM information_schema.KEY_COLUMN_USAGE fk
@@ -76,6 +88,14 @@ public class SparseAccountOwnershipGuard {
     }
 
     public void assertOnlyTransferableReferences(Integer absorbedUserId) {
+        assertReferences(absorbedUserId, ALLOWED);
+    }
+
+    public void assertOnlyArtistCommerceReferences(Integer absorbedUserId) {
+        assertReferences(absorbedUserId, ARTIST_COMMERCE_REFERENCES);
+    }
+
+    private void assertReferences(Integer absorbedUserId, Set<String> allowed) {
         if (absorbedUserId == null || absorbedUserId <= 0) {
             throw new IllegalArgumentException("Invalid absorbed user");
         }
@@ -99,7 +119,7 @@ public class SparseAccountOwnershipGuard {
             }
 
             String name = table + "." + column;
-            if (ALLOWED.contains(name)) {
+            if (allowed.contains(name)) {
                 // Only known, Database-FK-backed references may be transferred
                 // or revoked by the executor.
                 if (!hasParentFk(ref.get("has_user_fk"))) throw blocked();
