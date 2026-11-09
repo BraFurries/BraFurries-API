@@ -55,8 +55,8 @@ class CommerceOrderServiceTest {
         when(jdbc.queryForList(contains("FROM commerce_orders WHERE id="),eq(25L)))
             .thenReturn(List.of(Map.of("id",25L,"status","OPEN",
                 "totalAmount",new BigDecimal("100.00"))));
-        when(jdbc.queryForObject(contains("COALESCE(SUM(amount),0)"),
-            eq(BigDecimal.class),eq(25L))).thenReturn(new BigDecimal("10.00"));
+        when(jdbc.queryForList(contains("SELECT amount FROM commerce_order_payment_events"),
+            eq(BigDecimal.class),eq(25L))).thenReturn(List.of(new BigDecimal("10.00")));
         assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
             ()->orders.transition(auth,25L,new Transition("CANCELLED",null,
                 "Cliente desistiu"))).getStatusCode());
@@ -181,8 +181,8 @@ class CommerceOrderServiceTest {
         when(jdbc.queryForList(
             contains("FROM commerce_order_payment_events WHERE request_key"),eq(KEY)))
             .thenReturn(List.of());
-        when(jdbc.queryForObject(contains("COALESCE(SUM(amount),0)"),
-            eq(BigDecimal.class),eq(25L))).thenReturn(BigDecimal.ZERO);
+        when(jdbc.queryForList(contains("SELECT amount FROM commerce_order_payment_events"),
+            eq(BigDecimal.class),eq(25L))).thenReturn(List.of());
         when(support.insert(contains("INSERT INTO commerce_order_payment_events"),
             any(Object[].class))).thenReturn(99L);
         doThrow(new org.springframework.dao.DataIntegrityViolationException("audit failed"))
@@ -202,12 +202,34 @@ class CommerceOrderServiceTest {
                 "totalAmount",new BigDecimal("100.00"))));
         when(jdbc.queryForList(contains("FROM commerce_order_payment_events WHERE request_key"),
             eq(KEY))).thenReturn(List.of());
-        when(jdbc.queryForObject(contains("COALESCE(SUM(amount),0)"),
-            eq(BigDecimal.class),eq(25L))).thenReturn(new BigDecimal("90.00"));
+        when(jdbc.queryForList(contains("SELECT amount FROM commerce_order_payment_events"),
+            eq(BigDecimal.class),eq(25L))).thenReturn(List.of(new BigDecimal("90.00")));
         var payment=new Receive(KEY,new BigDecimal("20.00"),LocalDate.of(2026,11,3),
             "PIX",null,null);
         assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
             ()->orders.receive(auth,25L,payment)).getStatusCode());
+        verifyNoInteractions(support);
+    }
+
+    @Test
+    void balanceUsesLockingCurrentReadEvenAfterAuthorizationSnapshot() {
+        when(jdbc.queryForList(contains("FROM commerce_orders WHERE id="),eq(25L)))
+            .thenReturn(List.of(Map.of("id",25L,"status","OPEN",
+                "totalAmount",new BigDecimal("100.00"))));
+        when(jdbc.queryForList(
+            contains("FROM commerce_order_payment_events WHERE request_key"),eq(KEY)))
+            .thenReturn(List.of());
+        when(jdbc.queryForList(contains("SELECT amount FROM commerce_order_payment_events"),
+            eq(BigDecimal.class),eq(25L)))
+            .thenReturn(List.of(new BigDecimal("70.00"),new BigDecimal("20.00")));
+        var payment=new Receive(KEY,new BigDecimal("20.00"),LocalDate.of(2026,11,3),
+            "PIX",null,null);
+        assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
+            ()->orders.receive(auth,25L,payment)).getStatusCode());
+        verify(jdbc).queryForList(argThat(sql->sql.contains("SELECT amount FROM commerce_order_payment_events")
+            && sql.contains("FOR UPDATE")),eq(BigDecimal.class),eq(25L));
+        verify(jdbc).queryForList(argThat(sql->sql.contains("FROM commerce_order_payment_events WHERE request_key")
+            && sql.contains("FOR UPDATE")),eq(KEY));
         verifyNoInteractions(support);
     }
 
