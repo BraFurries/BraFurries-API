@@ -108,6 +108,24 @@ class CommerceArtistInvitationServiceTest {
     }
 
     @Test
+    void issuerCannotInviteUnknownLegacyOwnershipEvenWithEmptyLoginCredentials() {
+        when(authorization.requireOwner(auth)).thenReturn(user(2,"owner@example.invalid"));
+        when(users.findByIdForUpdate(10)).thenReturn(Optional.of(user(10,null)));
+        when(jdbc.queryForList(contains("FROM commerce_artist_profiles"),
+            eq(10))).thenReturn(List.of(Map.of("user_id",10)));
+        doThrow(new ResponseStatusException(HttpStatus.CONFLICT,
+            "ACCOUNT_DATA_RECONCILIATION_REQUIRED"))
+            .when(ownership).assertOnlyArtistCommerceReferences(10);
+
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->service.issue(auth,new IssueInvitation(10))).getStatusCode());
+        verify(finance,never()).insert(contains("INSERT INTO commerce_artist_invitations"),
+            any(Object[].class));
+        verify(jdbc,never()).update(contains("UPDATE commerce_artist_invitations"),
+            any(Object[].class));
+    }
+
+    @Test
     void failedSeparateCodeIncrementsDurableAttemptCounterWithoutActivatingLogin() {
         invite(10,hash("000000000000"));
         assertThrows(CommerceArtistInvitationService.InvalidProof.class,
