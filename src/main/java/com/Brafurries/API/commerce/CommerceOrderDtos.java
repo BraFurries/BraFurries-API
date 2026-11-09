@@ -34,6 +34,17 @@ public final class CommerceOrderDtos {
         @Valid @NotEmpty List<Line> items
     ) {}
 
+    /** Editable only while OPEN and before ANY recorded receipt, including reversed receipts. */
+    public record Update(
+        @NotBlank @Size(max=160) String buyerLabel,
+        @NotBlank String channel,
+        @Size(max=120) String externalReference,
+        @NotNull LocalDate orderedOn,
+        LocalDate expectedDeliveryOn,
+        @Size(max=5000) String notes,
+        @Valid @NotEmpty List<Line> items
+    ) {}
+
     public record Transition(
         @NotBlank String status,
         LocalDate deliveredOn,
