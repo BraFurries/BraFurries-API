@@ -10,6 +10,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -19,6 +23,7 @@ import org.springframework.web.server.ResponseStatusException;
  */
 @Service
 public class CommerceArtworkFileService {
+    private static final Logger LOG=LoggerFactory.getLogger(CommerceArtworkFileService.class);
     private static final Set<String> KINDS=Set.of(
         "SOURCE","PRINT_READY","EXPORT","REFERENCE");
     private final PlatformAuthorizationService authorization;
@@ -65,7 +70,28 @@ public class CommerceArtworkFileService {
             throw invalid("Descrição ultrapassa 500 caracteres");
         }
         var stored=storage.upload(artworkId,file);
+        boolean rollbackHookRegistered=false;
         try {
+            // R2 is not transactional: an INSERT may succeed but the outer
+            // transaction can still fail during audit or COMMIT. Register
+            // compensation on transaction completion, not only SQL exceptions.
+            if(TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.registerSynchronization(
+                    new TransactionSynchronization() {
+                        @Override public void afterCompletion(int completionStatus) {
+                            if(completionStatus!=STATUS_COMMITTED) {
+                                try {
+                                    storage.deleteUnregistered(artworkId,stored.key());
+                                } catch(RuntimeException cleanupFailure) {
+                                    // Never leak private object keys or credentials in logs.
+                                    LOG.error("Falha ao compensar arte {} no R2 após rollback: {}",
+                                        artworkId,cleanupFailure.getClass().getSimpleName());
+                                }
+                            }
+                        }
+                    });
+                rollbackHookRegistered=true;
+            }
             long id=support.insert("""
                 INSERT INTO commerce_artwork_files
                     (artwork_id,kind,original_name,extension,media_type,description,
@@ -76,10 +102,14 @@ public class CommerceArtworkFileService {
             audit(actor,id,"UPLOADED");
             return new CommerceCatalogDtos.Created(id);
         } catch(RuntimeException ex) {
-            try {
-                storage.deleteUnregistered(artworkId,stored.key());
-            } catch(RuntimeException cleanupFailure) {
-                ex.addSuppressed(cleanupFailure);
+            // Fallback for non-transactional direct invocations, e.g. focused
+            // unit tests. Under Spring transaction, afterCompletion owns cleanup.
+            if(!rollbackHookRegistered) {
+                try {
+                    storage.deleteUnregistered(artworkId,stored.key());
+                } catch(RuntimeException cleanupFailure) {
+                    ex.addSuppressed(cleanupFailure);
+                }
             }
             throw ex;
         }
