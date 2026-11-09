@@ -209,6 +209,23 @@ public class CommerceSettlementService {
         if (remaining.compareTo(amount)<0) {
             throw conflict("Pagamento excede o saldo pendente do fechamento");
         }
+        // A corrected administrative reference remains unique within its
+        // settlement for *future* payments as well, not just revisions.
+        // The settlement row is held FOR UPDATE throughout this transaction.
+        List<Long> effectiveDuplicates=jdbc.queryForList("""
+            SELECT p.id FROM commerce_payments p
+              LEFT JOIN commerce_payment_metadata_revisions r
+                ON r.id=(SELECT MAX(revision.id)
+                           FROM commerce_payment_metadata_revisions revision
+                          WHERE revision.payment_id=p.id)
+             WHERE p.settlement_id=?
+               AND (CASE WHEN r.id IS NULL THEN p.external_reference
+                         ELSE r.updated_reference END)=?
+             LIMIT 1
+            """,Long.class,settlementId,reference);
+        if(!effectiveDuplicates.isEmpty()) {
+            throw conflict("Esta referência já está em uso neste fechamento");
+        }
         long id;
         try {
             id=support.insert("""
