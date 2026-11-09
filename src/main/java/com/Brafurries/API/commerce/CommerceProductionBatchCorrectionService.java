@@ -97,8 +97,8 @@ public class CommerceProductionBatchCorrectionService {
             ((BigDecimal)row.get("additionalCost")).compareTo(extra)!=0 ||
             !date(row.get("producedOn")).equals(d.producedOn());
         boolean changedReference=!java.util.Objects.equals(row.get("reference"),reference);
-        if(!changedEconomics && !changedReference)
-            throw invalid("Nenhuma alteração encontrada");
+        // Repeating a successful PUT is idempotent and writes no new audit.
+        if(!changedEconomics && !changedReference) return;
 
         // Locks batch row before querying sale history. Sale registration locks
         // the same batch row before writing sale_item snapshots.
