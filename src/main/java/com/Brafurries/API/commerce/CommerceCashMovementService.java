@@ -202,16 +202,26 @@ public class CommerceCashMovementService {
             SELECT m.id,m.request_key AS requestKey,m.movement_type AS movementType,
                    m.event_kind AS eventKind,m.reversal_of_id AS reversalOfId,
                    m.amount,m.signed_amount AS signedAmount,
-                   m.occurred_on AS occurredOn,m.category,m.description,
+                   m.occurred_on AS occurredOn,m.category,
+                   CASE WHEN revision.id IS NULL THEN m.description
+                        ELSE revision.updated_description END AS description,
                    m.counterparty_label AS counterpartyLabel,
                    m.counterparty_user_id AS counterpartyUserId,
                    m.contributor_type AS contributorType,
                    m.contribution_nature AS contributionNature,
                    m.payment_method AS paymentMethod,
-                   m.external_reference AS externalReference,m.notes,
+                   CASE WHEN revision.id IS NULL THEN m.external_reference
+                        ELSE revision.updated_reference END AS externalReference,
+                   CASE WHEN revision.id IS NULL THEN m.notes
+                        ELSE revision.updated_notes END AS notes,
+                   (revision.id IS NOT NULL) AS metadataCorrected,
                    m.reversal_reason AS reversalReason,
                    m.created_at AS createdAt
               FROM commerce_cash_movements m
+              LEFT JOIN commerce_cash_metadata_revisions revision
+                ON revision.id=(SELECT MAX(latest.id)
+                                  FROM commerce_cash_metadata_revisions latest
+                                 WHERE latest.movement_id=m.id)
              WHERE m.occurred_on >= ? AND m.occurred_on < ?
              ORDER BY m.occurred_on DESC,m.id DESC LIMIT 1000
             """,Date.valueOf(ym.atDay(1)),Date.valueOf(ym.plusMonths(1).atDay(1)));

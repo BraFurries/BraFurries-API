@@ -245,4 +245,65 @@ class CommerceOrderServiceTest {
                 new Reverse(KEY,LocalDate.of(2026,11,3),"Duplicado"))).getStatusCode());
         verifyNoInteractions(support);
     }
+
+    @Test
+    void cannotEditOrderAfterAnyReceiptEventEvenIfNetPaidZero() {
+        when(jdbc.queryForList(contains("FROM commerce_orders WHERE id="),eq(25L)))
+            .thenReturn(List.of(Map.of("id",25L,"status","OPEN",
+                "totalAmount",new BigDecimal("100.00"))));
+        when(jdbc.queryForList(contains("SELECT id FROM commerce_order_payment_events"),
+                               eq(Long.class),eq(25L))).thenReturn(List.of(33L));
+        var updated=new Update("Kéti","DIRECT",null,LocalDate.of(2026,11,3),
+            null,null,List.of(new Line(null,"Camiseta","GG",2,new BigDecimal("50.00"))));
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->orders.update(auth,25L,updated)).getStatusCode());
+        verify(jdbc,never()).update(contains("DELETE FROM commerce_order_items"),eq(25L));
+        verifyNoInteractions(support);
+    }
+
+    @Test
+    void permitsCorrectionOfOpenUnpaidOrderInOneTransaction() {
+        when(jdbc.queryForList(contains("FROM commerce_orders WHERE id="),eq(25L)))
+            .thenReturn(List.of(Map.of("id",25L,"status","OPEN",
+                "totalAmount",new BigDecimal("100.00"))));
+        when(jdbc.queryForList(contains("SELECT id FROM commerce_order_payment_events"),
+                               eq(Long.class),eq(25L))).thenReturn(List.of());
+        var updated=new Update("Kéti","DIRECT",null,LocalDate.of(2026,11,3),
+            null,null,List.of(new Line(null,"Camiseta","GG",2,new BigDecimal("50.00"))));
+        orders.update(auth,25L,updated);
+        verify(jdbc).update(contains("UPDATE commerce_orders"),
+            eq("Kéti"),eq("DIRECT"),isNull(),eq(LocalDate.of(2026,11,3)),
+            isNull(),eq(new BigDecimal("100.00")),isNull(),eq(7),eq(25L));
+        verify(jdbc).update(contains("DELETE FROM commerce_order_items"),eq(25L));
+        verify(jdbc).update(contains("INSERT INTO commerce_order_items"),
+            eq(25L),isNull(),eq("Camiseta"),eq("GG"),eq(2),
+            eq(new BigDecimal("50.00")),eq(new BigDecimal("100.00")));
+        verify(support).audit(7,"ORDER",25L,"UPDATED");
+        verify(jdbc,never()).update(contains("commerce_sales"),any(Object[].class));
+        verify(jdbc,never()).update(contains("commerce_royalty_accruals"),any(Object[].class));
+    }
+
+    @Test
+    void refusesDeleteUnlessOrderIsOpenAndWithoutAnyPayments() {
+        when(jdbc.queryForList(contains("FROM commerce_orders WHERE id="),eq(25L)))
+            .thenReturn(List.of(Map.of("id",25L,"status","READY",
+                "totalAmount",new BigDecimal("100.00"))));
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->orders.deleteUnused(auth,25L)).getStatusCode());
+        verifyNoInteractions(support);
+    }
+
+    @Test
+    void deletesOnlyUnusedOpenOrderAndRecordsAudit() {
+        when(jdbc.queryForList(contains("FROM commerce_orders WHERE id="),eq(25L)))
+            .thenReturn(List.of(Map.of("id",25L,"status","OPEN",
+                "totalAmount",new BigDecimal("100.00"))));
+        when(jdbc.queryForList(contains("SELECT id FROM commerce_order_payment_events"),
+                               eq(Long.class),eq(25L))).thenReturn(List.of());
+        orders.deleteUnused(auth,25L);
+        var order=inOrder(jdbc,support);
+        order.verify(jdbc).update(contains("DELETE FROM commerce_order_items"),eq(25L));
+        order.verify(jdbc).update(contains("DELETE FROM commerce_orders"),eq(25L));
+        order.verify(support).audit(7,"ORDER",25L,"DELETED");
+    }
 }
