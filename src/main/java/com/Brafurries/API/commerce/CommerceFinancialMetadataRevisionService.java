@@ -65,8 +65,8 @@ public class CommerceFinancialMetadataRevisionService {
         Map<String,Object> current=recent.isEmpty()?original:recent.get(0);
         String oldRef=(String)current.get("reference");
         String oldNotes=(String)current.get("notes");
-        if(Objects.equals(reference,oldRef)&&Objects.equals(notes,oldNotes))
-            throw invalid("Nenhuma alteração administrativa encontrada");
+        // Duplicate network retries must not manufacture extra revisions.
+        if(Objects.equals(reference,oldRef)&&Objects.equals(notes,oldNotes)) return;
 
         // Unique business reference within a settlement, including corrected
         // references, not just the immutable originals with DB UNIQUE indices.
@@ -139,8 +139,7 @@ public class CommerceFinancialMetadataRevisionService {
                oldRef=(String)previous.get("reference"),
                oldNotes=(String)previous.get("notes");
         if(Objects.equals(description,oldDesc)&&Objects.equals(reference,oldRef)
-           &&Objects.equals(notes,oldNotes))
-            throw invalid("Nenhuma alteração administrativa encontrada");
+           &&Objects.equals(notes,oldNotes)) return;
         jdbc.update("""
             INSERT INTO commerce_cash_metadata_revisions
                (movement_id,previous_description,updated_description,

@@ -93,6 +93,21 @@ class CommerceFinancialMetadataRevisionServiceTest {
         verify(jdbc,never()).update(anyString(),any(Object[].class));
     }
 
+    @Test void repeatedIdenticalPayoutCorrectionIsANonAuditedSuccess() {
+        grant(PlatformPermission.PAYMENTS_RECORD);
+        when(jdbc.queryForList(contains("FROM commerce_settlements"),
+             eq(Long.class),eq(15L))).thenReturn(List.of(15L));
+        when(jdbc.queryForList(contains("FROM commerce_payments WHERE id="),
+             eq(3L),eq(15L))).thenReturn(List.of(originalPayment()));
+        when(jdbc.queryForList(contains("FROM commerce_payment_metadata_revisions"),
+             eq(3L))).thenReturn(List.of());
+        service.revisePayment(auth,15L,3L,
+            new CommerceFinancialMetadataRevisionService.PaymentRevision(
+                "PIX-001","Original","Reenvio após timeout de rede"));
+        verify(jdbc,never()).update(anyString(),any(Object[].class));
+        verifyNoInteractions(support);
+    }
+
     @Test void cashCorrectionCannotRewriteEconomicValuesAndRequiresFinancePermission() {
         grant(PlatformPermission.CASHFLOW_MANAGE);
         Map<String,Object> row=new HashMap<>();
