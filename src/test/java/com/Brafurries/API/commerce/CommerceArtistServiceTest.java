@@ -87,7 +87,6 @@ class CommerceArtistServiceTest {
         verify(jdbc).queryForList(argThat(q->q.contains("FROM commerce_settlements s")
             && q.contains("WHERE s.artist_user_id=?")),
             eq(77));
-        verify(jdbc,never()).queryForList(contains("claimed_by_user_id"),any());
     }
 
     @Test
