@@ -160,6 +160,28 @@ class CommerceOrderServiceTest {
     }
 
     @Test
+    void failedReceiptAuditIsNotSilentlyReturnedAsSuccessfulIdempotentReplay() {
+        when(jdbc.queryForList(contains("FROM commerce_orders WHERE id="),eq(25L)))
+            .thenReturn(List.of(Map.of("id",25L,"status","OPEN",
+                "totalAmount",new BigDecimal("100.00"))));
+        when(jdbc.queryForList(
+            contains("FROM commerce_order_payment_events WHERE request_key"),eq(KEY)))
+            .thenReturn(List.of());
+        when(jdbc.queryForObject(contains("COALESCE(SUM(amount),0)"),
+            eq(BigDecimal.class),eq(25L))).thenReturn(BigDecimal.ZERO);
+        when(support.insert(contains("INSERT INTO commerce_order_payment_events"),
+            any(Object[].class))).thenReturn(99L);
+        doThrow(new org.springframework.dao.DataIntegrityViolationException("audit failed"))
+            .when(support).audit(7,"ORDER_PAYMENT",99L,"RECEIVED");
+        var data=new Receive(KEY,new BigDecimal("50.00"),LocalDate.of(2026,11,3),
+            "PIX",null,null);
+        assertThrows(org.springframework.dao.DataIntegrityViolationException.class,
+            ()->orders.receive(auth,25L,data));
+        verify(jdbc,times(1)).queryForList(
+            contains("FROM commerce_order_payment_events WHERE request_key"),eq(KEY));
+    }
+
+    @Test
     void preventsReceivingMoreThanOrderAmountEvenUnderRetries() {
         when(jdbc.queryForList(contains("FROM commerce_orders WHERE id="),eq(25L)))
             .thenReturn(List.of(Map.of("id",25L,"status","OPEN",
