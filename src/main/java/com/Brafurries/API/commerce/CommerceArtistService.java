@@ -191,7 +191,7 @@ public class CommerceArtistService {
         // A true external placeholder must not already own login identities
         // or active Community history. This guards ad hoc/out-of-band rows.
         List<Map<String,Object>> artistAccounts=jdbc.queryForList("""
-            SELECT email,password_hash,merged_into_user_id FROM users WHERE id=?
+            SELECT email,password_hash,merged_into_user_id FROM users WHERE id=? FOR UPDATE
             """,artistId);
         if(artistAccounts.isEmpty() ||
             artistAccounts.get(0).get("email")!=null ||
@@ -199,10 +199,11 @@ public class CommerceArtistService {
             artistAccounts.get(0).get("merged_into_user_id")!=null) {
             throw conflict("O artista já possui credenciais; requer conciliação de contas");
         }
-        if(exists("SELECT id FROM user_discord WHERE user_id=? LIMIT 1",artistId)
-           || exists("SELECT id FROM user_social_identities WHERE user_id=? LIMIT 1",artistId)
-           || exists("SELECT id FROM user_community_status WHERE user_id=? LIMIT 1",artistId)
-           || exists("SELECT role_id FROM api_user_roles WHERE user_id=? LIMIT 1",artistId)) {
+        if(exists("SELECT id FROM user_discord WHERE user_id=? LIMIT 1 FOR UPDATE",artistId)
+           || exists("SELECT id FROM user_social_identities WHERE user_id=? LIMIT 1 FOR UPDATE",artistId)
+           || exists("SELECT id FROM user_community_status WHERE user_id=? LIMIT 1 FOR UPDATE",artistId)
+           || exists("SELECT role_id FROM api_user_roles WHERE user_id=? LIMIT 1 FOR UPDATE",artistId)
+           || exists("SELECT id FROM user_identity_links WHERE (user_a_id=? OR user_b_id=?) AND status='CONFIRMED' LIMIT 1 FOR UPDATE",artistId,artistId)) {
             throw conflict("O artista já possui identidade ou permissões; requer conciliação");
         }
         jdbc.update("""
@@ -380,8 +381,11 @@ public class CommerceArtistService {
         return rows.get(0);
     }
 
-    private boolean exists(String sql,int userId) {
-        return !jdbc.queryForList(sql,userId).isEmpty();
+    private boolean exists(String sql,Object... identifiers) {
+        // Current locking read: previous non-locking SELECT might reuse a stale
+        // MariaDB REPEATABLE READ transaction snapshot acquired by the initial
+        // claim lookup and miss a newly linked provider or Community identity.
+        return !jdbc.queryForList(sql,identifiers).isEmpty();
     }
 
     private BigDecimal scalar(String sql,Object... args) {
