@@ -23,6 +23,11 @@ public class CommerceOrderController {
         this.orders=orders;
     }
 
+    @GetMapping("/product-choices")
+    public List<Map<String,Object>> productChoices(Authentication auth) {
+        return orders.productChoices(auth);
+    }
+
     @GetMapping
     public List<Map<String,Object>> list(Authentication auth) {
         return orders.list(auth);
