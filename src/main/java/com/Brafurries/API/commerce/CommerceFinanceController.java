@@ -102,4 +102,12 @@ public class CommerceFinanceController {
                                  @Valid @RequestBody RecordPayment input) {
         return settlements.recordPayment(auth,id,input);
     }
+
+    @PostMapping("/statements/{id}/payments/{paymentId}/reverse")
+    @ResponseStatus(HttpStatus.CREATED)
+    public Created reversePayment(Authentication auth,@PathVariable long id,
+                                  @PathVariable long paymentId,
+                                  @Valid @RequestBody ReversePayment input) {
+        return settlements.reversePayment(auth,id,paymentId,input);
+    }
 }
