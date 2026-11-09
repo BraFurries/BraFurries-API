@@ -156,6 +156,105 @@ class CommerceArtistServiceTest {
         verifyNoInteractions(jdbc);
     }
 
+    private void pendingClaim(long claimId,int artistId,int applicantId) {
+        when(jdbc.queryForList(contains("FROM commerce_artist_claim_requests WHERE id=?"),
+            eq(claimId))).thenReturn(List.of(Map.of(
+                "id",claimId,"artist_user_id",artistId,
+                "requester_user_id",applicantId,"status","PENDING")));
+        when(jdbc.queryForList(contains("FROM commerce_artist_profiles"),
+            eq((long)artistId))).thenReturn(List.of(Map.of("user_id",artistId)));
+    }
+
+    @Test
+    void verifiedExternalArtistClaimLinksOnlyApplicantAfterOwnerApproval() {
+        when(authorization.requireOwner(auth)).thenReturn(user(2));
+        pendingClaim(31L,101,77);
+        when(jdbc.queryForList(contains("SELECT id,email_verified_at,merged_into_user_id"),
+            eq(77))).thenReturn(List.of(Map.of(
+                "id",77,"email_verified_at",java.time.LocalDateTime.of(2026,11,9,10,30))));
+        when(jdbc.queryForList(contains("SELECT email,password_hash,merged_into_user_id"),
+            eq(101))).thenReturn(List.of(Map.of()));
+        when(jdbc.update(contains("UPDATE commerce_artist_claim_requests"),
+            any(),any(),any(),any())).thenReturn(1);
+        when(jdbc.update(contains("UPDATE commerce_artist_profiles"),
+            any(),any(),any())).thenReturn(1);
+
+        artists.approve(auth,31L,new ApproveClaim("TELEGRAM",
+            "Confirmação independente pelo contato previamente conhecido"));
+
+        verify(jdbc).update(contains("UPDATE commerce_artist_profiles"),
+            eq(77),eq(2),eq(101));
+        verify(jdbc).update(contains("INSERT INTO commerce_catalog_audit"),
+            eq(2),eq("ARTIST_CLAIM"),eq(31L),eq("APPROVED"));
+        verify(jdbc).queryForList(argThat(sql->sql.contains("user_social_identities")
+            && sql.contains("FOR UPDATE")),eq(101));
+    }
+
+    @Test
+    void doesNotApproveClaimOnExistingDiscordOrTelegramLinkedUser() {
+        when(authorization.requireOwner(auth)).thenReturn(user(2));
+        pendingClaim(32L,102,77);
+        when(jdbc.queryForList(contains("SELECT id,email_verified_at,merged_into_user_id"),
+            eq(77))).thenReturn(List.of(Map.of(
+                "id",77,"email_verified_at",java.time.LocalDateTime.of(2026,11,9,10,30))));
+        when(jdbc.queryForList(contains("SELECT email,password_hash,merged_into_user_id"),
+            eq(102))).thenReturn(List.of(Map.of()));
+        when(jdbc.queryForList(contains("SELECT id FROM user_discord"),eq(102)))
+            .thenReturn(List.of(Map.of("id",10)));
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            () -> artists.approve(auth,32L,new ApproveClaim(
+                "TELEGRAM","Confirmado externamente"))).getStatusCode());
+        verify(jdbc,never()).update(contains("UPDATE commerce_artist_claim_requests"),
+            any(Object[].class));
+        verify(jdbc,never()).update(contains("UPDATE commerce_artist_profiles"),
+            any(Object[].class));
+    }
+
+    @Test
+    void simultaneousApprovalMustUpdateExactlyOneOwnershipLink() {
+        when(authorization.requireOwner(auth)).thenReturn(user(2));
+        pendingClaim(33L,103,77);
+        when(jdbc.queryForList(contains("SELECT id,email_verified_at,merged_into_user_id"),
+            eq(77))).thenReturn(List.of(Map.of(
+                "id",77,"email_verified_at",java.time.LocalDateTime.of(2026,11,9,10,30))));
+        when(jdbc.queryForList(contains("SELECT email,password_hash,merged_into_user_id"),
+            eq(103))).thenReturn(List.of(Map.of()));
+        when(jdbc.update(contains("UPDATE commerce_artist_claim_requests"),
+            any(),any(),any(),any())).thenReturn(1);
+        // The status changed, but a concurrent operation prevented the
+        // owner-link update. The transaction must fail and roll back both.
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->artists.approve(auth,33L,new ApproveClaim(
+                "IN_PERSON","Identidade confirmada pessoalmente"))).getStatusCode());
+        verify(jdbc,never()).update(contains("INSERT INTO commerce_catalog_audit"),
+            eq(2),eq("ARTIST_CLAIM"),eq(33L),eq("APPROVED"));
+    }
+
+    @Test
+    void ownerRevocationClearsAccessButPreservesOriginalApprovalEvidence() {
+        when(authorization.requireOwner(auth)).thenReturn(user(2));
+        when(jdbc.queryForList(contains("FROM commerce_artist_profiles"),
+            eq(101L))).thenReturn(List.of(Map.of(
+                "user_id",101,"claimed_by_user_id",77)));
+        when(jdbc.queryForList(contains("SELECT id FROM commerce_artist_claim_requests"),
+            eq(101L),eq(77))).thenReturn(List.of(Map.of("id",31L)));
+        when(jdbc.update(contains("UPDATE commerce_artist_claim_requests"),
+            any(),any(),any())).thenReturn(1);
+        when(jdbc.update(contains("UPDATE commerce_artist_profiles"),
+            any(),any())).thenReturn(1);
+
+        artists.revoke(auth,101,new RevokeClaim("Pedido expresso da artista"));
+
+        verify(jdbc).update(argThat(sql->
+            sql.contains("revocation_reason") && sql.contains("revoked_by_user_id")
+            && !sql.contains("reviewed_by_user_id") && !sql.contains("verification_method")),
+            eq("Pedido expresso da artista"),eq(2),eq(31L));
+        verify(jdbc).update(contains("UPDATE commerce_artist_profiles"),
+            eq(101L),eq(77));
+        verify(jdbc).update(contains("INSERT INTO commerce_catalog_audit"),
+            eq(2),eq("ARTIST_CLAIM"),eq(31L),eq("REVOKED"));
+    }
+
     @Test
     void requesterCannotClaimItsOwnArtistUser() {
         authenticatedUser(44);
