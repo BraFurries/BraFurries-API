@@ -60,7 +60,7 @@ public class CommerceFinancialMetadataRevisionService {
         List<Map<String,Object>> recent=jdbc.queryForList("""
             SELECT updated_reference AS reference,updated_notes AS notes
               FROM commerce_payment_metadata_revisions
-             WHERE payment_id=? ORDER BY id DESC LIMIT 1
+             WHERE payment_id=? ORDER BY id DESC LIMIT 1 FOR UPDATE
             """,paymentId);
         Map<String,Object> current=recent.isEmpty()?original:recent.get(0);
         String oldRef=(String)current.get("reference");
@@ -79,7 +79,7 @@ public class CommerceFinancialMetadataRevisionService {
              WHERE p.settlement_id=? AND p.id<>?
                AND (CASE WHEN r.id IS NULL THEN p.external_reference
                          ELSE r.updated_reference END)=?
-             LIMIT 1
+             LIMIT 1 FOR UPDATE
             """,Long.class,statementId,paymentId,reference);
         if(!conflicts.isEmpty()) throw conflict("Referência já utilizada neste fechamento");
 
@@ -132,7 +132,7 @@ public class CommerceFinancialMetadataRevisionService {
             SELECT updated_description AS description,
                    updated_reference AS reference,updated_notes AS notes
               FROM commerce_cash_metadata_revisions
-             WHERE movement_id=? ORDER BY id DESC LIMIT 1
+             WHERE movement_id=? ORDER BY id DESC LIMIT 1 FOR UPDATE
             """,movementId);
         Map<String,Object> previous=revisions.isEmpty()?original:revisions.get(0);
         String oldDesc=(String)previous.get("description"),
