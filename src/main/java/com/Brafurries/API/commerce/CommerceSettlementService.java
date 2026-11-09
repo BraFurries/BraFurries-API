@@ -12,6 +12,7 @@ import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -227,6 +228,88 @@ public class CommerceSettlementService {
         return new Created(id);
     }
 
+    /**
+     * Administrative correction only; does not initiate a transfer or a refund.
+     * A distinct negative ledger event offsets a positive recorded payment.
+     * The original row is never modified, and the historical settlement
+     * obligation and royalty accruals remain immutable.
+     */
+    @Transactional
+    public Created reversePayment(Authentication auth,long settlementId,
+                                  long originalPaymentId,ReversePayment input) {
+        int actor=authorization.requireOwner(auth).getId();
+        authorization.require(auth,PlatformPermission.FINANCE_VIEW);
+        if(input==null || input.reversedOn()==null ||
+           input.reversedOn().getYear()<2000 || input.reversedOn().isAfter(today())) {
+            throw invalid("Data do estorno inválida");
+        }
+        String reason=text(input.reason(),500,"Motivo do estorno",true);
+        if(reason.length()<3) throw invalid("Informe um motivo com pelo menos 3 caracteres");
+
+        // Lock the settlement before the payment, following recordPayment order
+        // to avoid deadlocks with concurrent legitimate transfers.
+        Statement statement=loadStatement(settlementId,true);
+        if(!List.of("APPROVED","PARTIALLY_PAID","PAID").contains(statement.status())) {
+            throw conflict("Apenas fechamentos aprovados podem ter pagamentos estornados");
+        }
+        List<Map<String,Object>> originals=jdbc.queryForList("""
+            SELECT id,amount,paid_on,event_kind
+              FROM commerce_payments
+             WHERE id=? AND settlement_id=? FOR UPDATE
+            """,originalPaymentId,settlementId);
+        if(originals.size()!=1) throw missing("Pagamento não encontrado");
+        Map<String,Object> original=originals.get(0);
+        if(!"PAYMENT".equals(original.get("event_kind"))) {
+            throw conflict("Somente pagamentos originais podem ser estornados");
+        }
+
+        List<Long> prior=jdbc.queryForList("""
+            SELECT id FROM commerce_payments
+             WHERE original_payment_id=? FOR UPDATE
+            """,Long.class,originalPaymentId);
+        if(!prior.isEmpty()) return new Created(prior.get(0));
+
+        LocalDate originalDate=((java.sql.Date)original.get("paid_on")).toLocalDate();
+        if(input.reversedOn().isBefore(originalDate)) {
+            throw invalid("O estorno não pode ser anterior ao pagamento original");
+        }
+        BigDecimal originalAmount=(BigDecimal)original.get("amount");
+        if(originalAmount.signum()<=0) throw conflict("Valor original inválido");
+
+        List<BigDecimal> amounts=jdbc.queryForList("""
+            SELECT amount FROM commerce_payments
+             WHERE settlement_id=? FOR UPDATE
+            """,BigDecimal.class,settlementId);
+        BigDecimal paid=BigDecimal.ZERO;
+        for(BigDecimal row:amounts) paid=paid.add(row);
+        BigDecimal after=paid.subtract(originalAmount);
+        if(after.signum()<0 || after.compareTo(statement.total())>0) {
+            throw conflict("Saldo financeiro inconsistente; conciliação manual necessária");
+        }
+
+        String syntheticReference="REV-"+originalPaymentId+"-"+UUID.randomUUID();
+        long reversalId;
+        try {
+            reversalId=support.insert("""
+                INSERT INTO commerce_payments
+                    (settlement_id,request_key,amount,event_kind,original_payment_id,
+                     reversal_reason,reversed_by_user_id,reversed_at,paid_on,
+                     external_reference,notes,recorded_by_user_id)
+                VALUES (?,?,?,'REVERSAL',?,?,?,CURRENT_TIMESTAMP(6),?,?,?,?)
+                """,settlementId,UUID.randomUUID().toString(),originalAmount.negate(),
+                     originalPaymentId,reason,actor,input.reversedOn(),
+                     syntheticReference,null,actor);
+        } catch(DataIntegrityViolationException ex) {
+            throw conflict("Este pagamento já foi estornado ou a operação está em conflito");
+        }
+
+        String next=after.signum()==0?"APPROVED":"PARTIALLY_PAID";
+        jdbc.update("UPDATE commerce_settlements SET status=? WHERE id=?",
+                    next,settlementId);
+        support.audit(actor,"PAYMENT",reversalId,"REVERSED");
+        return new Created(reversalId);
+    }
+
     @Transactional(readOnly=true)
     public List<Map<String,Object>> listStatements(Authentication auth,int year,int month) {
         authorization.require(auth,PlatformPermission.FINANCE_VIEW);
@@ -273,7 +356,9 @@ public class CommerceSettlementService {
         authorization.require(auth,PlatformPermission.FINANCE_VIEW);
         return jdbc.queryForList("""
             SELECT id,amount,paid_on AS paidOn,external_reference AS externalReference,
-                   notes,created_at AS createdAt
+                   notes,created_at AS createdAt,
+                   event_kind AS eventKind,original_payment_id AS originalPaymentId,
+                   reversal_reason AS reversalReason,reversed_at AS reversedAt
               FROM commerce_payments WHERE settlement_id=?
              ORDER BY id
             """,settlementId);

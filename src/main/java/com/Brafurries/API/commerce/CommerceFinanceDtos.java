@@ -61,5 +61,10 @@ public final class CommerceFinanceDtos {
         @Size(max=5000) String notes
     ) {}
 
+    public record ReversePayment(
+        @NotNull LocalDate reversedOn,
+        @NotBlank @Size(min=3,max=500) String reason
+    ) {}
+
     public record Created(long id) {}
 }
