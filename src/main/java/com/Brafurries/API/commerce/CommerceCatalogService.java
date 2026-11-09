@@ -249,6 +249,12 @@ public class CommerceCatalogService {
         authorization.require(auth,PlatformPermission.CONTRACTS_MANAGE);
         lock("commerce_products",productId,"Produto");
         requireExists("commerce_artworks",artworkId,"Arte");
+        String artworkStatus=jdbc.queryForObject(
+            "SELECT status FROM commerce_artworks WHERE id=?",String.class,artworkId);
+        if("ARCHIVED".equals(artworkStatus)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Obra arquivada: reative antes de vincular a novos produtos");
+        }
         BigDecimal rate = input.royaltyAllocationPercent()==null
             ? null : rate(input.royaltyAllocationPercent());
         List<BigDecimal> previous = jdbc.query("""
@@ -350,6 +356,12 @@ public class CommerceCatalogService {
                                 BigDecimal oneTimeAmount, MultipartFile pdf) {
         User actor=authorization.require(auth,PlatformPermission.CONTRACTS_MANAGE).user();
         lock("commerce_artworks",artworkId,"Arte");
+        String artworkStatus=jdbc.queryForObject(
+            "SELECT status FROM commerce_artworks WHERE id=?",String.class,artworkId);
+        if("ARCHIVED".equals(artworkStatus)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Obra arquivada: reative antes de registrar novo contrato");
+        }
         if (effectiveFrom==null || (effectiveUntil!=null && effectiveUntil.isBefore(effectiveFrom))) {
             throw invalid("Informe a vigência correta do contrato");
         }
