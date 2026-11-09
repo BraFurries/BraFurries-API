@@ -256,10 +256,11 @@ public class CommerceArtistService {
             """,artistId,applicantId);
         if(approved.isEmpty()) throw conflict("Registro de aprovação não encontrado");
         long claimId=number(approved.get(0),"id");
+        // Do not overwrite the ORIGINAL approval reviewer, proof or date.
         jdbc.update("""
             UPDATE commerce_artist_claim_requests
-               SET status='REVOKED',review_notes=?,reviewed_by_user_id=?,
-                   reviewed_at=CURRENT_TIMESTAMP(6)
+               SET status='REVOKED',revocation_reason=?,revoked_by_user_id=?,
+                   revoked_at=CURRENT_TIMESTAMP(6)
              WHERE id=? AND status='APPROVED'
             """,reason,owner.getId(),claimId);
         jdbc.update("""
