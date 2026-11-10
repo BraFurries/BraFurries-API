@@ -46,7 +46,7 @@ public class PartnerDiscordService {
     ) {}
     public record Settings(
         String guildId, String categoryId, String threadParentChannelId,
-        List<PartnerView> partners
+        boolean configured, List<PartnerView> partners
     ) {}
 
     private final PlatformAuthorizationService authorization;
@@ -177,7 +177,7 @@ public class PartnerDiscordService {
         }
         return new Settings(
             snowflake(ctx.guildId()), snowflake(config.get("category_id")),
-            snowflake(config.get("thread_parent_channel_id")), List.copyOf(items)
+            snowflake(config.get("thread_parent_channel_id")), !config.isEmpty(), List.copyOf(items)
         );
     }
 
