@@ -2,8 +2,10 @@ package com.Brafurries.API.admin;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -22,6 +24,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
@@ -118,6 +121,39 @@ class PartnerDiscordServiceTest {
         );
         assertEquals(HttpStatus.FORBIDDEN, error.getStatusCode());
         verifyNoInteractions(coddy);
+    }
+
+    @Test
+    void withdrawalRevokesDiscordBeforeDatabaseReleasesPartnerRecord() {
+        officialGuild(1);
+        configured();
+        User actor = new User();
+        actor.setId(33);
+        when(authorization.currentUser(auth)).thenReturn(actor);
+        Partner partner = new Partner();
+        partner.setId(17);
+        partner.setName("Antigo parceiro");
+        partner.setStatus("suspended");
+        when(partners.findWithDetailsById(17)).thenReturn(Optional.of(partner));
+        when(jdbc.queryForList(
+            startsWith("SELECT * FROM partner_discord_publications"), eq(1), eq(17)
+        )).thenReturn(List.of(Map.of(
+            "desired_revision", 3L,
+            "thread_id", 700L,
+            "exclusive_channel_enabled", 0,
+            "text_channel_created_by_bot", 0
+        )));
+        when(jdbc.update(
+            startsWith("DELETE FROM partner_discord_publications"), eq(17), eq(1), eq(3L)
+        )).thenReturn(1);
+
+        service.unpublish(auth, 17);
+
+        InOrder operations = inOrder(coddy, jdbc);
+        operations.verify(coddy).sync(eq("123456789012345678"), anyMap());
+        operations.verify(jdbc).update(
+            startsWith("DELETE FROM partner_discord_publications"), eq(17), eq(1), eq(3L)
+        );
     }
 
     @Test
