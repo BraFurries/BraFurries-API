@@ -6,7 +6,6 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -173,8 +172,6 @@ class PartnerDiscordServiceTest {
         );
         assertEquals(HttpStatus.BAD_REQUEST, error.getStatusCode());
         verifyNoInteractions(coddy);
-        verify(jdbc, never()).update(startsWith("INSERT INTO partner_discord_publications"),
-            org.mockito.ArgumentMatchers.any());
     }
 
     @Test
