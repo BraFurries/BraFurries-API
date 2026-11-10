@@ -147,6 +147,15 @@ public class PartnerDiscordService {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Parceria não encontrada"));
     }
 
+    private UserDiscord singleRepresentativeDiscord(User user) {
+        if (user == null) return null;
+        // A single platform user may legitimately control multiple Discord
+        // accounts after identity consolidation. Never select the first one
+        // arbitrarily for channel permissions.
+        List<UserDiscord> links = identities.findAllByUserIdOrderByIdAsc(user.getId());
+        return links.size() == 1 ? links.getFirst() : null;
+    }
+
     private static boolean enabled(Map<String, Object> row, String field) {
         Object value = row.get(field);
         return value instanceof Number number && number.intValue() == 1
@@ -164,7 +173,7 @@ public class PartnerDiscordService {
             User user = partner.getRepresentativeUser();
             String representativeName = user == null ? null
                 : Optional.ofNullable(user.getDisplayName()).orElse(user.getUsername());
-            UserDiscord discord = user == null ? null : identities.findByUser(user).orElse(null);
+            UserDiscord discord = user == null ? null : singleRepresentativeDiscord(user);
             items.add(new PartnerView(
                 partner.getId(), partner.getName(), partner.getStatus(), representativeName,
                 discord == null ? null : snowflake(discord.getDiscordUserId()),
@@ -236,7 +245,7 @@ public class PartnerDiscordService {
         }
         if (request.exclusiveChannelEnabled()) {
             User user = partner.getRepresentativeUser();
-            if (user == null || identities.findByUser(user).isEmpty()) {
+            if (user == null || singleRepresentativeDiscord(user) == null) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Representante sem identidade Discord");
             }
         }
@@ -324,7 +333,7 @@ public class PartnerDiscordService {
                     "Publicação pertence a outro escopo de comunidade");
             }
             User user = partner.getRepresentativeUser();
-            UserDiscord representative = user == null ? null : identities.findByUser(user).orElse(null);
+            UserDiscord representative = user == null ? null : singleRepresentativeDiscord(user);
             String discordId = representative == null ? null : snowflake(representative.getDiscordUserId());
             Map<String, Object> request = payload(ctx, partner, config, current, discordId);
             audit(ctx, partnerId, actor, "SYNC_REQUESTED", "Sincronização solicitada");
