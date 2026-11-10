@@ -5,8 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.inOrder;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -154,6 +154,89 @@ class PartnerDiscordServiceTest {
         operations.verify(jdbc).update(
             startsWith("DELETE FROM partner_discord_publications"), eq(17), eq(1), eq(3L)
         );
+    }
+
+    @Test
+    void rejectsOverlongMarkdownBeforeWritingOrPublishing() {
+        officialGuild(1);
+        configured();
+        Partner partner = new Partner();
+        partner.setId(17);
+        when(partners.findWithDetailsById(17)).thenReturn(Optional.of(partner));
+
+        ResponseStatusException error = assertThrows(
+            ResponseStatusException.class,
+            () -> service.updateAnnouncement(auth, 17,
+                new PartnerDiscordService.AnnouncementRequest(
+                    "X".repeat(16001), "INLINE_ONLY", null))
+        );
+        assertEquals(HttpStatus.BAD_REQUEST, error.getStatusCode());
+        verifyNoInteractions(coddy);
+    }
+
+    @Test
+    void rejectsUnrecognizedLinkAppendModeWithoutDiscordEffect() {
+        officialGuild(1);
+        configured();
+        Partner partner = new Partner();
+        partner.setId(17);
+        when(partners.findWithDetailsById(17)).thenReturn(Optional.of(partner));
+
+        ResponseStatusException error = assertThrows(
+            ResponseStatusException.class,
+            () -> service.updateAnnouncement(auth, 17,
+                new PartnerDiscordService.AnnouncementRequest("# Indie", "EXTERNAL", null))
+        );
+        assertEquals(HttpStatus.BAD_REQUEST, error.getStatusCode());
+        verifyNoInteractions(coddy);
+    }
+
+    @Test
+    void rejectsAnnouncementUpdateForPartnerAlreadyOwnedByAnotherCommunity() {
+        officialGuild(1);
+        configured();
+        Partner partner = new Partner();
+        partner.setId(17);
+        when(partners.findWithDetailsById(17)).thenReturn(Optional.of(partner));
+        when(jdbc.queryForList(startsWith("SELECT * FROM partner_discord_publications"),
+            eq(1), eq(17))).thenReturn(List.of());
+        when(jdbc.queryForList(startsWith("SELECT community_id FROM partner_discord_publications"),
+            eq(17))).thenReturn(List.of(Map.of("community_id", 2)));
+
+        ResponseStatusException error = assertThrows(ResponseStatusException.class,
+            () -> service.updateAnnouncement(auth, 17,
+                new PartnerDiscordService.AnnouncementRequest("# Indie", "INLINE_ONLY", null)));
+        assertEquals(HttpStatus.CONFLICT, error.getStatusCode());
+        verifyNoInteractions(coddy);
+    }
+
+    @Test
+    void savesMarkdownInDiscordStateWithoutRewritingInstitutionalDescription() {
+        officialGuild(1);
+        configured();
+        Partner partner = new Partner();
+        partner.setId(17);
+        partner.setName("República Indie");
+        partner.setStatus("active");
+        partner.setDescription("Descrição para o site");
+        when(partners.findWithDetailsById(17)).thenReturn(Optional.of(partner));
+        when(jdbc.queryForList(startsWith("SELECT * FROM partner_discord_publications"),
+            eq(1), eq(17))).thenReturn(List.of());
+        when(partners.findAdminPartners(null, null)).thenReturn(List.of(partner));
+        when(jdbc.queryForList(startsWith("SELECT community_id FROM partner_discord_publications"),
+            eq(17))).thenReturn(List.of());
+        User actor = new User();
+        actor.setId(33);
+        when(authorization.currentUser(auth)).thenReturn(actor);
+        when(jdbc.queryForList(startsWith("SELECT * FROM partner_discord_publications"),
+            eq(1))).thenReturn(List.of());
+
+        var view = service.updateAnnouncement(auth, 17,
+            new PartnerDiscordService.AnnouncementRequest(
+                "# 🐑 **República Indie**", "APPEND_MISSING", "Equipe de parcerias"));
+        assertEquals(17, view.partnerId());
+        assertEquals("Descrição para o site", partner.getDescription());
+        verifyNoInteractions(coddy);
     }
 
     @Test

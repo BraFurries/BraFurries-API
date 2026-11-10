@@ -1,6 +1,7 @@
 package com.Brafurries.API.admin;
 
 import com.Brafurries.API.admin.PartnerDiscordService.ConfigRequest;
+import com.Brafurries.API.admin.PartnerDiscordService.AnnouncementRequest;
 import com.Brafurries.API.admin.PartnerDiscordService.PartnerOptionRequest;
 import com.Brafurries.API.admin.PartnerDiscordService.PartnerView;
 import com.Brafurries.API.admin.PartnerDiscordService.PostRequest;
@@ -41,6 +42,13 @@ public class PartnerDiscordController {
     public PartnerView updatePartner(Authentication auth, @PathVariable int partnerId,
                                      @RequestBody PartnerOptionRequest request) {
         return service.updatePartnerOption(auth, partnerId, request);
+    }
+
+    @PutMapping("/admin/partners/{partnerId}/discord/announcement")
+    @PreAuthorize("@partnerAuthorizationService.canManage(authentication)")
+    public PartnerView updateAnnouncement(Authentication auth, @PathVariable int partnerId,
+                                          @RequestBody AnnouncementRequest request) {
+        return service.updateAnnouncement(auth, partnerId, request);
     }
 
     @PostMapping("/admin/partners/{partnerId}/discord/sync")
