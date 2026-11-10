@@ -90,12 +90,12 @@ class PartnerDiscordClientTest {
         Fixture f = fixture();
         f.server.expect(requestTo(TARGET)).andRespond(withStatus(HttpStatus.NOT_FOUND)
             .contentType(MediaType.APPLICATION_JSON).body("{\"error\":\"guild_not_found\"}"));
+        f.server.expect(requestTo(TARGET)).andRespond(withStatus(HttpStatus.NOT_FOUND)
+            .contentType(MediaType.APPLICATION_JSON).body("{\"error\":\"discord_resource_not_found\"}"));
+
         ResponseStatusException first = assertThrows(ResponseStatusException.class,
             () -> f.client.sync("123", Map.of("partnerId", 7)));
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE, first.getStatusCode());
-
-        f.server.expect(requestTo(TARGET)).andRespond(withStatus(HttpStatus.NOT_FOUND)
-            .contentType(MediaType.APPLICATION_JSON).body("{\"error\":\"discord_resource_not_found\"}"));
         ResponseStatusException second = assertThrows(ResponseStatusException.class,
             () -> f.client.sync("123", Map.of("partnerId", 7)));
         assertEquals(HttpStatus.CONFLICT, second.getStatusCode());
