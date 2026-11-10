@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.Brafurries.API.entity.misc.Partner;
+import com.Brafurries.API.partner.PartnerImageStorageService;
 import com.Brafurries.API.entity.misc.PartnerExternalLink;
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.entity.user.UserDiscord;
@@ -64,6 +65,7 @@ public class PartnerDiscordService {
     private final UserDiscordRepository identities;
     private final JdbcTemplate jdbc;
     private final PartnerDiscordClient coddy;
+    private final PartnerImageStorageService partnerImages;
     private final ConcurrentHashMap<Integer, ReentrantLock> partnerLocks = new ConcurrentHashMap<>();
 
     public PartnerDiscordService(
@@ -72,7 +74,8 @@ public class PartnerDiscordService {
         PartnerRepository partners,
         UserDiscordRepository identities,
         JdbcTemplate jdbc,
-        PartnerDiscordClient coddy
+        PartnerDiscordClient coddy,
+        PartnerImageStorageService partnerImages
     ) {
         this.authorization = authorization;
         this.guilds = guilds;
@@ -80,6 +83,7 @@ public class PartnerDiscordService {
         this.identities = identities;
         this.jdbc = jdbc;
         this.coddy = coddy;
+        this.partnerImages = partnerImages;
     }
 
     private record Context(int communityId, long guildId) {}
@@ -382,7 +386,7 @@ public class PartnerDiscordService {
         );
     }
 
-    private static Map<String, Object> payload(
+    private Map<String, Object> payload(
         Context ctx, Partner partner, Map<String, Object> settings, Map<String, Object> row,
         String representativeDiscordUserId
     ) {
@@ -391,6 +395,23 @@ public class PartnerDiscordService {
         result.put("name", partner.getName());
         result.put("description", partner.getDescription());
         result.put("imageUrl", partner.getImageUrl());
+        // Only managed R2 objects may be downloaded by the API. Sending the
+        // verified bytes over the authenticated API->Coddy channel prevents
+        // SSRF and lets Coddy replace the starter attachment, not the thread.
+        if ("active".equalsIgnoreCase(partner.getStatus()) && partner.getImageUrl() != null) {
+            var image = partnerImages.readManagedPartnerImage(partner.getId(), partner.getImageUrl());
+            if (image != null) {
+                if (!"image/webp".equals(image.contentType())
+                    || image.bytes() == null || image.bytes().length > 5 * 1024 * 1024
+                    || image.bytes().length < 12) {
+                    throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                        "Imagem R2 incompatível com a publicação no Discord");
+                }
+                result.put("imageContentType", image.contentType());
+                result.put("imageSha256", image.sha256());
+                result.put("imageData", java.util.Base64.getEncoder().encodeToString(image.bytes()));
+            }
+        }
         result.put("announcementMarkdown", row.get("announcement_markdown"));
         result.put("announcementLinksMode", row.getOrDefault("announcement_links_mode", "INLINE_ONLY"));
         result.put("announcementPublicContact", row.get("announcement_public_contact"));

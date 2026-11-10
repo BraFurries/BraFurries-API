@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 import com.Brafurries.API.entity.community.Community;
 import com.Brafurries.API.entity.community.CommunityDiscord;
 import com.Brafurries.API.entity.misc.Partner;
+import com.Brafurries.API.partner.PartnerImageStorageService;
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.platform.PlatformAuthorizationService;
 import com.Brafurries.API.repository.community.CommunityDiscordRepository;
@@ -40,13 +41,14 @@ class PartnerDiscordServiceTest {
     @Mock UserDiscordRepository identities;
     @Mock JdbcTemplate jdbc;
     @Mock PartnerDiscordClient coddy;
+    @Mock PartnerImageStorageService partnerImages;
     @Mock Authentication auth;
 
     PartnerDiscordService service;
 
     @BeforeEach
     void setUp() {
-        service = new PartnerDiscordService(authorization, guilds, partners, identities, jdbc, coddy);
+        service = new PartnerDiscordService(authorization, guilds, partners, identities, jdbc, coddy, partnerImages);
     }
 
     private void officialGuild(int linkedCommunityId) {
