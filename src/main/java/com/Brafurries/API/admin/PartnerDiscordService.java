@@ -189,6 +189,10 @@ public class PartnerDiscordService {
         int actor = authorization.currentUser(auth).getId();
         Long category = snowflake(request.categoryId(), true);
         Long parent = snowflake(request.threadParentChannelId(), true);
+        if (category == null && parent != null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                "Selecione a categoria do canal de threads já existente");
+        }
         Map<String, Object> prior = config(ctx);
         // Retargeting existing synced threads requires an explicit migration,
         // otherwise the Coddy could silently recreate/duplicate announcements.
