@@ -49,6 +49,8 @@ public class PartnerDiscordService {
         boolean configured, List<PartnerView> partners
     ) {}
 
+    public record OwnPublication(int partnerId, String partnerName, String guildId, String threadId) {}
+
     private final PlatformAuthorizationService authorization;
     private final CommunityDiscordRepository guilds;
     private final PartnerRepository partners;
