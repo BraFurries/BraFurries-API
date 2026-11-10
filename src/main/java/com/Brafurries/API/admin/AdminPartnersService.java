@@ -79,6 +79,7 @@ public class AdminPartnersService {
     private final UserTelegramRepository userTelegramRepository;
     private final PartnerImageStorageService partnerImageStorageService;
     private final PartnerImageTransactionCleanup partnerImageTransactionCleanup;
+    private final PartnerDiscordService partnerDiscordService;
 
     public AdminPartnersService(
         PartnerRepository partnerRepository,
@@ -92,7 +93,8 @@ public class AdminPartnersService {
         UserDiscordRepository userDiscordRepository,
         UserTelegramRepository userTelegramRepository,
         PartnerImageStorageService partnerImageStorageService,
-        PartnerImageTransactionCleanup partnerImageTransactionCleanup
+        PartnerImageTransactionCleanup partnerImageTransactionCleanup,
+        PartnerDiscordService partnerDiscordService
     ) {
         this.partnerRepository = partnerRepository;
         this.partnerMetricRepository = partnerMetricRepository;
@@ -106,6 +108,7 @@ public class AdminPartnersService {
         this.userTelegramRepository = userTelegramRepository;
         this.partnerImageStorageService = partnerImageStorageService;
         this.partnerImageTransactionCleanup = partnerImageTransactionCleanup;
+        this.partnerDiscordService = partnerDiscordService;
     }
 
     @Transactional(readOnly = true)
@@ -219,6 +222,17 @@ public class AdminPartnersService {
         // updated_at authoritative so Discord content drift is detected.
         partner.setUpdatedAt(java.time.LocalDateTime.now());
         Partner saved = partnerRepository.save(partner);
+        // The partner and announcement are persisted atomically; the controller
+        // requests Discord reconciliation only after this transaction commits.
+        if (request.discordAnnouncement() != null) {
+            var announcement = request.discordAnnouncement();
+            partnerDiscordService.updateAnnouncement(
+                org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication(),
+                id, new PartnerDiscordService.AnnouncementRequest(
+                    announcement.markdown(), announcement.linksMode(), announcement.publicContact()
+                )
+            );
+        }
         return toItem(saved, null, representativesByUser(List.of(saved)));
     }
 

@@ -102,6 +102,9 @@ class AdminPartnersServiceTest {
     @Mock
     private PartnerImageTransactionCleanup partnerImageTransactionCleanup;
 
+    @Mock
+    private PartnerDiscordService partnerDiscordService;
+
     @InjectMocks
     private AdminPartnersService service;
 

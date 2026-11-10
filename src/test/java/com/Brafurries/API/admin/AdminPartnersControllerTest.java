@@ -31,12 +31,14 @@ import org.springframework.web.server.ResponseStatusException;
 class AdminPartnersControllerTest {
 
     private AdminPartnersService service;
+    private PartnerDiscordService discordService;
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
         service = mock(AdminPartnersService.class);
-        mvc = MockMvcBuilders.standaloneSetup(new AdminPartnersController(service))
+        discordService = mock(PartnerDiscordService.class);
+        mvc = MockMvcBuilders.standaloneSetup(new AdminPartnersController(service, discordService))
             .setControllerAdvice(new GlobalExceptionHandler())
             .build();
     }
@@ -152,5 +154,7 @@ class AdminPartnersControllerTest {
             .andExpect(jsonPath("$.imageUrl").value("https://cdn.example/partners/7/image/logo.webp"));
 
         verify(service).uploadImage(eq(7), any());
+        verify(discordService).syncAfterPartnerMutation(
+            org.mockito.ArgumentMatchers.nullable(org.springframework.security.core.Authentication.class), eq(7));
     }
 }

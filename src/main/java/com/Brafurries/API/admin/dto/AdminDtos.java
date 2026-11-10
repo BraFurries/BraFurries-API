@@ -193,6 +193,8 @@ public class AdminDtos {
     ) {
     }
 
+    public record PartnerDiscordAnnouncementFields(String markdown, String linksMode, String publicContact) {}
+
     public record UpdatePartnerRequest(
         String name,
         String slug,
@@ -209,8 +211,19 @@ public class AdminDtos {
         String representativeName,
         PartnerLinkedResource linkedResource,
         Boolean clearLinkedResource,
-        List<PartnerExternalLinkItem> links
+        List<PartnerExternalLinkItem> links,
+        PartnerDiscordAnnouncementFields discordAnnouncement
     ) {
+        public UpdatePartnerRequest(
+            String name, String slug, String category, String status, String description, String imageUrl,
+            String websiteUrl, String contactName, String contactEmail, Integer representativeUserId,
+            Boolean clearRepresentativeUser, Integer communityId, String representativeName,
+            PartnerLinkedResource linkedResource, Boolean clearLinkedResource, List<PartnerExternalLinkItem> links
+        ) {
+            this(name, slug, category, status, description, imageUrl, websiteUrl, contactName, contactEmail,
+                representativeUserId, clearRepresentativeUser, communityId, representativeName,
+                linkedResource, clearLinkedResource, links, null);
+        }
         public UpdatePartnerRequest(
             String name, String slug, String category, String status, String description, String imageUrl,
             String websiteUrl, String contactName, String contactEmail, Integer representativeUserId,

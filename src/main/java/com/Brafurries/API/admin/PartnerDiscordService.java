@@ -320,7 +320,7 @@ public class PartnerDiscordService {
     @Transactional
     public PartnerView updateAnnouncement(Authentication auth, int partnerId, AnnouncementRequest request) {
         Context ctx = context();
-        requireConfigured(ctx);
+        // Editorial drafts can be saved even before Discord destination setup.
         requirePartner(partnerId);
         if (request == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Anúncio inválido");
@@ -390,6 +390,7 @@ public class PartnerDiscordService {
         result.put("partnerId", partner.getId());
         result.put("name", partner.getName());
         result.put("description", partner.getDescription());
+        result.put("imageUrl", partner.getImageUrl());
         result.put("announcementMarkdown", row.get("announcement_markdown"));
         result.put("announcementLinksMode", row.getOrDefault("announcement_links_mode", "INLINE_ONLY"));
         result.put("announcementPublicContact", row.get("announcement_public_contact"));
@@ -416,6 +417,25 @@ public class PartnerDiscordService {
         result.put("representativeDiscordUserId", representativeDiscordUserId);
         result.put("lastRepresentativeDiscordUserId", snowflake(row.get("representative_discord_user_id")));
         return result;
+    }
+
+    /** Synchronous after-commit sync for all administrative partner mutations. */
+    public void syncAfterPartnerMutation(Authentication auth, int partnerId) {
+        try {
+            Context ctx = context();
+            if (config(ctx).isEmpty()) return;
+            Partner partner = requirePartner(partnerId);
+            Map<String, Object> current = publication(ctx, partnerId);
+            if (!"active".equalsIgnoreCase(partner.getStatus())
+                && current.get("thread_id") == null && current.get("text_channel_id") == null) return;
+            sync(auth, partnerId);
+        } catch (RuntimeException failure) {
+            // The institutional save has already committed. A Discord failure
+            // must not report that saved data was rolled back.
+            org.slf4j.LoggerFactory.getLogger(PartnerDiscordService.class).warn(
+                "Partner saved; Discord reconciliation pending: partnerId={} errorType={}",
+                partnerId, failure.getClass().getSimpleName());
+        }
     }
 
     public PartnerView sync(Authentication auth, int partnerId) {
