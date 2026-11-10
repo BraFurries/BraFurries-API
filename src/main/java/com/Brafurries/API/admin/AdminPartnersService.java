@@ -214,6 +214,10 @@ public class AdminPartnersService {
             partner.setName(required(request.name(), "Nome obrigatorio"));
         }
         applyUpdateFields(partner, request);
+        // A link-only update changes a JPA collection, which does not
+        // necessarily trigger @PreUpdate on the parent. Keep the partner's
+        // updated_at authoritative so Discord content drift is detected.
+        partner.setUpdatedAt(java.time.LocalDateTime.now());
         Partner saved = partnerRepository.save(partner);
         return toItem(saved, null, representativesByUser(List.of(saved)));
     }
