@@ -192,6 +192,25 @@ class PartnerDiscordServiceTest {
     }
 
     @Test
+    void rejectsAnnouncementUpdateForPartnerAlreadyOwnedByAnotherCommunity() {
+        officialGuild(1);
+        configured();
+        Partner partner = new Partner();
+        partner.setId(17);
+        when(partners.findWithDetailsById(17)).thenReturn(Optional.of(partner));
+        when(jdbc.queryForList(startsWith("SELECT * FROM partner_discord_publications"),
+            eq(1), eq(17))).thenReturn(List.of());
+        when(jdbc.queryForList(startsWith("SELECT community_id FROM partner_discord_publications"),
+            eq(17))).thenReturn(List.of(Map.of("community_id", 2)));
+
+        ResponseStatusException error = assertThrows(ResponseStatusException.class,
+            () -> service.updateAnnouncement(auth, 17,
+                new PartnerDiscordService.AnnouncementRequest("# Indie", "INLINE_ONLY", null)));
+        assertEquals(HttpStatus.CONFLICT, error.getStatusCode());
+        verifyNoInteractions(coddy);
+    }
+
+    @Test
     void savesMarkdownInDiscordStateWithoutRewritingInstitutionalDescription() {
         officialGuild(1);
         configured();
