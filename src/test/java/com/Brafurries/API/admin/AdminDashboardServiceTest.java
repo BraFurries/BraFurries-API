@@ -20,6 +20,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -67,8 +68,12 @@ class AdminDashboardServiceTest {
         assertEquals(2580L, overview.metrics().botReachedUsers());
         assertEquals(3L, overview.metrics().serverGrowthWeek());
         assertEquals(1L, overview.metrics().serverLeavesWeek());
-        assertTrue(earliestExpected.isBefore(LocalDateTime.now(ZoneOffset.UTC)));
-        verify(guilds).countByLastBotJoinedAtGreaterThanEqual(any(LocalDateTime.class));
-        verify(guilds).countByLastBotLeftAtGreaterThanEqual(any(LocalDateTime.class));
+        ArgumentCaptor<LocalDateTime> joinsCutoff = ArgumentCaptor.forClass(LocalDateTime.class);
+        ArgumentCaptor<LocalDateTime> exitsCutoff = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(guilds).countByLastBotJoinedAtGreaterThanEqual(joinsCutoff.capture());
+        verify(guilds).countByLastBotLeftAtGreaterThanEqual(exitsCutoff.capture());
+        assertEquals(joinsCutoff.getValue(), exitsCutoff.getValue());
+        assertTrue(!joinsCutoff.getValue().isBefore(earliestExpected));
+        assertTrue(!joinsCutoff.getValue().isAfter(LocalDateTime.now(ZoneOffset.UTC)));
     }
 }
