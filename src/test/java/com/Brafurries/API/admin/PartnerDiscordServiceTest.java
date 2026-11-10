@@ -159,7 +159,6 @@ class PartnerDiscordServiceTest {
     @Test
     void rejectsOverlongMarkdownBeforeWritingOrPublishing() {
         officialGuild(1);
-        configured();
         Partner partner = new Partner();
         partner.setId(17);
         when(partners.findWithDetailsById(17)).thenReturn(Optional.of(partner));
@@ -177,7 +176,6 @@ class PartnerDiscordServiceTest {
     @Test
     void rejectsUnrecognizedLinkAppendModeWithoutDiscordEffect() {
         officialGuild(1);
-        configured();
         Partner partner = new Partner();
         partner.setId(17);
         when(partners.findWithDetailsById(17)).thenReturn(Optional.of(partner));
@@ -194,7 +192,6 @@ class PartnerDiscordServiceTest {
     @Test
     void rejectsAnnouncementUpdateForPartnerAlreadyOwnedByAnotherCommunity() {
         officialGuild(1);
-        configured();
         Partner partner = new Partner();
         partner.setId(17);
         when(partners.findWithDetailsById(17)).thenReturn(Optional.of(partner));
