@@ -311,6 +311,11 @@ jobs:
           cat "$onboarding_migration" >> src/test/resources/recruitment_schema.sql
           cat "$local_proof_migration" >> src/test/resources/recruitment_schema.sql
           cat "$oauth_reenable_migration" >> src/test/resources/recruitment_schema.sql
+          # Keep this second disposable schema aligned with the API entity.
+          presence_migration=".ci/coddy-presence-database/flyway/sql/versioned/V20261110_002__track_discord_bot_guild_presence.sql"
+          test "$(git -C .ci/coddy-presence-database rev-parse HEAD)" = "1d4d23b2ac3f02cd80da881b1daa508b5fb9c791"
+          test -s "$presence_migration"
+          cat "$presence_migration" >> src/test/resources/recruitment_schema.sql
           ./mvnw -B -Dtest=RecruitmentDraftJdbcMariaDbIntegrationTest,RecruitmentStageEditorJdbcMariaDbIntegrationTest,RecruitmentPublicationJdbcMariaDbIntegrationTest,RecruitmentCandidateJdbcMariaDbIntegrationTest,RecruitmentTrackingJdbcMariaDbIntegrationTest,RecruitmentHumanReviewJdbcMariaDbIntegrationTest,RecruitmentStageDecisionJdbcMariaDbIntegrationTest,RecruitmentDecisionPolicyJdbcMariaDbIntegrationTest,RecruitmentDecisionDeskJdbcMariaDbIntegrationTest,RecruitmentStageVotingJdbcMariaDbIntegrationTest,RecruitmentCandidateAttemptJdbcMariaDbIntegrationTest,RecruitmentObjectiveGradeJdbcMariaDbIntegrationTest test
 
       - name: Package without rerunning tests
