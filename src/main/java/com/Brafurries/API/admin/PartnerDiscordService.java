@@ -508,7 +508,15 @@ public class PartnerDiscordService {
                     throw new ResponseStatusException(HttpStatus.CONFLICT,
                         "Destino manual foi alterado; reconcilie a vitrine antes de continuar");
                 }
-                int updatedConfig = jdbc.update("""
+                boolean destinationChanged = !Objects.equals(snowflake(config.get("category_id")), newCategory)
+                    || !Objects.equals(snowflake(config.get("thread_parent_channel_id")), newParent)
+                    || enabled(config, "category_created_by_bot") != Boolean.TRUE.equals(result.get("categoryCreatedByBot"))
+                    || enabled(config, "thread_parent_created_by_bot") != Boolean.TRUE.equals(result.get("threadParentCreatedByBot"));
+                if (destinationChanged) {
+                    // MariaDB reports 0 affected rows for an unchanged SET.
+                    // Only apply CAS when identifiers or ownership flags
+                    // actually changed; ordinary content sync remains idempotent.
+                    int updatedConfig = jdbc.update("""
                     UPDATE partner_discord_config
                     SET category_created_by_bot = ?, category_id = ?,
                         thread_parent_created_by_bot = ?, thread_parent_channel_id = ?
@@ -522,9 +530,10 @@ public class PartnerDiscordService {
                     ctx.communityId(), ctx.guildId(), config.get("category_id"),
                     config.get("thread_parent_channel_id")
                 );
-                if (updatedConfig != 1) {
-                    throw new ResponseStatusException(HttpStatus.CONFLICT,
-                        "Destino da vitrine alterado durante a sincronização");
+                    if (updatedConfig != 1) {
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "Destino da vitrine alterado durante a sincronização");
+                    }
                 }
                 audit(ctx, partnerId, actor, "SYNC_SUCCEEDED", "Recursos Discord sincronizados");
                 return settings().partners().stream().filter(p -> p.partnerId() == partnerId).findFirst().orElseThrow();
