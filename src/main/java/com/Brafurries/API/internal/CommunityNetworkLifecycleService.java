@@ -42,6 +42,10 @@ import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.cache.annotation.CacheEvict;
+import java.time.ZoneOffset;
+import static com.Brafurries.API.config.CacheConfig.ADMIN_OVERVIEW;
+import static com.Brafurries.API.config.CacheConfig.ADMIN_GENERAL_METRICS;
 
 @Service
 public class CommunityNetworkLifecycleService {
@@ -94,6 +98,7 @@ public class CommunityNetworkLifecycleService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {ADMIN_OVERVIEW, ADMIN_GENERAL_METRICS}, allEntries = true)
     public DiscordNetworkResponse observeDiscordNetwork(
         String rawGuildId,
         DiscordNetworkObservationRequest request
@@ -130,6 +135,25 @@ public class CommunityNetworkLifecycleService {
                 )
         ) {
             link.setMembershipSyncState(MembershipSyncState.RECONCILIATION_REQUIRED.name());
+        }
+
+        // Presence timestamps are UTC. A repeated active observation must not
+        // invent a new join. Discord's member.joined_at can also safely fill
+        // missing history for a guild that was already active before rollout.
+        LocalDateTime observedAtUtc = LocalDateTime.now(ZoneOffset.UTC);
+        if (Boolean.TRUE.equals(request.active())) {
+            LocalDateTime providerJoinedAt = request.botJoinedAt() == null
+                ? null : LocalDateTime.ofInstant(request.botJoinedAt(), ZoneOffset.UTC);
+            if (providerJoinedAt != null) {
+                if (link.getLastBotJoinedAt() == null
+                    || providerJoinedAt.isAfter(link.getLastBotJoinedAt())) {
+                    link.setLastBotJoinedAt(providerJoinedAt);
+                }
+            } else if (newLink || !wasActive) {
+                link.setLastBotJoinedAt(observedAtUtc);
+            }
+        } else if (wasActive) {
+            link.setLastBotLeftAt(observedAtUtc);
         }
 
         link.setName(request.name().trim());
@@ -1112,6 +1136,7 @@ public class CommunityNetworkLifecycleService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {ADMIN_OVERVIEW, ADMIN_GENERAL_METRICS}, allEntries = true)
     public DiscordNetworkPresenceSnapshotResponse applyDiscordNetworkPresenceSnapshot(
         DiscordNetworkPresenceSnapshotRequest request
     ) {
@@ -1139,6 +1164,7 @@ public class CommunityNetworkLifecycleService {
             if (Boolean.TRUE.equals(locked.getActive())
                 && !observedGuildIds.contains(locked.getGuildId())) {
                 locked.setActive(false);
+                locked.setLastBotLeftAt(LocalDateTime.now(ZoneOffset.UTC));
                 discordRepository.save(locked);
                 backupControlPlaneStore.observeGuildBackupPresence(
                     locked.getGuildId(),
