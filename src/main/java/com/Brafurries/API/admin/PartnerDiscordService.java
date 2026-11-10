@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.Brafurries.API.entity.misc.Partner;
+import com.Brafurries.API.partner.PartnerImageStorageService;
 import com.Brafurries.API.entity.misc.PartnerExternalLink;
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.entity.user.UserDiscord;
@@ -64,6 +65,7 @@ public class PartnerDiscordService {
     private final UserDiscordRepository identities;
     private final JdbcTemplate jdbc;
     private final PartnerDiscordClient coddy;
+    private final PartnerImageStorageService partnerImages;
     private final ConcurrentHashMap<Integer, ReentrantLock> partnerLocks = new ConcurrentHashMap<>();
 
     public PartnerDiscordService(
@@ -72,7 +74,8 @@ public class PartnerDiscordService {
         PartnerRepository partners,
         UserDiscordRepository identities,
         JdbcTemplate jdbc,
-        PartnerDiscordClient coddy
+        PartnerDiscordClient coddy,
+        PartnerImageStorageService partnerImages
     ) {
         this.authorization = authorization;
         this.guilds = guilds;
@@ -80,6 +83,7 @@ public class PartnerDiscordService {
         this.identities = identities;
         this.jdbc = jdbc;
         this.coddy = coddy;
+        this.partnerImages = partnerImages;
     }
 
     private record Context(int communityId, long guildId) {}
@@ -320,7 +324,7 @@ public class PartnerDiscordService {
     @Transactional
     public PartnerView updateAnnouncement(Authentication auth, int partnerId, AnnouncementRequest request) {
         Context ctx = context();
-        requireConfigured(ctx);
+        // Editorial drafts can be saved even before Discord destination setup.
         requirePartner(partnerId);
         if (request == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Anúncio inválido");
@@ -382,7 +386,7 @@ public class PartnerDiscordService {
         );
     }
 
-    private static Map<String, Object> payload(
+    private Map<String, Object> payload(
         Context ctx, Partner partner, Map<String, Object> settings, Map<String, Object> row,
         String representativeDiscordUserId
     ) {
@@ -390,6 +394,24 @@ public class PartnerDiscordService {
         result.put("partnerId", partner.getId());
         result.put("name", partner.getName());
         result.put("description", partner.getDescription());
+        result.put("imageUrl", partner.getImageUrl());
+        // Only managed R2 objects may be downloaded by the API. Sending the
+        // verified bytes over the authenticated API->Coddy channel prevents
+        // SSRF and lets Coddy replace the starter attachment, not the thread.
+        if ("active".equalsIgnoreCase(partner.getStatus()) && partner.getImageUrl() != null) {
+            var image = partnerImages.readManagedPartnerImage(partner.getId(), partner.getImageUrl());
+            if (image != null) {
+                if (!"image/webp".equals(image.contentType())
+                    || image.bytes() == null || image.bytes().length > 5 * 1024 * 1024
+                    || image.bytes().length < 12) {
+                    throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                        "Imagem R2 incompatível com a publicação no Discord");
+                }
+                result.put("imageContentType", image.contentType());
+                result.put("imageSha256", image.sha256());
+                result.put("imageData", java.util.Base64.getEncoder().encodeToString(image.bytes()));
+            }
+        }
         result.put("announcementMarkdown", row.get("announcement_markdown"));
         result.put("announcementLinksMode", row.getOrDefault("announcement_links_mode", "INLINE_ONLY"));
         result.put("announcementPublicContact", row.get("announcement_public_contact"));
@@ -416,6 +438,25 @@ public class PartnerDiscordService {
         result.put("representativeDiscordUserId", representativeDiscordUserId);
         result.put("lastRepresentativeDiscordUserId", snowflake(row.get("representative_discord_user_id")));
         return result;
+    }
+
+    /** Synchronous after-commit sync for all administrative partner mutations. */
+    public void syncAfterPartnerMutation(Authentication auth, int partnerId) {
+        try {
+            Context ctx = context();
+            if (config(ctx).isEmpty()) return;
+            Partner partner = requirePartner(partnerId);
+            Map<String, Object> current = publication(ctx, partnerId);
+            if (!"active".equalsIgnoreCase(partner.getStatus())
+                && current.get("thread_id") == null && current.get("text_channel_id") == null) return;
+            sync(auth, partnerId);
+        } catch (RuntimeException failure) {
+            // The institutional save has already committed. A Discord failure
+            // must not report that saved data was rolled back.
+            org.slf4j.LoggerFactory.getLogger(PartnerDiscordService.class).warn(
+                "Partner saved; Discord reconciliation pending: partnerId={} errorType={}",
+                partnerId, failure.getClass().getSimpleName());
+        }
     }
 
     public PartnerView sync(Authentication auth, int partnerId) {
@@ -474,20 +515,47 @@ public class PartnerDiscordService {
                     throw new ResponseStatusException(HttpStatus.CONFLICT,
                         "Configuração alterada durante a sincronização; tente novamente");
                 }
-                jdbc.update("""
+                // The Coddy may recreate a *bot-owned* deleted category or
+                // forum. Persist the new verified identifiers, but never
+                // silently switch a manually selected destination.
+                String newCategory = snowflake(result.get("categoryId"));
+                String newParent = snowflake(result.get("threadParentChannelId"));
+                if ((!enabled(config, "category_created_by_bot")
+                        && config.get("category_id") != null
+                        && !Objects.equals(snowflake(config.get("category_id")), newCategory))
+                    || (!enabled(config, "thread_parent_created_by_bot")
+                        && config.get("thread_parent_channel_id") != null
+                        && !Objects.equals(snowflake(config.get("thread_parent_channel_id")), newParent))) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Destino manual foi alterado; reconcilie a vitrine antes de continuar");
+                }
+                boolean destinationChanged = !Objects.equals(snowflake(config.get("category_id")), newCategory)
+                    || !Objects.equals(snowflake(config.get("thread_parent_channel_id")), newParent)
+                    || enabled(config, "category_created_by_bot") != Boolean.TRUE.equals(result.get("categoryCreatedByBot"))
+                    || enabled(config, "thread_parent_created_by_bot") != Boolean.TRUE.equals(result.get("threadParentCreatedByBot"));
+                if (destinationChanged) {
+                    // MariaDB reports 0 affected rows for an unchanged SET.
+                    // Only apply CAS when identifiers or ownership flags
+                    // actually changed; ordinary content sync remains idempotent.
+                    int updatedConfig = jdbc.update("""
                     UPDATE partner_discord_config
-                    SET category_created_by_bot = IF(category_id IS NULL, ?, category_created_by_bot),
-                        category_id = COALESCE(category_id, ?),
-                        thread_parent_created_by_bot = IF(thread_parent_channel_id IS NULL, ?, thread_parent_created_by_bot),
-                        thread_parent_channel_id = COALESCE(thread_parent_channel_id, ?)
+                    SET category_created_by_bot = ?, category_id = ?,
+                        thread_parent_created_by_bot = ?, thread_parent_channel_id = ?
                     WHERE community_id = ? AND guild_id = ?
+                      AND category_id <=> ? AND thread_parent_channel_id <=> ?
                     """,
                     Boolean.TRUE.equals(result.get("categoryCreatedByBot")) ? 1 : 0,
-                    snowflake(snowflake(result.get("categoryId")), true),
+                    snowflake(newCategory, true),
                     Boolean.TRUE.equals(result.get("threadParentCreatedByBot")) ? 1 : 0,
-                    snowflake(snowflake(result.get("threadParentChannelId")), true),
-                    ctx.communityId(), ctx.guildId()
+                    snowflake(newParent, true),
+                    ctx.communityId(), ctx.guildId(), config.get("category_id"),
+                    config.get("thread_parent_channel_id")
                 );
+                    if (updatedConfig != 1) {
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "Destino da vitrine alterado durante a sincronização");
+                    }
+                }
                 audit(ctx, partnerId, actor, "SYNC_SUCCEEDED", "Recursos Discord sincronizados");
                 return settings().partners().stream().filter(p -> p.partnerId() == partnerId).findFirst().orElseThrow();
             } catch (RuntimeException failure) {

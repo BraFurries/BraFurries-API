@@ -21,6 +21,15 @@ public class R2PartnerImageStorageService implements PartnerImageStorageService 
     }
 
     @Override
+    public ManagedPartnerImage readManagedPartnerImage(Integer partnerId, String publicUrl) {
+        var content = storage.readManagedImageByPublicUrl(
+            publicUrl, keyPrefix(partnerId), "imagem da parceria"
+        );
+        return content == null ? null
+            : new ManagedPartnerImage(content.bytes(), content.contentType(), content.sha256());
+    }
+
+    @Override
     public void deletePartnerImageByUrl(Integer partnerId, String url) {
         storage.deleteByPublicUrl(url, keyPrefix(partnerId), "imagem da parceria");
     }

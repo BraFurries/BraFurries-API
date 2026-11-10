@@ -141,9 +141,15 @@ public class R2ImageStorageService {
             var head = client.headObject(
                 HeadObjectRequest.builder().bucket(bucket).key(key).build()
             );
+            if (head.contentLength() == null || head.contentLength() > MAX_ORIGINAL_IMAGE_BYTES) {
+                throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, subject + " muito grande");
+            }
             byte[] bytes = client.getObjectAsBytes(
                 GetObjectRequest.builder().bucket(bucket).key(key).build()
             ).asByteArray();
+            if (bytes.length > MAX_ORIGINAL_IMAGE_BYTES) {
+                throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, subject + " muito grande");
+            }
             return new StoredOriginalBytes(
                 bytes,
                 normalizeContentType(head.contentType()),
@@ -161,6 +167,13 @@ public class R2ImageStorageService {
                 ex
             );
         }
+    }
+
+    public StoredOriginalBytes readManagedImageByPublicUrl(
+        String publicUrl, String requiredKeyPrefix, String subject
+    ) {
+        String key = resolveManagedKey(publicUrl, requiredKeyPrefix);
+        return key == null ? null : readOriginal(key, requiredKeyPrefix, subject);
     }
 
     public String publicUrlForManagedKey(String key, String requiredKeyPrefix) {

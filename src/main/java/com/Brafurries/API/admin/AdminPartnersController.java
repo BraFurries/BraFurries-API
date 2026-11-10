@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import org.springframework.security.access.prepost.PreAuthorize;
 import jakarta.validation.Valid;
 import java.util.List;
+import org.springframework.security.core.Authentication;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,9 +32,12 @@ import org.springframework.web.multipart.MultipartFile;
 public class AdminPartnersController {
 
     private final AdminPartnersService adminPartnersService;
+    private final PartnerDiscordService partnerDiscordService;
 
-    public AdminPartnersController(AdminPartnersService adminPartnersService) {
+    public AdminPartnersController(AdminPartnersService adminPartnersService,
+                                   PartnerDiscordService partnerDiscordService) {
         this.adminPartnersService = adminPartnersService;
+        this.partnerDiscordService = partnerDiscordService;
     }
 
     @Operation(summary = "Lista parcerias administrativas")
@@ -72,38 +76,50 @@ public class AdminPartnersController {
     @Operation(summary = "Cria parceria")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public AdminPartnerItem createPartner(@Valid @RequestBody CreatePartnerRequest request) {
-        return adminPartnersService.create(request);
+    public AdminPartnerItem createPartner(Authentication auth, @Valid @RequestBody CreatePartnerRequest request) {
+        AdminPartnerItem saved = adminPartnersService.create(request);
+        partnerDiscordService.syncAfterPartnerMutation(auth, saved.id());
+        return saved;
     }
 
     @Operation(summary = "Atualiza parceria")
     @PatchMapping("/{id}")
     public AdminPartnerItem updatePartner(
         @PathVariable Integer id,
-        @RequestBody UpdatePartnerRequest request
+        @RequestBody UpdatePartnerRequest request,
+        Authentication auth
     ) {
-        return adminPartnersService.update(id, request);
+        AdminPartnerItem saved = adminPartnersService.update(id, request);
+        partnerDiscordService.syncAfterPartnerMutation(auth, id);
+        return saved;
     }
 
     @Operation(summary = "Envia imagem da parceria")
     @PostMapping(path = "/{id}/image", consumes = "multipart/form-data")
-    public PartnerImageResponse uploadPartnerImage(@PathVariable Integer id, @RequestPart("file") MultipartFile file) {
-        return adminPartnersService.uploadImage(id, file);
+    public PartnerImageResponse uploadPartnerImage(Authentication auth, @PathVariable Integer id, @RequestPart("file") MultipartFile file) {
+        PartnerImageResponse saved = adminPartnersService.uploadImage(id, file);
+        partnerDiscordService.syncAfterPartnerMutation(auth, id);
+        return saved;
     }
 
     @Operation(summary = "Remove imagem da parceria")
     @DeleteMapping("/{id}/image")
-    public PartnerImageResponse deletePartnerImage(@PathVariable Integer id) {
-        return adminPartnersService.deleteImage(id);
+    public PartnerImageResponse deletePartnerImage(Authentication auth, @PathVariable Integer id) {
+        PartnerImageResponse saved = adminPartnersService.deleteImage(id);
+        partnerDiscordService.syncAfterPartnerMutation(auth, id);
+        return saved;
     }
 
     @Operation(summary = "Atualiza status da parceria")
     @PatchMapping("/{id}/status")
     public AdminPartnerItem updatePartnerStatus(
         @PathVariable Integer id,
-        @Valid @RequestBody UpdatePartnerStatusRequest request
+        @Valid @RequestBody UpdatePartnerStatusRequest request,
+        Authentication auth
     ) {
-        return adminPartnersService.updateStatus(id, request);
+        AdminPartnerItem saved = adminPartnersService.updateStatus(id, request);
+        partnerDiscordService.syncAfterPartnerMutation(auth, id);
+        return saved;
     }
 
     @Operation(summary = "Remove parceria")
