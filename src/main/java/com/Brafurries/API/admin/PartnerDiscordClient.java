@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -26,6 +27,7 @@ public class PartnerDiscordClient {
     private final String baseUrl;
     private final String token;
 
+    @Autowired
     public PartnerDiscordClient(
         @Value("${app.bot.base-url:http://127.0.0.1:18088}") String baseUrl,
         @Value("${app.bot.status-token:}") String token,
