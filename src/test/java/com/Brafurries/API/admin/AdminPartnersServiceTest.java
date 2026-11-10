@@ -218,8 +218,8 @@ class AdminPartnersServiceTest {
         assertEquals("República Indie", saved.name());
         verify(partnerDiscordService).updateAnnouncement(
             org.mockito.ArgumentMatchers.nullable(org.springframework.security.core.Authentication.class),
-            eq(7),
-            eq(new PartnerDiscordService.AnnouncementRequest(
+            org.mockito.ArgumentMatchers.eq(7),
+            org.mockito.ArgumentMatchers.eq(new PartnerDiscordService.AnnouncementRequest(
                 "# República Indie", "INLINE_ONLY", "Equipe"
             ))
         );
