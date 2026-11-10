@@ -314,10 +314,15 @@ public class PartnerDiscordService {
             // Create default publication state if absent; existing partners
             // remain unchanged until an explicit sync request.
             jdbc.update("""
-                INSERT IGNORE INTO partner_discord_publications(partner_id, community_id)
+                INSERT INTO partner_discord_publications(partner_id, community_id)
                 VALUES (?, ?)
+                ON DUPLICATE KEY UPDATE partner_id = partner_id
                 """, partnerId, ctx.communityId());
             Map<String, Object> current = publication(ctx, partnerId);
+            if (current.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Publicação pertence a outro escopo de comunidade");
+            }
             User user = partner.getRepresentativeUser();
             UserDiscord representative = user == null ? null : identities.findByUser(user).orElse(null);
             String discordId = representative == null ? null : snowflake(representative.getDiscordUserId());
