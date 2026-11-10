@@ -29,6 +29,7 @@ import com.Brafurries.API.user.CommunityAuthorizationService;
 import com.Brafurries.API.user.CommunityMembershipAggregateService;
 import com.Brafurries.API.user.CommunityNetworkAvailabilityService;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -174,6 +175,69 @@ class CommunityNetworkLifecycleServiceTest {
         });
         lenient().when(networkEvents.save(any(CommunityNetworkMemberEvent.class)))
             .thenAnswer(invocation -> invocation.getArgument(0));
+    }
+
+    @Test
+    void botPresenceKeepsLastJoinAndExitDatesWithoutRefreshingRepeatedObservations() {
+        link.setDiscordAdminId(111L);
+        LocalDateTime providerJoinUtc = LocalDateTime.of(2026, 11, 9, 12, 30);
+        service.observeDiscordNetwork(
+            "100",
+            new DiscordNetworkObservationRequest(
+                "Guild A", "111", true, 1, providerJoinUtc.toInstant(ZoneOffset.UTC)
+            )
+        );
+        assertEquals(providerJoinUtc, link.getLastBotJoinedAt());
+        assertNull(link.getLastBotLeftAt());
+
+        service.observeDiscordNetwork(
+            "100", new DiscordNetworkObservationRequest("Guild A", "111", true, 1)
+        );
+        assertEquals(providerJoinUtc, link.getLastBotJoinedAt());
+
+        service.observeDiscordNetwork(
+            "100", new DiscordNetworkObservationRequest("Guild A", "111", false, 0)
+        );
+        assertFalse(link.getActive());
+        LocalDateTime firstExit = link.getLastBotLeftAt();
+        assertNotNull(firstExit);
+
+        service.observeDiscordNetwork(
+            "100", new DiscordNetworkObservationRequest("Guild A", "111", false, 0)
+        );
+        assertEquals(firstExit, link.getLastBotLeftAt());
+
+        LocalDateTime rejoinUtc = providerJoinUtc.plusDays(1);
+        service.observeDiscordNetwork(
+            "100",
+            new DiscordNetworkObservationRequest(
+                "Guild A", "111", true, 1, rejoinUtc.toInstant(ZoneOffset.UTC)
+            )
+        );
+        assertTrue(link.getActive());
+        assertEquals(rejoinUtc, link.getLastBotJoinedAt());
+        assertEquals(firstExit, link.getLastBotLeftAt());
+    }
+
+    @Test
+    void completeGuildSnapshotRecordsExitOnlyWhenPreviouslyActive() {
+        link.setDiscordAdminId(111L);
+        when(discord.findAllByActiveTrueOrderByGuildIdAsc()).thenReturn(List.of(link));
+
+        var result = service.applyDiscordNetworkPresenceSnapshot(
+            new DiscordNetworkPresenceSnapshotRequest(true, List.of())
+        );
+
+        assertEquals(1, result.deactivatedGuilds());
+        assertFalse(link.getActive());
+        LocalDateTime observedExit = link.getLastBotLeftAt();
+        assertNotNull(observedExit);
+
+        var repeated = service.applyDiscordNetworkPresenceSnapshot(
+            new DiscordNetworkPresenceSnapshotRequest(true, List.of())
+        );
+        assertEquals(0, repeated.deactivatedGuilds());
+        assertEquals(observedExit, link.getLastBotLeftAt());
     }
 
     @Test
