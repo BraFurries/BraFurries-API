@@ -49,6 +49,12 @@ public class PartnerDiscordController {
         return service.sync(auth, partnerId);
     }
 
+    @DeleteMapping("/admin/partners/{partnerId}/discord")
+    @PreAuthorize("@partnerAuthorizationService.canManage(authentication)")
+    public void unpublish(Authentication auth, @PathVariable int partnerId) {
+        service.unpublish(auth, partnerId);
+    }
+
     @PostMapping("/admin/partners/discord/sync")
     @PreAuthorize("@partnerAuthorizationService.canManage(authentication)")
     public List<PartnerView> syncAll(Authentication auth) {
