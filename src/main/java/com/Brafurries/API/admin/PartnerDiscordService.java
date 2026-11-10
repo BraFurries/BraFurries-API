@@ -494,20 +494,38 @@ public class PartnerDiscordService {
                     throw new ResponseStatusException(HttpStatus.CONFLICT,
                         "Configuração alterada durante a sincronização; tente novamente");
                 }
-                jdbc.update("""
+                // The Coddy may recreate a *bot-owned* deleted category or
+                // forum. Persist the new verified identifiers, but never
+                // silently switch a manually selected destination.
+                String newCategory = snowflake(result.get("categoryId"));
+                String newParent = snowflake(result.get("threadParentChannelId"));
+                if ((!enabled(config, "category_created_by_bot")
+                        && config.get("category_id") != null
+                        && !Objects.equals(snowflake(config.get("category_id")), newCategory))
+                    || (!enabled(config, "thread_parent_created_by_bot")
+                        && config.get("thread_parent_channel_id") != null
+                        && !Objects.equals(snowflake(config.get("thread_parent_channel_id")), newParent))) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Destino manual foi alterado; reconcilie a vitrine antes de continuar");
+                }
+                int updatedConfig = jdbc.update("""
                     UPDATE partner_discord_config
-                    SET category_created_by_bot = IF(category_id IS NULL, ?, category_created_by_bot),
-                        category_id = COALESCE(category_id, ?),
-                        thread_parent_created_by_bot = IF(thread_parent_channel_id IS NULL, ?, thread_parent_created_by_bot),
-                        thread_parent_channel_id = COALESCE(thread_parent_channel_id, ?)
+                    SET category_created_by_bot = ?, category_id = ?,
+                        thread_parent_created_by_bot = ?, thread_parent_channel_id = ?
                     WHERE community_id = ? AND guild_id = ?
+                      AND category_id <=> ? AND thread_parent_channel_id <=> ?
                     """,
                     Boolean.TRUE.equals(result.get("categoryCreatedByBot")) ? 1 : 0,
-                    snowflake(snowflake(result.get("categoryId")), true),
+                    snowflake(newCategory, true),
                     Boolean.TRUE.equals(result.get("threadParentCreatedByBot")) ? 1 : 0,
-                    snowflake(snowflake(result.get("threadParentChannelId")), true),
-                    ctx.communityId(), ctx.guildId()
+                    snowflake(newParent, true),
+                    ctx.communityId(), ctx.guildId(), config.get("category_id"),
+                    config.get("thread_parent_channel_id")
                 );
+                if (updatedConfig != 1) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Destino da vitrine alterado durante a sincronização");
+                }
                 audit(ctx, partnerId, actor, "SYNC_SUCCEEDED", "Recursos Discord sincronizados");
                 return settings().partners().stream().filter(p -> p.partnerId() == partnerId).findFirst().orElseThrow();
             } catch (RuntimeException failure) {
