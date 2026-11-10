@@ -201,6 +201,31 @@ class AdminPartnersServiceTest {
     }
 
     @Test
+    void updatesPartnerAndDiscordAnnouncementInOneSaveOperation() {
+        Partner partner = basePartner();
+        when(partnerRepository.findWithDetailsById(7)).thenReturn(Optional.of(partner));
+        when(partnerRepository.save(partner)).thenReturn(partner);
+        var announcement = new com.Brafurries.API.admin.dto.AdminDtos.PartnerDiscordAnnouncementFields(
+            "# República Indie", "INLINE_ONLY", "Equipe"
+        );
+        var request = new UpdatePartnerRequest(
+            "República Indie", null, "brand", null, null, null, null, null, null,
+            null, null, null, null, null, null, null, announcement
+        );
+
+        AdminPartnerItem saved = service.update(7, request);
+
+        assertEquals("República Indie", saved.name());
+        verify(partnerDiscordService).updateAnnouncement(
+            org.mockito.ArgumentMatchers.nullable(org.springframework.security.core.Authentication.class),
+            eq(7),
+            eq(new PartnerDiscordService.AnnouncementRequest(
+                "# República Indie", "INLINE_ONLY", "Equipe"
+            ))
+        );
+    }
+
+    @Test
     void unknownCategoryIsRejectedForCreateAndUpdate() {
         ResponseStatusException createError = assertThrows(
             ResponseStatusException.class,
