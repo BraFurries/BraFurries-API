@@ -337,16 +337,16 @@ public class PartnerDiscordService {
                 }
                 jdbc.update("""
                     UPDATE partner_discord_config
-                    SET category_id = COALESCE(category_id, ?),
-                        category_created_by_bot = IF(category_id IS NULL, ?, category_created_by_bot),
-                        thread_parent_channel_id = COALESCE(thread_parent_channel_id, ?),
-                        thread_parent_created_by_bot = IF(thread_parent_channel_id IS NULL, ?, thread_parent_created_by_bot)
+                    SET category_created_by_bot = IF(category_id IS NULL, ?, category_created_by_bot),
+                        category_id = COALESCE(category_id, ?),
+                        thread_parent_created_by_bot = IF(thread_parent_channel_id IS NULL, ?, thread_parent_created_by_bot),
+                        thread_parent_channel_id = COALESCE(thread_parent_channel_id, ?)
                     WHERE community_id = ? AND guild_id = ?
                     """,
-                    snowflake(snowflake(result.get("categoryId")), true),
                     Boolean.TRUE.equals(result.get("categoryCreatedByBot")) ? 1 : 0,
-                    snowflake(snowflake(result.get("threadParentChannelId")), true),
+                    snowflake(snowflake(result.get("categoryId")), true),
                     Boolean.TRUE.equals(result.get("threadParentCreatedByBot")) ? 1 : 0,
+                    snowflake(snowflake(result.get("threadParentChannelId")), true),
                     ctx.communityId(), ctx.guildId()
                 );
                 audit(ctx, partnerId, actor, "SYNC_SUCCEEDED", "Recursos Discord sincronizados");
