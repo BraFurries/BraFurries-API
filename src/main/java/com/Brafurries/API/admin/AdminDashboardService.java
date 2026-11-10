@@ -24,6 +24,7 @@ import com.Brafurries.API.repository.user.UserRepository;
 import com.Brafurries.API.repository.user.UserTelegramRepository;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Locale;
 import org.springframework.cache.annotation.Cacheable;
@@ -95,17 +96,20 @@ public class AdminDashboardService {
         var discordMetrics = communityDiscordRepository.fetchGeneralDiscordMetrics();
         var botStatus = botStatusService.getStatus();
         long activePartners = partnerRepository.countByStatusIgnoreCase("active");
+        long pendingPartners = partnerRepository.countByStatusIgnoreCase("pending");
+        LocalDateTime weekStartUtc = LocalDateTime.now(ZoneOffset.UTC).minusDays(7);
 
         AdminOverviewMetrics metrics = new AdminOverviewMetrics(
             userRepository.count(),
-            partnerRepository.countByStatusIgnoreCase("pending"),
+            0, // User currently has no reliable creation timestamp for a weekly count.
             activePartners,
-            0,
+            pendingPartners,
             botStatus.status(),
             botStatus.pingMs() == null ? 0 : Math.round(botStatus.pingMs()),
             safeLong(discordMetrics.getActiveDiscordCommunities()),
-            0,
-            safeLong(discordMetrics.getTotalMembersReachedActiveCommunities())
+            communityDiscordRepository.countByLastBotJoinedAtGreaterThanEqual(weekStartUtc),
+            safeLong(discordMetrics.getTotalMembersReachedActiveCommunities()),
+            communityDiscordRepository.countByLastBotLeftAtGreaterThanEqual(weekStartUtc)
         );
 
         String systemStatus = "online".equals(botStatus.status()) || "degraded".equals(botStatus.status())
