@@ -223,6 +223,8 @@ class PartnerDiscordServiceTest {
         when(jdbc.queryForList(startsWith("SELECT * FROM partner_discord_publications"),
             eq(1), eq(17))).thenReturn(List.of());
         when(partners.findAdminPartners(null, null)).thenReturn(List.of(partner));
+        when(jdbc.queryForList(startsWith("SELECT community_id FROM partner_discord_publications"),
+            eq(17))).thenReturn(List.of());
         User actor = new User();
         actor.setId(33);
         when(authorization.currentUser(auth)).thenReturn(actor);
