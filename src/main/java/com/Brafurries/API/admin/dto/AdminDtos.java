@@ -33,7 +33,8 @@ public class AdminDtos {
         long botPingMs,
         long botServers,
         long serverGrowthWeek,
-        long botReachedUsers
+        long botReachedUsers,
+        long serverLeavesWeek
     ) {
     }
 
