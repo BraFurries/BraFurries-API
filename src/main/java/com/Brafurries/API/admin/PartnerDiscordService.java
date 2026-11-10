@@ -377,6 +377,26 @@ public class PartnerDiscordService {
         return results;
     }
 
+    @Transactional(readOnly = true)
+    public List<OwnPublication> myPublications(Authentication auth) {
+        Context ctx = context();
+        User author = authorization.currentUser(auth);
+        Map<Integer, Map<String, Object>> states = publicationRows(ctx);
+        List<OwnPublication> result = new ArrayList<>();
+        for (Partner partner : partners.findAdminPartners("active", null)) {
+            if (partner.getRepresentativeUser() == null
+                || !author.getId().equals(partner.getRepresentativeUser().getId())) continue;
+            Map<String, Object> row = states.get(partner.getId());
+            if (row == null || row.get("thread_id") == null
+                || ((Number) row.get("applied_revision")).longValue() < 1) continue;
+            result.add(new OwnPublication(
+                partner.getId(), partner.getName(), snowflake(ctx.guildId()),
+                snowflake(row.get("thread_id"))
+            ));
+        }
+        return List.copyOf(result);
+    }
+
     public Map<String, Object> publish(Authentication auth, int partnerId, PostRequest request) {
         Context ctx = context();
         requireConfigured(ctx);
