@@ -1,6 +1,9 @@
 package com.Brafurries.API.admin;
 
 import com.Brafurries.API.entity.community.CommunityDiscord;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.Brafurries.API.entity.misc.Partner;
 import com.Brafurries.API.entity.misc.PartnerExternalLink;
 import com.Brafurries.API.entity.user.User;
@@ -38,12 +41,14 @@ public class PartnerDiscordService {
         Boolean adoptExistingTextChannel
     ) {}
     public record PostRequest(String content) {}
+    public record AnnouncementRequest(String markdown, String linksMode, String publicContact) {}
     public record PartnerView(
         int partnerId, String name, String status, String representativeName,
         String representativeDiscordUserId, boolean exclusiveChannelEnabled,
         String existingTextChannelId, boolean adoptExistingTextChannel,
         String threadId, String textChannelId, long desiredRevision,
-        long appliedRevision, String lastSyncError, boolean contentOutOfSync
+        long appliedRevision, String lastSyncError, boolean contentOutOfSync,
+        String announcementMarkdown, String announcementLinksMode, String announcementPublicContact
     ) {}
     public record Settings(
         String guildId, String categoryId, String threadParentChannelId,
@@ -52,6 +57,7 @@ public class PartnerDiscordService {
 
     public record OwnPublication(int partnerId, String partnerName, String guildId, String threadId) {}
 
+    private static final ObjectMapper JSON = new ObjectMapper();
     private final PlatformAuthorizationService authorization;
     private final CommunityDiscordRepository guilds;
     private final PartnerRepository partners;
@@ -163,6 +169,44 @@ public class PartnerDiscordService {
             || value instanceof Boolean flag && flag;
     }
 
+    private static List<String> readPartIds(Object raw) {
+        if (raw == null) return List.of();
+        try {
+            JsonNode value = JSON.readTree(raw.toString());
+            if (!value.isArray() || value.size() > 11) throw new IllegalArgumentException();
+            List<String> ids = new ArrayList<>();
+            for (JsonNode item : value) {
+                if (!item.isTextual() || ids.contains(item.textValue())) throw new IllegalArgumentException();
+                snowflake(item.textValue(), false);
+                ids.add(item.textValue());
+            }
+            return List.copyOf(ids);
+        } catch (JsonProcessingException | IllegalArgumentException exception) {
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT, "IDs de continuação inválidos; reconciliação necessária", exception);
+        }
+    }
+
+    private static String writePartIds(Object raw) {
+        if (!(raw instanceof List<?> values) || values.size() > 11) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Coddy retornou IDs de continuação inválidos");
+        }
+        List<String> ids = new ArrayList<>();
+        for (Object value : values) {
+            if (!(value instanceof String id) || ids.contains(id)) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Coddy retornou IDs duplicados");
+            }
+            snowflake(id, false);
+            ids.add(id);
+        }
+        try {
+            return JSON.writeValueAsString(ids);
+        } catch (JsonProcessingException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                "Falha ao serializar IDs das mensagens", exception);
+        }
+    }
+
     @Transactional(readOnly = true)
     public Settings settings() {
         Context ctx = context();
@@ -187,7 +231,10 @@ public class PartnerDiscordService {
                 snowflake(row.get("thread_id")), snowflake(row.get("text_channel_id")),
                 row.isEmpty() ? 0 : ((Number) row.get("desired_revision")).longValue(),
                 row.isEmpty() ? 0 : ((Number) row.get("applied_revision")).longValue(),
-                (String) row.get("last_sync_error"), contentOutOfSync
+                (String) row.get("last_sync_error"), contentOutOfSync,
+                (String) row.get("announcement_markdown"),
+                (String) row.getOrDefault("announcement_links_mode", "INLINE_ONLY"),
+                (String) row.get("announcement_public_contact")
             ));
         }
         return new Settings(
@@ -270,6 +317,53 @@ public class PartnerDiscordService {
         return settings().partners().stream().filter(p -> p.partnerId() == partnerId).findFirst().orElseThrow();
     }
 
+    @Transactional
+    public PartnerView updateAnnouncement(Authentication auth, int partnerId, AnnouncementRequest request) {
+        Context ctx = context();
+        requireConfigured(ctx);
+        requirePartner(partnerId);
+        if (request == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Anúncio inválido");
+        }
+        String markdown = request.markdown() == null || request.markdown().isBlank()
+            ? null : request.markdown().strip();
+        String mode = request.linksMode() == null ? "INLINE_ONLY" : request.linksMode();
+        String contact = request.publicContact() == null || request.publicContact().isBlank()
+            ? null : request.publicContact().strip();
+        if (markdown != null && markdown.length() > 16000) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Anúncio excede 16.000 caracteres");
+        }
+        if (!List.of("INLINE_ONLY", "APPEND_MISSING").contains(mode)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Modo de links inválido");
+        }
+        if (contact != null && contact.length() > 255) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Contato excede 255 caracteres");
+        }
+        Map<String, Object> current = publication(ctx, partnerId);
+        if (!current.isEmpty()
+            && Objects.equals(markdown, current.get("announcement_markdown"))
+            && Objects.equals(mode, current.get("announcement_links_mode"))
+            && Objects.equals(contact, current.get("announcement_public_contact"))) {
+            return settings().partners().stream()
+                .filter(item -> item.partnerId() == partnerId).findFirst().orElseThrow();
+        }
+        jdbc.update("""
+            INSERT INTO partner_discord_publications
+                (partner_id, community_id, announcement_markdown,
+                 announcement_links_mode, announcement_public_contact)
+            VALUES (?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                announcement_markdown = VALUES(announcement_markdown),
+                announcement_links_mode = VALUES(announcement_links_mode),
+                announcement_public_contact = VALUES(announcement_public_contact),
+                desired_revision = desired_revision + 1, last_sync_error = NULL
+            """, partnerId, ctx.communityId(), markdown, mode, contact);
+        audit(ctx, partnerId, authorization.currentUser(auth).getId(),
+            "PARTNER_OPTION_UPDATED", "Anúncio Markdown do Discord atualizado");
+        return settings().partners().stream()
+            .filter(item -> item.partnerId() == partnerId).findFirst().orElseThrow();
+    }
+
     private void audit(Context ctx, Integer partnerId, int actor, String action, String details) {
         jdbc.update(
             "INSERT INTO partner_discord_audit(community_id, partner_id, actor_user_id, action, details) "
@@ -286,6 +380,10 @@ public class PartnerDiscordService {
         result.put("partnerId", partner.getId());
         result.put("name", partner.getName());
         result.put("description", partner.getDescription());
+        result.put("announcementMarkdown", row.get("announcement_markdown"));
+        result.put("announcementLinksMode", row.getOrDefault("announcement_links_mode", "INLINE_ONLY"));
+        result.put("announcementPublicContact", row.get("announcement_public_contact"));
+        result.put("announcementPartMessageIds", readPartIds(row.get("announcement_part_message_ids")));
         result.put("links", partner.getExternalLinks().stream()
             .map(link -> Map.<String, Object>of(
                 "type", link.getType() == null ? "website" : link.getType(),
@@ -346,6 +444,7 @@ public class PartnerDiscordService {
                 int count = jdbc.update("""
                     UPDATE partner_discord_publications
                     SET thread_id = ?, thread_intro_message_id = ?,
+                        announcement_part_message_ids = ?,
                         text_channel_id = ?, text_intro_message_id = ?,
                         representative_discord_user_id = ?,
                         text_channel_created_by_bot = ?, applied_revision = desired_revision,
@@ -354,6 +453,7 @@ public class PartnerDiscordService {
                     """,
                     snowflake(result.get("threadId")) == null ? null : snowflake(snowflake(result.get("threadId")), true),
                     snowflake(result.get("threadIntroMessageId")) == null ? null : snowflake(snowflake(result.get("threadIntroMessageId")), true),
+                    writePartIds(result.get("announcementPartMessageIds")),
                     snowflake(result.get("textChannelId")) == null ? null : snowflake(snowflake(result.get("textChannelId")), true),
                     snowflake(result.get("textIntroMessageId")) == null ? null : snowflake(snowflake(result.get("textIntroMessageId")), true),
                     snowflake(result.get("representativeDiscordUserId")) == null ? null : snowflake(snowflake(result.get("representativeDiscordUserId")), true),
