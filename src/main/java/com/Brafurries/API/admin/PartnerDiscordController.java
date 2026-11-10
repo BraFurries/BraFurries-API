@@ -55,6 +55,12 @@ public class PartnerDiscordController {
         return service.syncAll(auth);
     }
 
+    @GetMapping("/user/me/partners/discord")
+    @PreAuthorize("isAuthenticated()")
+    public List<PartnerDiscordService.OwnPublication> myPublications(Authentication auth) {
+        return service.myPublications(auth);
+    }
+
     @PostMapping("/user/me/partners/{partnerId}/discord/posts")
     @PreAuthorize("isAuthenticated()")
     public Map<String, Object> post(Authentication auth, @PathVariable int partnerId,
