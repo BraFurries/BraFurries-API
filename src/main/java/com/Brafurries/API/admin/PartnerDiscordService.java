@@ -9,6 +9,7 @@ import com.Brafurries.API.platform.PlatformAuthorizationService;
 import com.Brafurries.API.repository.community.CommunityDiscordRepository;
 import com.Brafurries.API.repository.misc.PartnerRepository;
 import com.Brafurries.API.repository.user.UserDiscordRepository;
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -42,7 +43,7 @@ public class PartnerDiscordService {
         String representativeDiscordUserId, boolean exclusiveChannelEnabled,
         String existingTextChannelId, boolean adoptExistingTextChannel,
         String threadId, String textChannelId, long desiredRevision,
-        long appliedRevision, String lastSyncError
+        long appliedRevision, String lastSyncError, boolean contentOutOfSync
     ) {}
     public record Settings(
         String guildId, String categoryId, String threadParentChannelId,
@@ -174,6 +175,9 @@ public class PartnerDiscordService {
             String representativeName = user == null ? null
                 : Optional.ofNullable(user.getDisplayName()).orElse(user.getUsername());
             UserDiscord discord = user == null ? null : singleRepresentativeDiscord(user);
+            Timestamp lastSync = row.get("last_synced_at") instanceof Timestamp t ? t : null;
+            boolean contentOutOfSync = !row.isEmpty() && partner.getUpdatedAt() != null
+                && (lastSync == null || partner.getUpdatedAt().isAfter(lastSync.toLocalDateTime()));
             items.add(new PartnerView(
                 partner.getId(), partner.getName(), partner.getStatus(), representativeName,
                 discord == null ? null : snowflake(discord.getDiscordUserId()),
@@ -183,7 +187,7 @@ public class PartnerDiscordService {
                 snowflake(row.get("thread_id")), snowflake(row.get("text_channel_id")),
                 row.isEmpty() ? 0 : ((Number) row.get("desired_revision")).longValue(),
                 row.isEmpty() ? 0 : ((Number) row.get("applied_revision")).longValue(),
-                (String) row.get("last_sync_error")
+                (String) row.get("last_sync_error"), contentOutOfSync
             ));
         }
         return new Settings(
