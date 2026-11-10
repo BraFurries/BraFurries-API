@@ -340,6 +340,16 @@ public class PartnerDiscordService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Contato excede 255 caracteres");
         }
         Map<String, Object> current = publication(ctx, partnerId);
+        // The publication is keyed globally by partner_id. Never let an
+        // upsert silently overwrite a row associated with another Community.
+        for (Map<String, Object> row : jdbc.queryForList(
+            "SELECT community_id FROM partner_discord_publications WHERE partner_id = ?", partnerId
+        )) {
+            if (((Number) row.get("community_id")).intValue() != ctx.communityId()) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Publicação está vinculada a outra Community");
+            }
+        }
         if (!current.isEmpty()
             && Objects.equals(markdown, current.get("announcement_markdown"))
             && Objects.equals(mode, current.get("announcement_links_mode"))
