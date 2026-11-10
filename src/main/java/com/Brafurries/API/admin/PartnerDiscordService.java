@@ -169,7 +169,7 @@ public class PartnerDiscordService {
             || value instanceof Boolean flag && flag;
     }
 
-    private static List<String> readPartIds(Object raw) {
+    static List<String> readPartIds(Object raw) {
         if (raw == null) return List.of();
         try {
             JsonNode value = JSON.readTree(raw.toString());
@@ -187,7 +187,7 @@ public class PartnerDiscordService {
         }
     }
 
-    private static String writePartIds(Object raw) {
+    static String writePartIds(Object raw) {
         if (!(raw instanceof List<?> values) || values.size() > 11) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Coddy retornou IDs de continuação inválidos");
         }
