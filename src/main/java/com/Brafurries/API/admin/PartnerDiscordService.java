@@ -392,6 +392,7 @@ public class PartnerDiscordService {
         Context ctx = context();
         requireConfigured(ctx);
         List<PartnerView> results = new ArrayList<>();
+        int failures = 0;
         Map<Integer, Map<String, Object>> existing = publicationRows(ctx);
         for (Partner partner : partners.findAdminPartners(null, null)) {
             if (!"active".equalsIgnoreCase(partner.getStatus()) && !existing.containsKey(partner.getId())) {
@@ -400,8 +401,14 @@ public class PartnerDiscordService {
             try {
                 results.add(sync(auth, partner.getId()));
             } catch (RuntimeException exception) {
-                // Failure remains recorded per partner; do not abort others.
+                // Continue through independent partners, but never report
+                // the batch as fully successful while some items failed.
+                failures++;
             }
+        }
+        if (failures > 0) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                failures + " parceria(s) não sincronizadas; algumas podem ter sido aplicadas");
         }
         return results;
     }
