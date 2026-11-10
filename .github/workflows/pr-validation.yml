@@ -136,6 +136,16 @@ jobs:
           path: .ci/social-onboarding-database
           persist-credentials: false
 
+      # Database owns the new guild-presence DDL. Apply the exact reviewed
+      # migration only to disposable Testcontainers, never to production.
+      - name: Checkout pinned Coddy presence migration (read only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: BraFurries/BraFurries-Database
+          ref: 1d4d23b2ac3f02cd80da881b1daa508b5fb9c791
+          path: .ci/coddy-presence-database
+          persist-credentials: false
+
       - name: Verify baseline source and run opt-in MariaDB Testcontainers compatibility
         env:
           BRF_BASELINE_JPA_INTEGRATION: "true"
@@ -163,6 +173,9 @@ jobs:
           test -s "$local_proof_migration"
           oauth_reenable_migration=".ci/social-onboarding-database/flyway/sql/versioned/V20261107_003__social_login_fresh_oauth_proofs.sql"
           test -s "$oauth_reenable_migration"
+          presence_migration=".ci/coddy-presence-database/flyway/sql/versioned/V20261110_002__track_discord_bot_guild_presence.sql"
+          test "$(git -C .ci/coddy-presence-database rev-parse HEAD)" = "1d4d23b2ac3f02cd80da881b1daa508b5fb9c791"
+          test -s "$presence_migration"
           moderation_dir=".ci/moderation-database/flyway/sql/versioned"
           for migration in \
             V20261029_002__expand_user_ban_reasons.sql \
@@ -180,6 +193,7 @@ jobs:
             "$onboarding_migration" \
             "$local_proof_migration" \
             "$oauth_reenable_migration" \
+            "$presence_migration" \
             > src/test/resources/brafurries_schema_baseline.sql
           ./mvnw -B -Dtest=BaselineSchemaJpaMariaDbIntegrationTest,BaselineSchemaFullContextMariaDbIntegrationTest test
 
