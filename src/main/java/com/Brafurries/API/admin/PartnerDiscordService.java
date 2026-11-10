@@ -306,6 +306,11 @@ public class PartnerDiscordService {
         try {
             Partner partner = requirePartner(partnerId);
             Map<String, Object> config = config(ctx);
+            if (!"active".equalsIgnoreCase(partner.getStatus())
+                && publication(ctx, partnerId).isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Parceria ainda não publicada; apenas parceiros ativos podem ser sincronizados");
+            }
             // Create default publication state if absent; existing partners
             // remain unchanged until an explicit sync request.
             jdbc.update("""
@@ -373,7 +378,11 @@ public class PartnerDiscordService {
         Context ctx = context();
         requireConfigured(ctx);
         List<PartnerView> results = new ArrayList<>();
+        Map<Integer, Map<String, Object>> existing = publicationRows(ctx);
         for (Partner partner : partners.findAdminPartners(null, null)) {
+            if (!"active".equalsIgnoreCase(partner.getStatus()) && !existing.containsKey(partner.getId())) {
+                continue;
+            }
             try {
                 results.add(sync(auth, partner.getId()));
             } catch (RuntimeException exception) {
@@ -381,6 +390,40 @@ public class PartnerDiscordService {
             }
         }
         return results;
+    }
+
+    /**
+     * Explicitly withdraw a partner from Discord before deleting its
+     * administrative record. Discord history is archived/hidden, not erased.
+     * The mapping is removed only after Coddy confirms all revocations.
+     */
+    public void unpublish(Authentication auth, int partnerId) {
+        Context ctx = context();
+        requireConfigured(ctx);
+        int actor = authorization.currentUser(auth).getId();
+        ReentrantLock lock = partnerLocks.computeIfAbsent(partnerId, ignored -> new ReentrantLock());
+        lock.lock();
+        try {
+            Map<String, Object> state = publication(ctx, partnerId);
+            if (state.isEmpty()) return;
+            Partner partner = requirePartner(partnerId);
+            Map<String, Object> request = payload(ctx, partner, config(ctx), state, null);
+            request.put("active", false);
+            request.put("exclusiveChannelEnabled", false);
+            coddy.sync(snowflake(ctx.guildId()), request);
+            int deleted = jdbc.update(
+                "DELETE FROM partner_discord_publications WHERE partner_id = ? AND community_id = ? "
+                    + "AND desired_revision = ?",
+                partnerId, ctx.communityId(), ((Number) state.get("desired_revision")).longValue()
+            );
+            if (deleted != 1) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "A parceria foi alterada durante o encerramento; revise o estado antes de tentar novamente");
+            }
+            audit(ctx, partnerId, actor, "UNPUBLISHED", "Divulgação Discord retirada; histórico preservado");
+        } finally {
+            lock.unlock();
+        }
     }
 
     @Transactional(readOnly = true)
