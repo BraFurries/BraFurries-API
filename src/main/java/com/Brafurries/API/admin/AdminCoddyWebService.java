@@ -233,20 +233,33 @@ public class AdminCoddyWebService {
                 || !Long.toString(channelId).equals(delivered.channelId())) {
                 throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Resposta Coddy inconsistente");
             }
-            long messageId = snowflake(delivered.messageId());
-            jdbc.update("""
+            long messageId;
+            try {
+                messageId = snowflake(delivered.messageId());
+            } catch (ResponseStatusException invalidResponse) {
+                // The Discord message may already exist; treat as unknown.
+                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Resposta de entrega do Coddy inconsistente");
+            }
+            int recorded = jdbc.update("""
                 UPDATE coddy_admin_action_audit
                 SET outcome = 'SENT', discord_message_id = ?
                 WHERE request_key = ? AND outcome = 'REQUESTED'
                 """, messageId, key);
+            if (recorded != 1) {
+                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Nao foi possivel confirmar o registro da mensagem enviada");
+            }
             return new SendResult(key, "sent", Long.toString(guildId),
                 Long.toString(channelId), Long.toString(messageId));
         } catch (ResponseStatusException error) {
+            boolean rejected = error.getStatusCode().is4xxClientError();
             jdbc.update("""
-                UPDATE coddy_admin_action_audit SET outcome = 'UNKNOWN',
-                    error_code = 'DELIVERY_UNCERTAIN'
+                UPDATE coddy_admin_action_audit SET outcome = ?,
+                    error_code = ?
                 WHERE request_key = ? AND outcome = 'REQUESTED'
-                """, key);
+                """, rejected ? "FAILED" : "UNKNOWN",
+                rejected ? "DISCORD_REJECTED" : "DELIVERY_UNCERTAIN", key);
             throw error;
         }
     }
