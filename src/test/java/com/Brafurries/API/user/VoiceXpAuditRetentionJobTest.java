@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -18,6 +19,7 @@ class VoiceXpAuditRetentionJobTest {
     @Test
     void usesAnIndexed72HourCutoffAndOnlyDeletesDetailLogs() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.queryForObject(anyString(), eq(Integer.class))).thenReturn(2);
         when(jdbc.update(anyString())).thenReturn(17);
         VoiceXpAuditRetentionJob job = new VoiceXpAuditRetentionJob(jdbc);
 
@@ -40,6 +42,7 @@ class VoiceXpAuditRetentionJobTest {
     @Test
     void limitsWorkEvenWithAFullBacklog() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.queryForObject(anyString(), eq(Integer.class))).thenReturn(2);
         when(jdbc.update(anyString())).thenReturn(VoiceXpAuditRetentionJob.BATCH_SIZE);
         new VoiceXpAuditRetentionJob(jdbc).purgeExpiredDiagnostics();
         verify(jdbc, times(VoiceXpAuditRetentionJob.MAX_BATCHES)).update(anyString());
@@ -48,14 +51,25 @@ class VoiceXpAuditRetentionJobTest {
     @Test
     void stopsEarlyOnShortOrEmptyBatch() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.queryForObject(anyString(), eq(Integer.class))).thenReturn(2);
         when(jdbc.update(anyString())).thenReturn(VoiceXpAuditRetentionJob.BATCH_SIZE, 12, 0);
         new VoiceXpAuditRetentionJob(jdbc).purgeExpiredDiagnostics();
         verify(jdbc, times(2)).update(anyString());
 
         JdbcTemplate empty = mock(JdbcTemplate.class);
+        when(empty.queryForObject(anyString(), eq(Integer.class))).thenReturn(2);
         when(empty.update(anyString())).thenReturn(0);
         new VoiceXpAuditRetentionJob(empty).purgeExpiredDiagnostics();
         verify(empty, times(1)).update(anyString());
+    }
+
+    @Test
+    void doesNotDeleteAnythingWhenRequiredDatabaseIndexIsMissing() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.queryForObject(anyString(), eq(Integer.class))).thenReturn(0);
+        new VoiceXpAuditRetentionJob(jdbc).purgeExpiredDiagnostics();
+
+        verify(jdbc, times(0)).update(anyString());
     }
 
     @Test
