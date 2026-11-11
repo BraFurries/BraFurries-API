@@ -25,11 +25,13 @@ public interface CommunityDiscordRepository extends JpaRepository<CommunityDisco
     Page<CommunityDiscord> findAll(Specification<CommunityDiscord> spec, Pageable pageable);
 
     Page<CommunityDiscord> findByNameContainingIgnoreCase(String name, Pageable pageable);
+    @EntityGraph(attributePaths = "community")
     Optional<CommunityDiscord> findByGuildId(Long guildId);
     Optional<CommunityDiscord> findByCommunity(Community community);
     boolean existsByCommunityIdAndActiveTrue(Integer communityId);
     // Single indexed EXISTS query. Both tenant FK and active official guild must match.
     boolean existsByGuildIdAndCommunityIdAndActiveTrue(Long guildId, Integer communityId);
+    @EntityGraph(attributePaths = "community")
     List<CommunityDiscord> findAllByActiveTrueOrderByGuildIdAsc();
 
     // Each guild contributes at most once to each seven-day metric. These are
