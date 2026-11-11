@@ -31,6 +31,18 @@ public class VoiceXpAuditRetentionJob {
         LIMIT 500
         """;
 
+    private static final String RETENTION_INDEX_READY = """
+        SELECT COUNT(*)
+        FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'voice_xp_audit_log'
+          AND INDEX_NAME = 'idx_voice_xp_audit_retention'
+          AND (
+              (SEQ_IN_INDEX = 1 AND COLUMN_NAME = 'created_at')
+              OR (SEQ_IN_INDEX = 2 AND COLUMN_NAME = 'id')
+          )
+        """;
+
     private final JdbcTemplate jdbc;
 
     public VoiceXpAuditRetentionJob(JdbcTemplate jdbc) {
@@ -41,8 +53,22 @@ public class VoiceXpAuditRetentionJob {
         return jdbc.update(DELETE_EXPIRED);
     }
 
+    /**
+     * Fail closed if someone turns on the flag before the Database migration.
+     * Never fall back to a full-table scan on a large audit history.
+     */
+    boolean isRetentionIndexReady() {
+        Integer matchingColumns = jdbc.queryForObject(RETENTION_INDEX_READY, Integer.class);
+        return matchingColumns != null && matchingColumns == 2;
+    }
+
     @Scheduled(cron = "0 */5 * * * *", zone = "UTC")
     public void purgeExpiredDiagnostics() {
+        if (!isRetentionIndexReady()) {
+            log.warn("Voice XP audit retention skipped: required chronological index is missing");
+            return;
+        }
+
         int deleted = 0;
         for (int batch = 0; batch < MAX_BATCHES; batch++) {
             int count = purgeBatch();
