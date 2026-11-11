@@ -78,7 +78,7 @@ class AdminCoddyPresenceServiceTest {
         verify(guilds).findAll(any(Specification.class), pagination.capture());
         assertEquals(0, pagination.getValue().getPageNumber());
         assertEquals(20, pagination.getValue().getPageSize());
-        assertEquals("active: DESC,name: ASC,id: ASC", pagination.getValue().getSort().toString());
+        assertEquals("active: DESC, name: ASC, id: ASC", pagination.getValue().getSort().toString());
     }
 
     @Test
