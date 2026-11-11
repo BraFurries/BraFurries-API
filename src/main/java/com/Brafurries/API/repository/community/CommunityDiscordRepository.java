@@ -34,6 +34,8 @@ public interface CommunityDiscordRepository extends JpaRepository<CommunityDisco
 
     // Each guild contributes at most once to each seven-day metric. These are
     // recent-transition counts, not a historical event ledger or net growth.
+    long countByActiveTrueAndMembershipSyncStateAndLastFullReconciliationAtIsNotNull(String syncState);
+
     long countByLastBotJoinedAtGreaterThanEqual(java.time.LocalDateTime sinceUtc);
     long countByLastBotLeftAtGreaterThanEqual(java.time.LocalDateTime sinceUtc);
 

@@ -35,13 +35,14 @@ class AdminDashboardServiceTest {
     @Mock ApiUserRoleRepository userRoles;
     @Mock ApiRolePermissionRepository rolePermissions;
     @Mock AdminBotStatusService botStatus;
+    @Mock AdminCoddyReachService reach;
     @Mock GeneralDiscordMetricsProjection guildMetrics;
 
     @Test
     void overviewMapsPendingPartnersAndRealSevenDayGuildTransitions() {
         when(guilds.fetchGeneralDiscordMetrics()).thenReturn(guildMetrics);
         when(guildMetrics.getActiveDiscordCommunities()).thenReturn(8L);
-        when(guildMetrics.getTotalMembersReachedActiveCommunities()).thenReturn(2580L);
+        when(reach.read()).thenReturn(new AdminCoddyReachService.ReachSnapshot(1920L, 6L));
         when(guilds.countByLastBotJoinedAtGreaterThanEqual(any(LocalDateTime.class))).thenReturn(3L);
         when(guilds.countByLastBotLeftAtGreaterThanEqual(any(LocalDateTime.class))).thenReturn(1L);
         when(users.count()).thenReturn(120L);
@@ -54,7 +55,7 @@ class AdminDashboardServiceTest {
 
         var service = new AdminDashboardService(
             users, discordUsers, telegramUsers, partners, guilds, commandUses,
-            userRoles, rolePermissions, botStatus
+            userRoles, rolePermissions, botStatus, reach
         );
         LocalDateTime earliestExpected = LocalDateTime.now(ZoneOffset.UTC).minusDays(7).minusMinutes(1);
 
@@ -65,7 +66,8 @@ class AdminDashboardServiceTest {
         assertEquals(5L, overview.metrics().activePartners());
         assertEquals(4L, overview.metrics().pendingPartners());
         assertEquals(8L, overview.metrics().botServers());
-        assertEquals(2580L, overview.metrics().botReachedUsers());
+        assertEquals(1920L, overview.metrics().botReachedUsers());
+        assertEquals(6L, overview.metrics().botReconciledServers());
         assertEquals(3L, overview.metrics().serverGrowthWeek());
         assertEquals(1L, overview.metrics().serverLeavesWeek());
         ArgumentCaptor<LocalDateTime> joinsCutoff = ArgumentCaptor.forClass(LocalDateTime.class);

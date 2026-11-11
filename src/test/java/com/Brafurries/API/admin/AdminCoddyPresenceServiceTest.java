@@ -29,6 +29,7 @@ import org.springframework.web.server.ResponseStatusException;
 class AdminCoddyPresenceServiceTest {
     @Mock CommunityDiscordRepository guilds;
     @Mock GeneralDiscordMetricsProjection metrics;
+    @Mock AdminCoddyReachService reach;
 
     @Test
     void returnsGlobalSummaryAndPagedGuildDetailsWithoutTruncatingDiscordId() {
@@ -50,19 +51,20 @@ class AdminCoddyPresenceServiceTest {
         when(guilds.fetchGeneralDiscordMetrics()).thenReturn(metrics);
         when(metrics.getTotalDiscordCommunities()).thenReturn(4L);
         when(metrics.getActiveDiscordCommunities()).thenReturn(3L);
-        when(metrics.getTotalMembersReachedActiveCommunities()).thenReturn(1900L);
+        when(reach.read()).thenReturn(new AdminCoddyReachService.ReachSnapshot(1100L, 2L));
         when(guilds.countByLastBotJoinedAtGreaterThanEqual(any(LocalDateTime.class)))
             .thenReturn(2L, 3L);
         when(guilds.countByLastBotLeftAtGreaterThanEqual(any(LocalDateTime.class)))
             .thenReturn(1L, 2L);
 
-        var response = new AdminCoddyPresenceService(guilds)
+        var response = new AdminCoddyPresenceService(guilds, reach)
             .list(1, 20, "123456789012345678", "active", 11);
 
         assertEquals(4L, response.summary().knownServers());
         assertEquals(3L, response.summary().activeServers());
         assertEquals(1L, response.summary().inactiveServers());
-        assertEquals(1900L, response.summary().estimatedReach());
+        assertEquals(1100L, response.summary().estimatedReach());
+        assertEquals(2L, response.summary().reconciledServers());
         assertEquals(2L, response.summary().entries7d());
         assertEquals(1L, response.summary().exits7d());
         assertEquals(3L, response.summary().entries30d());
@@ -83,7 +85,7 @@ class AdminCoddyPresenceServiceTest {
 
     @Test
     void rejectsInvalidFiltersWithoutReadingGuilds() {
-        var service = new AdminCoddyPresenceService(guilds);
+        var service = new AdminCoddyPresenceService(guilds, reach);
         assertEquals(400, assertThrows(ResponseStatusException.class,
             () -> service.list(1, 20, "", "suspended", null)).getStatusCode().value());
         assertEquals(400, assertThrows(ResponseStatusException.class,

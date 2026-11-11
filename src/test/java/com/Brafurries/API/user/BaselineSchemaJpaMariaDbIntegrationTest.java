@@ -4,6 +4,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import com.Brafurries.API.entity.community.Community;
 import com.Brafurries.API.entity.community.CommunityDiscord;
+import com.Brafurries.API.entity.community.CommunityNetworkMemberStatus;
+import com.Brafurries.API.admin.AdminCoddyReachService;
+import com.Brafurries.API.repository.community.CommunityNetworkMemberStatusRepository;
 import com.Brafurries.API.admin.AdminCoddyPresenceService;
 import com.Brafurries.API.repository.community.CommunityDiscordRepository;
 import com.Brafurries.API.entity.community.CommunityStore;
@@ -64,7 +67,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Import({ThemeControlPlaneStore.class, BackupControlPlaneStore.class,
     SparseAccountConsolidationExecutor.class, SparseAccountOwnershipGuard.class,
-    AdminCoddyPresenceService.class,
+    AdminCoddyPresenceService.class, AdminCoddyReachService.class,
     UserAccountReconciliationPreflightService.class, UserAccountConsolidationPlanner.class})
 class BaselineSchemaJpaMariaDbIntegrationTest {
     private static final long GUILD_A = 991001L;
@@ -80,6 +83,8 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
 
     @Autowired private JdbcTemplate jdbc;
     @Autowired private AdminCoddyPresenceService coddyPresence;
+    @Autowired private AdminCoddyReachService coddyReach;
+    @Autowired private CommunityNetworkMemberStatusRepository networkMembers;
     @Autowired private CommunityDiscordRepository guilds;
     @Autowired private CommunityRepository communities;
     @Autowired private CommunityStoreRepository communityStore;
@@ -170,6 +175,74 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
 
         // The search term is literal; % must not match arbitrary servers.
         assertEquals(0, coddyPresence.list(1, 20, "%", "all", null).pagination().totalItems());
+    }
+
+    @Test
+    void coddyReachDeduplicatesMembersAndExcludesInactiveAndUnreconciledGuildsOnMariaDb() {
+        Community first = new Community();
+        first.setName("Distinct Guild One");
+        first = communities.saveAndFlush(first);
+        Community second = new Community();
+        second.setName("Distinct Guild Two");
+        second = communities.saveAndFlush(second);
+        Community inactive = new Community();
+        inactive.setName("Distinct Inactive");
+        inactive = communities.saveAndFlush(inactive);
+        Community unverified = new Community();
+        unverified.setName("Distinct Unreconciled");
+        unverified = communities.saveAndFlush(unverified);
+
+        long firstId = 123456789012340001L;
+        long secondId = 123456789012340002L;
+        long inactiveId = 123456789012340003L;
+        long unverifiedId = 123456789012340004L;
+        LocalDateTime observedAt = LocalDateTime.of(2026, 11, 11, 11, 0);
+        for (var fixture : List.of(
+            new Object[] {first, firstId, true, "HEALTHY", observedAt},
+            new Object[] {second, secondId, true, "HEALTHY", observedAt},
+            new Object[] {inactive, inactiveId, false, "HEALTHY", observedAt},
+            new Object[] {unverified, unverifiedId, true, "RECONCILIATION_REQUIRED", null}
+        )) {
+            CommunityDiscord guild = new CommunityDiscord();
+            guild.setCommunity((Community) fixture[0]);
+            guild.setGuildId((Long) fixture[1]);
+            guild.setName(((Community) fixture[0]).getName());
+            guild.setActive((Boolean) fixture[2]);
+            guild.setUsersQuantity(5000); // Provider count deliberately inflated.
+            guild.setMembershipSyncState((String) fixture[3]);
+            guild.setLastFullReconciliationAt((LocalDateTime) fixture[4]);
+            guilds.saveAndFlush(guild);
+        }
+
+        User repeated = users.saveAndFlush(new User());
+        User secondUser = users.saveAndFlush(new User());
+        User inactiveOnly = users.saveAndFlush(new User());
+        User unverifiedOnly = users.saveAndFlush(new User());
+        createTrackedPresence(first, firstId, repeated, true);
+        createTrackedPresence(first, firstId, secondUser, true);
+        createTrackedPresence(second, secondId, repeated, true); // Same person on two guilds.
+        createTrackedPresence(second, secondId, secondUser, false);
+        createTrackedPresence(inactive, inactiveId, inactiveOnly, true);
+        createTrackedPresence(unverified, unverifiedId, unverifiedOnly, true);
+        networkMembers.flush();
+        entityManager.clear();
+
+        var summary = coddyReach.read();
+        assertEquals(2L, summary.uniqueMembers());
+        assertEquals(2L, summary.reconciledServers());
+        assertEquals(2L, coddyPresence.list(1, 20, "", "active", null).summary().estimatedReach());
+        assertEquals(2L, coddyPresence.list(1, 20, "", "active", null).summary().reconciledServers());
+    }
+
+    private void createTrackedPresence(Community community, long guildId, User user, boolean present) {
+        CommunityNetworkMemberStatus record = new CommunityNetworkMemberStatus();
+        record.setCommunity(community);
+        record.setNetworkType("DISCORD");
+        record.setExternalNetworkId(guildId);
+        record.setUser(user);
+        record.setIsPresent(present);
+        record.setLastObservedAt(LocalDateTime.of(2026, 11, 11, 11, 0));
+        networkMembers.save(record);
     }
 
     @Test

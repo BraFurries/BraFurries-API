@@ -29,9 +29,11 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class AdminCoddyPresenceService {
     private final CommunityDiscordRepository guilds;
+    private final AdminCoddyReachService reachService;
 
-    public AdminCoddyPresenceService(CommunityDiscordRepository guilds) {
+    public AdminCoddyPresenceService(CommunityDiscordRepository guilds, AdminCoddyReachService reachService) {
         this.guilds = guilds;
+        this.reachService = reachService;
     }
 
     @Transactional(readOnly = true)
@@ -65,14 +67,16 @@ public class AdminCoddyPresenceService {
 
         LocalDateTime nowUtc = LocalDateTime.now(ZoneOffset.UTC);
         var totals = guilds.fetchGeneralDiscordMetrics();
+        var reach = reachService.read();
         long knownServers = safe(totals.getTotalDiscordCommunities());
         long activeServers = safe(totals.getActiveDiscordCommunities());
 
         Summary summary = new Summary(
             knownServers,
             activeServers,
+            reach.reconciledServers(),
             Math.max(knownServers - activeServers, 0),
-            safe(totals.getTotalMembersReachedActiveCommunities()),
+            reach.uniqueMembers(),
             guilds.countByLastBotJoinedAtGreaterThanEqual(nowUtc.minusDays(7)),
             guilds.countByLastBotLeftAtGreaterThanEqual(nowUtc.minusDays(7)),
             guilds.countByLastBotJoinedAtGreaterThanEqual(nowUtc.minusDays(30)),
