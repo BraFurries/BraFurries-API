@@ -18,17 +18,20 @@ public class AdminMetricsService {
     private final UserRepository userRepository;
     private final UserDiscordRepository userDiscordRepository;
     private final UserTelegramRepository userTelegramRepository;
+    private final AdminCoddyReachService reachService;
 
     public AdminMetricsService(
         CommunityDiscordRepository communityDiscordRepository,
         UserRepository userRepository,
         UserDiscordRepository userDiscordRepository,
-        UserTelegramRepository userTelegramRepository
+        UserTelegramRepository userTelegramRepository,
+        AdminCoddyReachService reachService
     ) {
         this.communityDiscordRepository = communityDiscordRepository;
         this.userRepository = userRepository;
         this.userDiscordRepository = userDiscordRepository;
         this.userTelegramRepository = userTelegramRepository;
+        this.reachService = reachService;
     }
 
     @Cacheable(cacheNames = ADMIN_GENERAL_METRICS, key = "'general'")
@@ -37,7 +40,8 @@ public class AdminMetricsService {
 
         long totalDiscordCommunities = toLong(result.getTotalDiscordCommunities());
         long activeDiscordCommunities = toLong(result.getActiveDiscordCommunities());
-        long totalMembersReachedActiveCommunities = toLong(result.getTotalMembersReachedActiveCommunities());
+        // Match the overview/presence reach contract; do not sum per-guild observations.
+        long totalMembersReachedActiveCommunities = reachService.read().uniqueMembers();
         long totalMembersReachedAllCommunities = toLong(result.getTotalMembersReachedAllCommunities());
 
         long totalRegisteredUsers = userRepository.count();

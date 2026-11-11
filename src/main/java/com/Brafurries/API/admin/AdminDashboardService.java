@@ -46,6 +46,7 @@ public class AdminDashboardService {
     private final ApiUserRoleRepository apiUserRoleRepository;
     private final ApiRolePermissionRepository apiRolePermissionRepository;
     private final AdminBotStatusService botStatusService;
+    private final AdminCoddyReachService reachService;
 
     public AdminDashboardService(
         UserRepository userRepository,
@@ -56,7 +57,8 @@ public class AdminDashboardService {
         ConfigCommandUseRepository configCommandUseRepository,
         ApiUserRoleRepository apiUserRoleRepository,
         ApiRolePermissionRepository apiRolePermissionRepository,
-        AdminBotStatusService botStatusService
+        AdminBotStatusService botStatusService,
+        AdminCoddyReachService reachService
     ) {
         this.userRepository = userRepository;
         this.userDiscordRepository = userDiscordRepository;
@@ -67,6 +69,7 @@ public class AdminDashboardService {
         this.apiUserRoleRepository = apiUserRoleRepository;
         this.apiRolePermissionRepository = apiRolePermissionRepository;
         this.botStatusService = botStatusService;
+        this.reachService = reachService;
     }
 
     @Cacheable(cacheNames = ADMIN_SESSION, key = "#authentication.name")
@@ -94,6 +97,7 @@ public class AdminDashboardService {
     @Cacheable(cacheNames = ADMIN_OVERVIEW, key = "'overview'")
     public AdminOverview getOverview() {
         var discordMetrics = communityDiscordRepository.fetchGeneralDiscordMetrics();
+        var reach = reachService.read();
         var botStatus = botStatusService.getStatus();
         long activePartners = partnerRepository.countByStatusIgnoreCase("active");
         long pendingPartners = partnerRepository.countByStatusIgnoreCase("pending");
@@ -107,8 +111,9 @@ public class AdminDashboardService {
             botStatus.status(),
             botStatus.pingMs() == null ? 0 : Math.round(botStatus.pingMs()),
             safeLong(discordMetrics.getActiveDiscordCommunities()),
+            reach.reconciledServers(),
             communityDiscordRepository.countByLastBotJoinedAtGreaterThanEqual(weekStartUtc),
-            safeLong(discordMetrics.getTotalMembersReachedActiveCommunities()),
+            reach.uniqueMembers(),
             communityDiscordRepository.countByLastBotLeftAtGreaterThanEqual(weekStartUtc)
         );
 

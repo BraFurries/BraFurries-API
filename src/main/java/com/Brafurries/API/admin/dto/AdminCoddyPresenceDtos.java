@@ -12,6 +12,7 @@ public final class AdminCoddyPresenceDtos {
     public record Summary(
         long knownServers,
         long activeServers,
+        long reconciledServers,
         long inactiveServers,
         long estimatedReach,
         long entries7d,

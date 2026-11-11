@@ -32,6 +32,7 @@ public class AdminDtos {
         String botStatus,
         long botPingMs,
         long botServers,
+        long botReconciledServers,
         long serverGrowthWeek,
         long botReachedUsers,
         long serverLeavesWeek
