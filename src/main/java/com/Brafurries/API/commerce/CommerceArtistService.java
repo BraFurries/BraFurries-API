@@ -148,6 +148,26 @@ public class CommerceArtistService {
             paidForPeriod,paidTotal,artworks,statements);
     }
 
+    /**
+     * Lightweight personal eligibility check for the profile menu.
+     * A linked artist profile is eligible even before the first artwork or royalty.
+     * Legacy ownership without a profile remains eligible, too.
+     * Never use client-supplied artist or Community IDs.
+     */
+    @Transactional(readOnly = true)
+    public ArtistAccess myAccess(Authentication auth) {
+        int userId = activeAccount(auth).getId();
+        Integer matched = jdbc.queryForObject("""
+            SELECT CASE WHEN
+                EXISTS(SELECT 1 FROM commerce_artist_profiles p WHERE p.user_id = ?)
+                OR EXISTS(SELECT 1 FROM commerce_artworks a WHERE a.artist_user_id = ?)
+                OR EXISTS(SELECT 1 FROM commerce_settlements s WHERE s.artist_user_id = ?)
+                OR EXISTS(SELECT 1 FROM commerce_royalty_accruals r WHERE r.artist_user_id = ?)
+            THEN 1 ELSE 0 END
+            """, Integer.class, userId, userId, userId, userId);
+        return new ArtistAccess(matched != null && matched != 0);
+    }
+
     private User activeAccount(Authentication auth) {
         if(!authorization.isConfigured()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,

@@ -90,6 +90,43 @@ class CommerceArtistServiceTest {
     }
 
     @Test
+    void artistEligibilityUsesOnlyCanonicalUserAndRecognizesProfileWithoutRoyalties() {
+        when(authorization.isConfigured()).thenReturn(true);
+        when(authorization.currentUser(auth)).thenReturn(user(77));
+        when(jdbc.queryForObject(contains("commerce_artist_profiles"),eq(Integer.class),
+            eq(77),eq(77),eq(77),eq(77))).thenReturn(1);
+
+        assertTrue(artists.myAccess(auth).eligible());
+        verify(jdbc).queryForObject(argThat(q ->
+                q.contains("p.user_id = ?")
+                && q.contains("a.artist_user_id = ?")
+                && q.contains("s.artist_user_id = ?")
+                && q.contains("r.artist_user_id = ?")
+                && !q.contains("claimed_by_user_id")),
+            eq(Integer.class),eq(77),eq(77),eq(77),eq(77));
+    }
+
+    @Test
+    void artistEligibilityIsFalseForOrdinaryMemberWithNoLinkedRecords() {
+        when(authorization.isConfigured()).thenReturn(true);
+        when(authorization.currentUser(auth)).thenReturn(user(55));
+        when(jdbc.queryForObject(anyString(),eq(Integer.class),
+            eq(55),eq(55),eq(55),eq(55))).thenReturn(0);
+        assertFalse(artists.myAccess(auth).eligible());
+    }
+
+    @Test
+    void artistEligibilityRejectsMergedAccountAndDoesNotTouchDatabase() {
+        when(authorization.isConfigured()).thenReturn(true);
+        User alias=user(77);
+        alias.setMergedIntoUser(user(99));
+        when(authorization.currentUser(auth)).thenReturn(alias);
+        assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
+            ()->artists.myAccess(auth)).getStatusCode());
+        verifyNoInteractions(jdbc,finance);
+    }
+
+    @Test
     void rejectsCanonicalAliasSessions() {
         when(authorization.isConfigured()).thenReturn(true);
         User alias=user(77);
