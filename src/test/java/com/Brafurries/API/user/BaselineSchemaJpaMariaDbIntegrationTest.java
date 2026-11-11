@@ -3,6 +3,9 @@ package com.Brafurries.API.user;
 import static org.junit.jupiter.api.Assertions.*;
 
 import com.Brafurries.API.entity.community.Community;
+import com.Brafurries.API.entity.community.CommunityDiscord;
+import com.Brafurries.API.admin.AdminCoddyPresenceService;
+import com.Brafurries.API.repository.community.CommunityDiscordRepository;
 import com.Brafurries.API.entity.community.CommunityStore;
 import com.Brafurries.API.auth.social.SparseAccountConsolidationExecutor;
 import com.Brafurries.API.auth.social.SparseAccountOwnershipGuard;
@@ -61,6 +64,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Import({ThemeControlPlaneStore.class, BackupControlPlaneStore.class,
     SparseAccountConsolidationExecutor.class, SparseAccountOwnershipGuard.class,
+    AdminCoddyPresenceService.class,
     UserAccountReconciliationPreflightService.class, UserAccountConsolidationPlanner.class})
 class BaselineSchemaJpaMariaDbIntegrationTest {
     private static final long GUILD_A = 991001L;
@@ -75,6 +79,8 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
         .withInitScript("brafurries_schema_baseline.sql");
 
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private AdminCoddyPresenceService coddyPresence;
+    @Autowired private CommunityDiscordRepository guilds;
     @Autowired private CommunityRepository communities;
     @Autowired private CommunityStoreRepository communityStore;
     @Autowired private EntityManager entityManager;
@@ -109,6 +115,61 @@ class BaselineSchemaJpaMariaDbIntegrationTest {
         community = communities.saveAndFlush(community);
         assertNotNull(community.getId());
         assertEquals("Synthetic tenant", communities.findById(community.getId()).orElseThrow().getName());
+    }
+
+    @Test
+    void coddyPresencePagesAndFiltersRealMariaDbByGuildAndTenant() {
+        Community north = new Community();
+        north.setName("Synthetic North Tenant");
+        north = communities.saveAndFlush(north);
+
+        Community south = new Community();
+        south.setName("Synthetic South Tenant");
+        south = communities.saveAndFlush(south);
+
+        CommunityDiscord northGuild = new CommunityDiscord();
+        northGuild.setCommunity(north);
+        northGuild.setName("Lobo Demo");
+        northGuild.setGuildId(123456789012345678L);
+        northGuild.setActive(true);
+        northGuild.setUsersQuantity(800);
+        northGuild.setMembershipSyncState("HEALTHY");
+        northGuild.setLastBotJoinedAt(LocalDateTime.of(2026, 11, 10, 8, 0));
+        guilds.saveAndFlush(northGuild);
+
+        CommunityDiscord southGuild = new CommunityDiscord();
+        southGuild.setCommunity(south);
+        southGuild.setName("Gato Demo");
+        southGuild.setGuildId(223456789012345678L);
+        southGuild.setActive(false);
+        southGuild.setUsersQuantity(300);
+        southGuild.setMembershipSyncState("RECONCILIATION_REQUIRED");
+        guilds.saveAndFlush(southGuild);
+        entityManager.clear();
+
+        // One-to-one community fetch, count query and deterministic pagination
+        // are all exercised on MariaDB with the Database-owned schema.
+        var first = coddyPresence.list(1, 1, "", "all", null);
+        assertEquals(2, first.pagination().totalItems());
+        assertEquals(2, first.pagination().totalPages());
+        assertEquals("123456789012345678", first.items().getFirst().guildId());
+        assertEquals(1, first.items().size());
+
+        var byGuildId = coddyPresence.list(1, 20, "123456789012345678", "active", null);
+        assertEquals(1, byGuildId.pagination().totalItems());
+        assertEquals(north.getId(), byGuildId.items().getFirst().communityId());
+
+        var byTenantName = coddyPresence.list(1, 20, "South Tenant", "all", null);
+        assertEquals(1, byTenantName.pagination().totalItems());
+        assertEquals(south.getId(), byTenantName.items().getFirst().communityId());
+
+        var scoped = coddyPresence.list(1, 20, "", "inactive", north.getId());
+        assertEquals(0, scoped.pagination().totalItems());
+        var other = coddyPresence.list(1, 20, "", "inactive", south.getId());
+        assertEquals(1, other.pagination().totalItems());
+
+        // The search term is literal; % must not match arbitrary servers.
+        assertEquals(0, coddyPresence.list(1, 20, "%", "all", null).pagination().totalItems());
     }
 
     @Test

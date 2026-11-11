@@ -15,6 +15,7 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.HandlerMapping;
@@ -42,6 +43,19 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MissingServletRequestParameterException.class)
     public ResponseEntity<ApiErrorResponse> handleMissingParameter(MissingServletRequestParameterException ex, HttpServletRequest request) {
         return ResponseEntity.badRequest().body(buildBody(HttpStatus.BAD_REQUEST, "Parâmetro obrigatório ausente: " + ex.getParameterName(), request.getRequestURI(), null));
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidQueryParameter(
+        MethodArgumentTypeMismatchException ex,
+        HttpServletRequest request
+    ) {
+        // Do not turn malformed URL parameters into 500 responses or echo
+        // the rejected user-controlled value into the error payload.
+        return ResponseEntity.badRequest().body(buildBody(
+            HttpStatus.BAD_REQUEST, "Parâmetro de consulta inválido: " + ex.getName(),
+            request.getRequestURI(), null
+        ));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
