@@ -156,14 +156,15 @@ public class AdminCoddyWebService {
         return new Targets(options);
     }
 
-    private CommunityDiscord requireActiveGuild(int communityId, long guildId) {
+    private void requireActiveGuild(int communityId, long guildId) {
         if (communityId <= 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Community invalida");
-        return guilds.findByGuildId(guildId)
-            .filter(c -> Boolean.TRUE.equals(c.getActive())
-                && c.getCommunity() != null && c.getCommunity().getId() == communityId)
-            .orElseThrow(() -> new ResponseStatusException(
+        // Check both tenant and exact Discord snowflake in one indexed EXISTS.
+        // Never infer tenancy from a possibly non-unique guild lookup.
+        if (!guilds.existsByGuildIdAndCommunityIdAndActiveTrue(guildId, communityId)) {
+            throw new ResponseStatusException(
                 HttpStatus.NOT_FOUND, "Servidor nao pertence a uma Community ativa autorizada"
-            ));
+            );
+        }
     }
 
     private SendResult existing(String key, int actorId, int communityId,
