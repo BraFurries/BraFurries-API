@@ -62,7 +62,8 @@ class AdminCoddyWebServiceTest {
 
     @Test
     void rejectsCrossTenantGuildBeforeAuditingOrSending() {
-        when(guilds.findByGuildId(GUILD)).thenReturn(Optional.of(guild(21, true)));
+        CommunityDiscord link = guild(21, true);
+        when(guilds.findByGuildId(GUILD)).thenReturn(Optional.of(link));
         ResponseStatusException error = assertThrows(ResponseStatusException.class,
             () -> service.send(auth, request(22, "Olá")));
         assertEquals(HttpStatus.NOT_FOUND, error.getStatusCode());
@@ -72,7 +73,8 @@ class AdminCoddyWebServiceTest {
 
     @Test
     void rejectsInactiveGuildBeforeAnyExternalEffect() {
-        when(guilds.findByGuildId(GUILD)).thenReturn(Optional.of(guild(12, false)));
+        CommunityDiscord link = guild(12, false);
+        when(guilds.findByGuildId(GUILD)).thenReturn(Optional.of(link));
         ResponseStatusException error = assertThrows(ResponseStatusException.class,
             () -> service.send(auth, request(12, "Olá")));
         assertEquals(HttpStatus.NOT_FOUND, error.getStatusCode());
@@ -81,7 +83,8 @@ class AdminCoddyWebServiceTest {
 
     @Test
     void filtersAvailableTargetsToActiveCommunityAssociations() {
-        when(guilds.findAllByActiveTrueOrderByGuildIdAsc()).thenReturn(List.of(guild(12, true)));
+        CommunityDiscord link = guild(12, true);
+        when(guilds.findAllByActiveTrueOrderByGuildIdAsc()).thenReturn(List.of(link));
         when(coddy.messageTargets()).thenReturn(new AdminCoddyWebClient.RuntimeTargets(List.of(
             new AdminCoddyWebClient.RuntimeGuild(Long.toString(GUILD), "Servidor",
                 List.of(new ChannelTarget(Long.toString(CHANNEL), "avisos", "text"))),
@@ -109,8 +112,9 @@ class AdminCoddyWebServiceTest {
 
     @Test
     void successfulSendIsOneShotAndRecordsReturnedDiscordMessage() {
-        when(guilds.findByGuildId(GUILD)).thenReturn(Optional.of(guild(12, true)));
-        when(guilds.findAllByActiveTrueOrderByGuildIdAsc()).thenReturn(List.of(guild(12, true)));
+        CommunityDiscord link = guild(12, true);
+        when(guilds.findByGuildId(GUILD)).thenReturn(Optional.of(link));
+        when(guilds.findAllByActiveTrueOrderByGuildIdAsc()).thenReturn(List.of(link));
         when(coddy.messageTargets()).thenReturn(new AdminCoddyWebClient.RuntimeTargets(List.of(
             new AdminCoddyWebClient.RuntimeGuild(Long.toString(GUILD), "Servidor",
                 List.of(new ChannelTarget(Long.toString(CHANNEL), "avisos", "text")))
