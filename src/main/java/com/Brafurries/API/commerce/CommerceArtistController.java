@@ -8,6 +8,7 @@ import java.util.Map;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -38,6 +39,13 @@ public class CommerceArtistController {
     public Created registerExternal(Authentication auth,
                                     @Valid @RequestBody RegisterExternalArtist request) {
         return artists.registerExternal(auth,request);
+    }
+
+    @GetMapping("/me/access")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ArtistAccess> myAccess(Authentication auth) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+            .body(artists.myAccess(auth));
     }
 
     @GetMapping("/me/portfolio")

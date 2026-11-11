@@ -46,6 +46,8 @@ public final class CommerceArtistDtos {
 
     public record InvitationResult(String status, String message) {}
 
+    public record ArtistAccess(boolean eligible) {}
+
     public record Portfolio(
         int year, int month,
         BigDecimal accruedMonth, BigDecimal accruedTotal,
