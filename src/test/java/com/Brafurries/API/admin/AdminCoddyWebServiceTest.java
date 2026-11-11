@@ -46,6 +46,7 @@ class AdminCoddyWebServiceTest {
         when(auth.getName()).thenReturn("admin@brafurries.test");
         when(users.findByEmail("admin@brafurries.test")).thenReturn(Optional.of(actor));
         when(jdbc.queryForList(anyString(), eq(KEY))).thenReturn(List.of());
+        when(jdbc.update(anyString(), any(Object[].class))).thenReturn(1);
     }
 
     private static String digest(String message) {
