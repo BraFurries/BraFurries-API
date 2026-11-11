@@ -25,7 +25,6 @@ public interface CommunityDiscordRepository extends JpaRepository<CommunityDisco
     Page<CommunityDiscord> findAll(Specification<CommunityDiscord> spec, Pageable pageable);
 
     Page<CommunityDiscord> findByNameContainingIgnoreCase(String name, Pageable pageable);
-    @EntityGraph(attributePaths = "community")
     Optional<CommunityDiscord> findByGuildId(Long guildId);
     Optional<CommunityDiscord> findByCommunity(Community community);
     boolean existsByCommunityIdAndActiveTrue(Integer communityId);
