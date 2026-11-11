@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.server.ResponseStatusException;
@@ -103,8 +104,24 @@ public class AdminCoddyWebClient {
                 .retrieve().body(Delivery.class);
             if (result == null || result.messageId() == null) throw unavailable();
             return result;
+        } catch (HttpClientErrorException ex) {
+            // An explicit Discord-side rejection means the effect did not happen.
+            // Never forward raw internal URLs, tokens, or response bodies.
+            if (ex.getStatusCode().value() == 403) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Coddy sem permissao para enviar ao canal");
+            }
+            if (ex.getStatusCode().value() == 404) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Servidor ou canal nao esta disponivel para o Coddy");
+            }
+            if (ex.getStatusCode().value() == 422) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Mensagem rejeitada pelo Coddy");
+            }
+            throw unavailable();
         } catch (RestClientException ex) {
-            // Uncertain delivery is never auto-retried by this API client.
+            // Timeouts and 5xx can be post-send; never retry here.
             throw unavailable();
         }
     }
