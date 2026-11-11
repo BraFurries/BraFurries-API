@@ -8,6 +8,9 @@ import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.Lock;
 import jakarta.persistence.LockModeType;
@@ -15,7 +18,12 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public interface CommunityDiscordRepository extends JpaRepository<CommunityDiscord, Integer> {
+public interface CommunityDiscordRepository extends JpaRepository<CommunityDiscord, Integer>, JpaSpecificationExecutor<CommunityDiscord> {
+    // Bounded admin directory pages need the owning community without N+1 loads.
+    @Override
+    @EntityGraph(attributePaths = "community")
+    Page<CommunityDiscord> findAll(Specification<CommunityDiscord> spec, Pageable pageable);
+
     Page<CommunityDiscord> findByNameContainingIgnoreCase(String name, Pageable pageable);
     Optional<CommunityDiscord> findByGuildId(Long guildId);
     Optional<CommunityDiscord> findByCommunity(Community community);
