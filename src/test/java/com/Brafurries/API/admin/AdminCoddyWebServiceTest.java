@@ -13,6 +13,10 @@ import com.Brafurries.API.entity.community.CommunityDiscord;
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.repository.community.CommunityDiscordRepository;
 import com.Brafurries.API.repository.user.UserRepository;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -42,6 +46,15 @@ class AdminCoddyWebServiceTest {
         when(auth.getName()).thenReturn("admin@brafurries.test");
         when(users.findByEmail("admin@brafurries.test")).thenReturn(Optional.of(actor));
         when(jdbc.queryForList(anyString(), eq(KEY))).thenReturn(List.of());
+    }
+
+    private static String digest(String message) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest((GUILD + ":" + CHANNEL + ":" + message).getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException(ex);
+        }
     }
 
     private SendRequest request(int communityId, String message) {
@@ -100,9 +113,21 @@ class AdminCoddyWebServiceTest {
     @Test
     void doesNotReplayAnUncertainRequestKey() {
         when(jdbc.queryForList(anyString(), eq(KEY))).thenReturn(List.of(Map.of(
-            "actor_user_id", 7, "community_id", 12, "guild_id", GUILD,
-            "channel_id", CHANNEL, "payload_sha256", "unused",
+            "action_type", "MESSAGE_SEND", "actor_user_id", 7, "community_id", 12,
+            "guild_id", GUILD, "channel_id", CHANNEL, "payload_sha256", digest("Olá"),
             "outcome", "UNKNOWN"
+        )));
+        ResponseStatusException error = assertThrows(ResponseStatusException.class,
+            () -> service.send(auth, request(12, "Olá")));
+        assertEquals(HttpStatus.CONFLICT, error.getStatusCode());
+        verifyNoInteractions(coddy);
+    }
+
+    @Test
+    void rejectsRequestKeyPreviouslyUsedForPresenceWithoutThrowingServerError() {
+        when(jdbc.queryForList(anyString(), eq(KEY))).thenReturn(List.of(Map.of(
+            "action_type", "PRESENCE_UPDATE", "actor_user_id", 7,
+            "outcome", "APPLIED"
         )));
         ResponseStatusException error = assertThrows(ResponseStatusException.class,
             () -> service.send(auth, request(12, "Olá")));
