@@ -169,16 +169,17 @@ public class AdminCoddyWebService {
     private SendResult existing(String key, int actorId, int communityId,
                                 long guildId, long channelId, String hash) {
         List<Map<String, Object>> rows = jdbc.queryForList("""
-            SELECT actor_user_id, community_id, guild_id, channel_id,
+            SELECT action_type, actor_user_id, community_id, guild_id, channel_id,
                    payload_sha256, outcome, discord_message_id
             FROM coddy_admin_action_audit WHERE request_key = ?
             """, key);
         if (rows.isEmpty()) return null;
         Map<String, Object> row = rows.getFirst();
-        if (((Number) row.get("actor_user_id")).intValue() != actorId
-            || ((Number) row.get("community_id")).intValue() != communityId
-            || ((Number) row.get("guild_id")).longValue() != guildId
-            || ((Number) row.get("channel_id")).longValue() != channelId
+        if (!"MESSAGE_SEND".equals(row.get("action_type"))
+            || !(row.get("actor_user_id") instanceof Number storedActor) || storedActor.intValue() != actorId
+            || !(row.get("community_id") instanceof Number storedCommunity) || storedCommunity.intValue() != communityId
+            || !(row.get("guild_id") instanceof Number storedGuild) || storedGuild.longValue() != guildId
+            || !(row.get("channel_id") instanceof Number storedChannel) || storedChannel.longValue() != channelId
             || !Objects.equals(row.get("payload_sha256"), hash)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Chave utilizada por outra operacao");
         }
@@ -220,7 +221,10 @@ public class AdminCoddyWebService {
                 ) VALUES (?, 'MESSAGE_SEND', ?, ?, ?, ?, ?, 'REQUESTED')
                 """, key, who, communityId, guildId, channelId, hash);
         } catch (DuplicateKeyException conflict) {
-            return existing(key, who, communityId, guildId, channelId, hash);
+            SendResult prior = existing(key, who, communityId, guildId, channelId, hash);
+            if (prior != null) return prior;
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Requisicao concorrente com resultado ainda nao conhecido");
         }
         try {
             AdminCoddyWebClient.Delivery delivered = coddy.send(guildId, channelId, request.message());
