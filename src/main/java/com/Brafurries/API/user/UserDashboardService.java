@@ -1,5 +1,6 @@
 package com.Brafurries.API.user;
 
+import com.Brafurries.API.admin.AdminCoddyReachService;
 import com.Brafurries.API.auth.social.DiscordSelfServiceLinkService;
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.entity.user.UserDiscord;
@@ -34,19 +35,22 @@ public class UserDashboardService {
     private final UserDiscordRepository userDiscordRepository;
     private final UserDashboardCachedQueryService cachedQueryService;
     private final EventPartnershipService eventPartnershipService;
+    private final AdminCoddyReachService coddyReachService;
 
     public UserDashboardService(
             UserRepository userRepository,
             DiscordSelfServiceLinkService selfServiceLinks,
             UserDiscordRepository userDiscordRepository,
             UserDashboardCachedQueryService cachedQueryService,
-            EventPartnershipService eventPartnershipService
+            EventPartnershipService eventPartnershipService,
+            AdminCoddyReachService coddyReachService
     ) {
         this.userRepository = userRepository;
         this.selfServiceLinks = selfServiceLinks;
         this.userDiscordRepository = userDiscordRepository;
         this.cachedQueryService = cachedQueryService;
         this.eventPartnershipService = eventPartnershipService;
+        this.coddyReachService = coddyReachService;
     }
 
     @Transactional(readOnly = true)
@@ -117,7 +121,9 @@ public class UserDashboardService {
 
         GeneralDiscordMetricsProjection result = cachedQueryService.fetchGeneralDiscordMetrics();
         long activeServers = toLong(result.getActiveDiscordCommunities());
-        long totalReached = toLong(result.getTotalMembersReachedActiveCommunities());
+        // Match the administrative overview: count each persisted identity once
+        // across healthy, reconciled active Discord guilds, not a sum of guild sizes.
+        long totalReached = coddyReachService.read().uniqueMembers();
 
         return List.of(
                 new DashboardAnalyticsItem("Servidores ativos", Long.toString(activeServers)),

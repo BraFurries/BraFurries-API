@@ -1,5 +1,6 @@
 package com.Brafurries.API.user;
 
+import com.Brafurries.API.admin.AdminCoddyReachService;
 import com.Brafurries.API.auth.social.DiscordSelfServiceLinkService;
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.event.EventPartnershipService;
@@ -44,6 +45,9 @@ class UserDashboardServiceTest {
     @Mock
     private EventPartnershipService eventPartnershipService;
 
+    @Mock
+    private AdminCoddyReachService coddyReachService;
+
     @Test
     void getLoggedUserDashboardPrioritizesOnePartnerThenOneCommon() {
         User user = new User();
@@ -70,7 +74,8 @@ class UserDashboardServiceTest {
                 accountLinks,
                 userDiscordRepository,
                 cachedQueryService,
-                eventPartnershipService
+                eventPartnershipService,
+                coddyReachService
         );
 
         UserDashboardResponse response = service.getLoggedUserDashboard(new UsernamePasswordAuthenticationToken("USER@example.com", null, List.of()));
@@ -90,7 +95,7 @@ class UserDashboardServiceTest {
     }
 
     @Test
-    void getLoggedUserDashboardReturnsAdminAnalyticsFromDiscordMetrics() {
+    void getLoggedUserDashboardReturnsDistinctReachInsteadOfSummedGuildMembers() {
         User user = new User();
         user.setId(10);
         user.setEmail("admin@example.com");
@@ -105,7 +110,7 @@ class UserDashboardServiceTest {
         when(eventPartnershipService.findActivePartnerEventIds(any())).thenReturn(Set.of());
         when(cachedQueryService.fetchGeneralDiscordMetrics()).thenReturn(metrics);
         when(metrics.getActiveDiscordCommunities()).thenReturn(12L);
-        when(metrics.getTotalMembersReachedActiveCommunities()).thenReturn(3456L);
+        when(coddyReachService.read()).thenReturn(new AdminCoddyReachService.ReachSnapshot(1920L, 6L));
 
         when(accountLinks.legacyProfileFor(user)).thenReturn(user);
         UserDashboardService service = new UserDashboardService(
@@ -113,7 +118,8 @@ class UserDashboardServiceTest {
                 accountLinks,
                 userDiscordRepository,
                 cachedQueryService,
-                eventPartnershipService
+                eventPartnershipService,
+                coddyReachService
         );
 
         UserDashboardResponse response = service.getLoggedUserDashboard(new UsernamePasswordAuthenticationToken(
@@ -125,7 +131,7 @@ class UserDashboardServiceTest {
         assertEquals("Servidores ativos", response.analytics().get(0).name());
         assertEquals("12", response.analytics().get(0).data());
         assertEquals("Total de furries alcançados", response.analytics().get(1).name());
-        assertEquals("3456", response.analytics().get(1).data());
+        assertEquals("1920", response.analytics().get(1).data());
         assertEquals("Status do bot", response.analytics().get(2).name());
         assertEquals("Online", response.analytics().get(2).data());
     }
