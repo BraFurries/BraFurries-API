@@ -75,8 +75,7 @@ class AdminCoddyWebServiceTest {
 
     @Test
     void rejectsCrossTenantGuildBeforeAuditingOrSending() {
-        CommunityDiscord link = guild(21, true);
-        when(guilds.findByGuildId(GUILD)).thenReturn(Optional.of(link));
+        when(guilds.existsByGuildIdAndCommunityIdAndActiveTrue(GUILD, 22)).thenReturn(false);
         ResponseStatusException error = assertThrows(ResponseStatusException.class,
             () -> service.send(auth, request(22, "Olá")));
         assertEquals(HttpStatus.NOT_FOUND, error.getStatusCode());
@@ -86,8 +85,7 @@ class AdminCoddyWebServiceTest {
 
     @Test
     void rejectsInactiveGuildBeforeAnyExternalEffect() {
-        CommunityDiscord link = guild(12, false);
-        when(guilds.findByGuildId(GUILD)).thenReturn(Optional.of(link));
+        when(guilds.existsByGuildIdAndCommunityIdAndActiveTrue(GUILD, 12)).thenReturn(false);
         ResponseStatusException error = assertThrows(ResponseStatusException.class,
             () -> service.send(auth, request(12, "Olá")));
         assertEquals(HttpStatus.NOT_FOUND, error.getStatusCode());
@@ -138,7 +136,7 @@ class AdminCoddyWebServiceTest {
     @Test
     void successfulSendIsOneShotAndRecordsReturnedDiscordMessage() {
         CommunityDiscord link = guild(12, true);
-        when(guilds.findByGuildId(GUILD)).thenReturn(Optional.of(link));
+        when(guilds.existsByGuildIdAndCommunityIdAndActiveTrue(GUILD, 12)).thenReturn(true);
         when(guilds.findAllByActiveTrueOrderByGuildIdAsc()).thenReturn(List.of(link));
         when(coddy.messageTargets()).thenReturn(new AdminCoddyWebClient.RuntimeTargets(List.of(
             new AdminCoddyWebClient.RuntimeGuild(Long.toString(GUILD), "Servidor",
