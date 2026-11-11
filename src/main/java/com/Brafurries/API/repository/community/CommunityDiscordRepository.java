@@ -30,6 +30,7 @@ public interface CommunityDiscordRepository extends JpaRepository<CommunityDisco
     boolean existsByCommunityIdAndActiveTrue(Integer communityId);
     // Single indexed EXISTS query. Both tenant FK and active official guild must match.
     boolean existsByGuildIdAndCommunityIdAndActiveTrue(Long guildId, Integer communityId);
+    @EntityGraph(attributePaths = "community")
     List<CommunityDiscord> findAllByActiveTrueOrderByGuildIdAsc();
 
     // Each guild contributes at most once to each seven-day metric. These are
