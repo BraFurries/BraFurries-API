@@ -42,4 +42,13 @@ public class CommunityDiscord {
 
     @Column(name = "last_membership_event_at")
     private LocalDateTime lastMembershipEventAt;
+
+    // UTC: actual Discord bot joined_at when available, otherwise the first
+    // observation of an inactive-to-active transition.
+    @Column(name = "last_bot_joined_at")
+    private LocalDateTime lastBotJoinedAt;
+
+    // UTC: observed Discord removal or absence from a complete guild snapshot.
+    @Column(name = "last_bot_left_at")
+    private LocalDateTime lastBotLeftAt;
 }

@@ -24,6 +24,11 @@ public interface CommunityDiscordRepository extends JpaRepository<CommunityDisco
     boolean existsByGuildIdAndCommunityIdAndActiveTrue(Long guildId, Integer communityId);
     List<CommunityDiscord> findAllByActiveTrueOrderByGuildIdAsc();
 
+    // Each guild contributes at most once to each seven-day metric. These are
+    // recent-transition counts, not a historical event ledger or net growth.
+    long countByLastBotJoinedAtGreaterThanEqual(java.time.LocalDateTime sinceUtc);
+    long countByLastBotLeftAtGreaterThanEqual(java.time.LocalDateTime sinceUtc);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT link FROM CommunityDiscord link JOIN FETCH link.community WHERE link.guildId = :guildId")
     Optional<CommunityDiscord> findByGuildIdForUpdate(@Param("guildId") Long guildId);

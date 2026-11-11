@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -27,8 +28,16 @@ public final class InternalCommunityNetworkDtos {
         @NotBlank @Size(max = 100) String name,
         @NotBlank String ownerDiscordUserId,
         @NotNull Boolean active,
-        @NotNull @PositiveOrZero Integer observedMembers
-    ) {}
+        @NotNull @PositiveOrZero Integer observedMembers,
+        Instant botJoinedAt
+    ) {
+        // Older lifecycle clients/tests may still send the original four fields.
+        public DiscordNetworkObservationRequest(
+            String name, String ownerDiscordUserId, Boolean active, Integer observedMembers
+        ) {
+            this(name, ownerDiscordUserId, active, observedMembers, null);
+        }
+    }
 
     public record DiscordOwnershipObservationRequest(
         @NotBlank String ownerDiscordUserId
