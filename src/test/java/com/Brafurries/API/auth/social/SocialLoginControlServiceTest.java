@@ -37,6 +37,7 @@ class SocialLoginControlServiceTest {
     @Mock PasswordEncoder passwords;
     @Mock DiscordSelfServiceLinkService discord;
     @Mock SocialLoginOAuthProofService oauthProofs;
+    @Mock VerifiedSocialIdentityService verifiedIdentities;
 
     SocialLoginControlService service;
     User owner;
@@ -45,7 +46,7 @@ class SocialLoginControlServiceTest {
     @BeforeEach
     void setup() {
         service = new SocialLoginControlService(users, identities, events, refreshTokens, userTokens,
-            passwords, discord, oauthProofs);
+            passwords, discord, oauthProofs, verifiedIdentities);
         owner = new User();
         owner.setId(9);
         owner.setEmail("site@example.com");
@@ -159,6 +160,56 @@ class SocialLoginControlServiceTest {
         assertTrue(linked.getLoginEnabled());
         verify(events).save(any());
         verify(refreshTokens).deleteByUser(owner);
+    }
+
+    @Test
+    void initialGoogleConnectRequiresSitePasswordAndFreshProviderProofAndRevokesSessions() {
+        confirmedLocalAccount();
+        when(identities.findByUserIdAndProvider(9, "google")).thenReturn(List.of());
+        when(oauthProofs.consumeVerifiedGoogle(owner, "one-use-ticket")).thenReturn("new-google-sub");
+        var google = identity(90L, "google", owner, true);
+        google.setProviderSubject("new-google-sub");
+        when(identities.findByProviderAndProviderSubject("google", "new-google-sub"))
+            .thenReturn(Optional.of(google));
+
+        assertEquals("RELOGIN_REQUIRED",
+            service.connectGoogleOAuth(auth, "one-use-ticket", "local-password").status());
+
+        verify(verifiedIdentities).bindProvenSubject(owner, "google", "new-google-sub", null);
+        verify(refreshTokens).deleteByUser(owner);
+        verify(events).save(argThat(event ->
+            Boolean.FALSE.equals(event.getPreviousLoginEnabled())
+                && Boolean.TRUE.equals(event.getNextLoginEnabled())
+                && Long.valueOf(4L).equals(event.getPreviousAuthVersion())
+                && Long.valueOf(5L).equals(event.getNextAuthVersion())
+                && event.getIdentity() == google));
+        assertEquals(5L, owner.getAuthVersion());
+    }
+
+    @Test
+    void initialGoogleConnectCannotBypassPreviouslyDisabledGoogleIdentity() {
+        confirmedLocalAccount();
+        var disabled = identity(91L, "google", owner, false);
+        when(identities.findByUserIdAndProvider(9, "google")).thenReturn(List.of(disabled));
+        ResponseStatusException error = assertThrows(ResponseStatusException.class,
+            () -> service.connectGoogleOAuth(auth, "one-use-ticket", "local-password"));
+        assertEquals(HttpStatus.CONFLICT, error.getStatusCode());
+        verifyNoInteractions(oauthProofs, verifiedIdentities, events, refreshTokens);
+    }
+
+    @Test
+    void initialGoogleConnectRejectsProviderSubjectOwnedByAnotherUser() {
+        confirmedLocalAccount();
+        when(identities.findByUserIdAndProvider(9, "google")).thenReturn(List.of());
+        when(oauthProofs.consumeVerifiedGoogle(owner, "one-use-ticket")).thenReturn("other-sub");
+        doThrow(new ResponseStatusException(HttpStatus.CONFLICT, "ACCOUNT_LINK_REQUIRED"))
+            .when(verifiedIdentities).bindProvenSubject(owner, "google", "other-sub", null);
+
+        assertThrows(ResponseStatusException.class,
+            () -> service.connectGoogleOAuth(auth, "one-use-ticket", "local-password"));
+
+        assertEquals(4L, owner.getAuthVersion());
+        verifyNoInteractions(refreshTokens, events);
     }
 
     @Test
