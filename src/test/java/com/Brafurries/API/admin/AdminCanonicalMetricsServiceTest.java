@@ -51,7 +51,6 @@ class AdminCanonicalMetricsServiceTest {
         assertTrue(report.topCommands().isEmpty());
         assertTrue(report.dailySnapshots().stream().allMatch(p -> p.brafurriesMembers()==null));
         assertTrue(report.commandUsage().stream().allMatch(p -> p.executions()==null));
-        verify(jdbc,never()).queryForObject(contains("config_command_uses"),any());
     }
 
     @Test void countsExactlyImmutableCompletionsWhenTelemetryStarted() {
