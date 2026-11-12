@@ -131,6 +131,15 @@ public class CommerceCatalogController {
             .body(bytes);
     }
 
+    public record OrphanedContractPdfInput(String key) {}
+
+    @PostMapping("/contract-documents/cleanup-orphan")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteOrphanedContractPdf(Authentication auth,
+                                          @RequestBody OrphanedContractPdfInput input) {
+        catalog.deleteOrphanedContractPdf(auth,input==null?null:input.key());
+    }
+
     @DeleteMapping("/artworks/{artworkId}/contracts/{contractId}/unused-test")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void discardUnusedTestContract(Authentication auth,@PathVariable long artworkId,
