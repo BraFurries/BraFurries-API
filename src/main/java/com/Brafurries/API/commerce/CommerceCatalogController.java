@@ -131,15 +131,6 @@ public class CommerceCatalogController {
             .body(bytes);
     }
 
-    public record OrphanedContractPdfInput(String key) {}
-
-    @PostMapping("/contract-documents/cleanup-orphan")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deleteOrphanedContractPdf(Authentication auth,
-                                          @RequestBody OrphanedContractPdfInput input) {
-        catalog.deleteOrphanedContractPdf(auth,input==null?null:input.key());
-    }
-
     @PostMapping("/artworks/{artworkId}/contracts/{contractId}/terminate")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void terminate(Authentication auth,@PathVariable long artworkId,
