@@ -92,6 +92,35 @@ class VerifiedSocialIdentityServiceTest {
     }
 
     @Test
+    void nativeLockReadBlocksDisabledProviderEvenAfterAUserLock() {
+        when(repository.currentLoginEnabledForUpdate("google", "g-sub"))
+            .thenReturn(Optional.of(false));
+        assertTrue(service().loginDisabledAfterUserLock("google", "g-sub"));
+        verify(repository).currentLoginEnabledForUpdate("google", "g-sub");
+    }
+
+    @Test
+    void nativeLockReadDoesNotTreatANeverRegisteredProviderAsDisabled() {
+        assertFalse(service().loginDisabledAfterUserLock("google", "new-sub"));
+        verify(repository).currentLoginEnabledForUpdate("google", "new-sub");
+    }
+
+    @Test
+    void differentGoogleSubjectIncludingDisabledIdentityBlocksAutoLink() {
+        User account = user(10);
+        UserSocialIdentity disabled = new UserSocialIdentity();
+        disabled.setUser(account);
+        disabled.setProvider("google");
+        disabled.setProviderSubject("old-sub");
+        disabled.setLoginEnabled(false);
+        when(repository.findByUserIdAndProvider(10, "google"))
+            .thenReturn(java.util.List.of(disabled));
+
+        assertTrue(service().hasDifferentSubject(account, "google", "new-sub"));
+        assertFalse(service().hasDifferentSubject(account, "google", "old-sub"));
+    }
+
+    @Test
     void rejectsInvalidProofSubjectsBeforeAccessingDatabase() {
         assertThrows(IllegalArgumentException.class,
             () -> service().bindProvenSubject(user(10), "github", "unapproved", null));

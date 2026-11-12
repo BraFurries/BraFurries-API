@@ -51,6 +51,31 @@ public class VerifiedSocialIdentityService {
             .orElse("discord".equals(p));
     }
 
+    /**
+     * A login disabled in a concurrent callback must not be bypassed by the
+     * e-mail auto-link fallback. Called after locking the site's User row.
+     * An absent identity is not disabled; a present one must be checked fresh.
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public boolean loginDisabledAfterUserLock(String provider, String providerSubject) {
+        return identities.currentLoginEnabledForUpdate(
+                normalizeProvider(provider), normalizeSubject(providerSubject))
+            .map(enabled -> !enabled)
+            .orElse(false);
+    }
+
+    /**
+     * Never attach a new Google subject to an account with a different Google
+     * identity, including identities whose login was explicitly disabled.
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public boolean hasDifferentSubject(User owner, String provider, String providerSubject) {
+        String p = normalizeProvider(provider);
+        String subject = normalizeSubject(providerSubject);
+        return identities.findByUserIdAndProvider(owner.getId(), p).stream()
+            .anyMatch(identity -> !subject.equals(identity.getProviderSubject()));
+    }
+
     /** A disabled OAuth login never frees the provider subject or Community identity. */
     @Transactional(readOnly = true)
     public Boolean loginAllowed(String provider, String providerSubject) {

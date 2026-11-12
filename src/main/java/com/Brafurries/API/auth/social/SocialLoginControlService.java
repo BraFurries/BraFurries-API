@@ -38,6 +38,7 @@ public class SocialLoginControlService {
     private final PasswordEncoder passwords;
     private final DiscordSelfServiceLinkService discord;
     private final SocialLoginOAuthProofService oauthProofs;
+    private final VerifiedSocialIdentityService verifiedIdentities;
 
     public SocialLoginControlService(
         UserRepository users,
@@ -47,7 +48,8 @@ public class SocialLoginControlService {
         UserTokenRepository userTokens,
         PasswordEncoder passwords,
         DiscordSelfServiceLinkService discord,
-        SocialLoginOAuthProofService oauthProofs
+        SocialLoginOAuthProofService oauthProofs,
+        VerifiedSocialIdentityService verifiedIdentities
     ) {
         this.users = users;
         this.identities = identities;
@@ -57,6 +59,7 @@ public class SocialLoginControlService {
         this.passwords = passwords;
         this.discord = discord;
         this.oauthProofs = oauthProofs;
+        this.verifiedIdentities = verifiedIdentities;
     }
 
     public record ProviderLogin(Long identityId, String provider, boolean loginEnabled) {}
@@ -92,6 +95,36 @@ public class SocialLoginControlService {
         String subject = oauthProofs.consumeVerifiedGoogle(actor, ticket);
         UserSocialIdentity identity = ownedIdentity(actor, "google", subject);
         return enable(actor, identity);
+    }
+
+    /**
+     * Manual fallback for third-party Google e-mails: a verified site login
+     * with local password AND a fresh Google OAuth ticket prove both identities.
+     * Never merge separate website accounts or resurrect a disabled provider.
+     */
+    @Transactional
+    public ChangeResult connectGoogleOAuth(Authentication authentication, String ticket, String password) {
+        User actor = requireLockedActor(authentication, password);
+        if (!identities.findByUserIdAndProvider(actor.getId(), "google").isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "GOOGLE_ALREADY_LINKED");
+        }
+        String subject = oauthProofs.consumeVerifiedGoogle(actor, ticket);
+        verifiedIdentities.bindProvenSubject(actor, "google", subject, null);
+        UserSocialIdentity identity = ownedIdentity(actor, "google", subject);
+
+        Long previousVersion = actor.getAuthVersion();
+        revokeSessions(actor);
+        UserSocialLoginEvent event = new UserSocialLoginEvent();
+        event.setUser(actor);
+        event.setIdentity(identity);
+        event.setProvider("google");
+        event.setPreviousLoginEnabled(false);
+        event.setNextLoginEnabled(true);
+        event.setPreviousAuthVersion(previousVersion);
+        event.setNextAuthVersion(actor.getAuthVersion());
+        events.save(event);
+        auditAfterCommit("CONNECTED", actor, identity);
+        return new ChangeResult("RELOGIN_REQUIRED");
     }
 
     @Transactional
