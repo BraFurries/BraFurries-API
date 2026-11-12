@@ -23,7 +23,6 @@ import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
@@ -58,7 +57,7 @@ public class CommerceCatalogService {
     public List<Map<String,Object>> templates(Authentication auth) {
         authorization.require(auth, PlatformPermission.CONTRACTS_MANAGE);
         return jdbc.queryForList("""
-            SELECT id,name,description,modality,royalty_method AS royaltyMethod,
+            SELECT id,name,description,full_text AS fullText,modality,royalty_method AS royaltyMethod,
                    royalty_percent AS royaltyPercent,royalty_fixed_amount AS royaltyFixedAmount,
                    active,created_at AS createdAt
               FROM commerce_contract_templates ORDER BY id DESC LIMIT 500
@@ -76,14 +75,15 @@ public class CommerceCatalogService {
             ? null : money(input.royaltyFixedAmount(), "Valor fixo");
         validateRoyaltyTerms(method, percentage, fixed);
         String name = text(input.name(), 160, "Nome do modelo");
+        String fullText = contractText(input.fullText());
         try {
             long id = insert("""
                 INSERT INTO commerce_contract_templates
-                    (name,description,modality,royalty_method,royalty_percent,
-                     royalty_fixed_amount,created_by_user_id)
-                VALUES (?,?,?,?,?,?,?)
-                """, name, optional(input.description(), 5000), modality, method,
-                percentage, fixed, actor.getId());
+                    (name,description,full_text,modality,royalty_method,
+                     royalty_percent,royalty_fixed_amount,created_by_user_id)
+                VALUES (?,?,?,?,?,?,?,?)
+                """, name, optional(input.description(), 5000), fullText,modality,
+                method,percentage,fixed,actor.getId());
             audit(actor, "CONTRACT_TEMPLATE", id, "CREATED");
             return new Created(id);
         } catch (DataIntegrityViolationException ex) {
@@ -351,73 +351,6 @@ public class CommerceCatalogService {
     }
 
     @Transactional
-    public Created signContract(Authentication auth, long artworkId, long templateId,
-                                LocalDate effectiveFrom, LocalDate effectiveUntil,
-                                BigDecimal oneTimeAmount, MultipartFile pdf) {
-        User actor=authorization.require(auth,PlatformPermission.CONTRACTS_MANAGE).user();
-        lock("commerce_artworks",artworkId,"Arte");
-        String artworkStatus=jdbc.queryForObject(
-            "SELECT status FROM commerce_artworks WHERE id=?",String.class,artworkId);
-        if("ARCHIVED".equals(artworkStatus)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                "Obra arquivada: reative antes de registrar novo contrato");
-        }
-        if (effectiveFrom==null || (effectiveUntil!=null && effectiveUntil.isBefore(effectiveFrom))) {
-            throw invalid("Informe a vigência correta do contrato");
-        }
-        BigDecimal oneTime=money(oneTimeAmount,"Pagamento único");
-        List<Map<String,Object>> active=jdbc.queryForList("""
-            SELECT id FROM commerce_artwork_contracts
-             WHERE artwork_id=? AND status='ACTIVE' LIMIT 1
-            """,artworkId);
-        if (!active.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                "Esta arte já tem contrato ativo. Encerre-o antes de cadastrar outro.");
-        }
-        List<Map<String,Object>> templates=jdbc.queryForList("""
-            SELECT modality,royalty_method,royalty_percent,royalty_fixed_amount
-              FROM commerce_contract_templates WHERE id=? AND active=1
-            """,templateId);
-        if (templates.isEmpty()) {
-            throw notFound("Modelo de contrato ativo");
-        }
-        Map<String,Object> template=templates.get(0);
-        Integer artistId=jdbc.queryForObject("""
-            SELECT artist_user_id FROM commerce_artworks WHERE id=?
-            """,Integer.class,artworkId);
-        var stored=documents.upload(artworkId,pdf);
-        try {
-            long id=insert("""
-                INSERT INTO commerce_artwork_contracts
-                    (artwork_id,template_id,artist_user_id,signed_artist_user_id,
-                     modality_snapshot,royalty_method_snapshot,royalty_percent_snapshot,
-                     royalty_fixed_snapshot,one_time_amount,effective_from,effective_until,
-                     signed_storage_key,signed_sha256,signed_bytes,created_by_user_id)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,artworkId,templateId,artistId,artistId,template.get("modality"),
-                template.get("royalty_method"),template.get("royalty_percent"),
-                template.get("royalty_fixed_amount"),oneTime,effectiveFrom,effectiveUntil,
-                stored.key(),stored.sha256(),stored.sizeBytes(),actor.getId());
-            jdbc.update("""
-                UPDATE commerce_artworks SET status='ACTIVE'
-                 WHERE id=? AND status='DRAFT'
-                """,artworkId);
-            audit(actor,"ARTWORK_CONTRACT",id,"SIGNED");
-            return new Created(id);
-        } catch (RuntimeException ex) {
-            try {
-                documents.delete(artworkId,stored.key());
-            } catch (RuntimeException cleanup) {
-                ex.addSuppressed(cleanup);
-            }
-            if (ex instanceof DataIntegrityViolationException) {
-                throw conflict("Esta arte já tem contrato ativo ou existe conflito nos dados",ex);
-            }
-            throw ex;
-        }
-    }
-
-    @Transactional
     public void terminateContract(Authentication auth,long artworkId,long contractId) {
         User actor=authorization.require(auth,PlatformPermission.CONTRACTS_MANAGE).user();
         lock("commerce_artworks",artworkId,"Arte");
@@ -475,6 +408,13 @@ public class CommerceCatalogService {
         if (id==null || id.longValue()<1 ||
             jdbc.queryForObject("SELECT COUNT(*) FROM "+table+" WHERE id=? AND active=1",
                 Integer.class,id)==0) throw notFound(label+" ativo");
+    }
+
+    private String contractText(String body) {
+        if (body == null || body.isBlank() || body.length() > 60000) {
+            throw invalid("Preencha as cláusulas, termos e concessões (até 60.000 caracteres)");
+        }
+        return body.replace("\r\n","\n").trim();
     }
 
     private String requireCode(String code,Set<String> allowed,String label) {

@@ -7,7 +7,6 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
-import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -22,10 +21,8 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.multipart.MultipartFile;
 
 /** Commercial catalog; deliberately outside /communities/{id}. */
 @RestController
@@ -118,19 +115,6 @@ public class CommerceCatalogController {
     @GetMapping("/artworks/{artworkId}/contracts")
     public List<Map<String,Object>> contracts(Authentication auth,@PathVariable long artworkId) {
         return catalog.contracts(auth,artworkId);
-    }
-
-    @PostMapping(path="/artworks/{artworkId}/contracts",consumes=MediaType.MULTIPART_FORM_DATA_VALUE)
-    @ResponseStatus(HttpStatus.CREATED)
-    public Created signContract(Authentication auth,@PathVariable long artworkId,
-                                @RequestParam long templateId,
-                                @RequestParam @DateTimeFormat(iso=DateTimeFormat.ISO.DATE) LocalDate effectiveFrom,
-                                @RequestParam(required=false)
-                                @DateTimeFormat(iso=DateTimeFormat.ISO.DATE) LocalDate effectiveUntil,
-                                @RequestParam(defaultValue="0.00") BigDecimal oneTimeAmount,
-                                @RequestPart("file") MultipartFile file) {
-        return catalog.signContract(auth,artworkId,templateId,effectiveFrom,effectiveUntil,
-            oneTimeAmount,file);
     }
 
     @GetMapping(path="/artworks/{artworkId}/contracts/{contractId}/download",
