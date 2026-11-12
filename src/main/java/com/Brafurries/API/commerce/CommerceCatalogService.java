@@ -418,6 +418,38 @@ public class CommerceCatalogService {
         documents.deleteExistingContract(artworkId,(String)rows.get(0).get("signed_storage_key"));
     }
 
+    /**
+     * One-off owner-only cleanup for a test PDF whose contract row was already
+     * deleted manually. Never touch keys that are still tracked in either table.
+     * The exact private key is supplied by the owner; never accept a bucket name.
+     */
+    @Transactional(readOnly = true)
+    public void deleteOrphanedContractPdf(Authentication auth,String key) {
+        authorization.requireOwner(auth);
+        if (key==null || key.length()>512) throw invalid("Chave privada inválida");
+        var match=java.util.regex.Pattern.compile(
+            "^commerce/contracts/([1-9][0-9]*)/[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}\\.pdf$")
+            .matcher(key);
+        if (!match.matches()) throw invalid("A chave deve identificar um PDF privado de contrato");
+        long artworkId;
+        try {
+            artworkId=Long.parseLong(match.group(1));
+        } catch(NumberFormatException ex) {
+            throw invalid("Identificador da arte inválido");
+        }
+        Integer agreements=jdbc.queryForObject("""
+            SELECT COUNT(*) FROM commerce_artwork_contracts WHERE signed_storage_key=?
+            """,Integer.class,key);
+        Integer preparations=jdbc.queryForObject("""
+            SELECT COUNT(*) FROM commerce_contract_preparations WHERE generated_storage_key=?
+            """,Integer.class,key);
+        if ((agreements!=null && agreements>0) ||
+            (preparations!=null && preparations>0)) {
+            throw conflict("O PDF ainda está vinculado a um contrato ou minuta",null);
+        }
+        documents.deleteExistingContract(artworkId,key);
+    }
+
     @Transactional(readOnly = true)
     public byte[] downloadContract(Authentication auth,long artworkId,long contractId) {
         authorization.require(auth,PlatformPermission.CONTRACTS_MANAGE);
