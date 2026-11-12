@@ -113,6 +113,36 @@ public class CommercePrivateDocumentStorage {
         }
     }
 
+    /**
+     * Owner-only orphan cleanup. Check that the exact object exists, remove it,
+     * and verify R2 no longer serves it. This does not modify the SQL database.
+     */
+    public void deleteOrphanedDocument(long artworkId,String key) {
+        if (!validKey(artworkId,key)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                "Chave do PDF privado inválida");
+        }
+        requireConfiguration();
+        try (S3Client client = createClient()) {
+            client.headObject(HeadObjectRequest.builder().bucket(bucket).key(key).build());
+            client.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(key).build());
+            try {
+                client.headObject(HeadObjectRequest.builder().bucket(bucket).key(key).build());
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "R2 ainda apresenta o documento após exclusão");
+            } catch (S3Exception confirmedMissing) {
+                if (confirmedMissing.statusCode()!=404) throw confirmedMissing;
+            }
+        } catch (S3Exception ex) {
+            if (ex.statusCode()==404) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "O PDF privado informado já não existe no R2",ex);
+            }
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                "Falha ao verificar ou excluir PDF privado no R2",ex);
+        }
+    }
+
     /** Owner-only discard: an unknown key must not silently be treated as deleted. */
     public void deleteExistingContract(long artworkId, String key) {
         if (!validKey(artworkId, key)) {
