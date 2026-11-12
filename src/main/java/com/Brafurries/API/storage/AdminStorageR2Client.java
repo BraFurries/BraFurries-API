@@ -46,16 +46,21 @@ public class AdminStorageR2Client {
         this.privateSecretKey=privateSecretKey;
     }
 
-    public record Page(List<S3Object> objects,String nextCursor,boolean truncated) {}
+    public record Page(List<S3Object> objects,List<String> folders,String nextCursor,boolean truncated) {}
 
     public Page list(AdminStorageService.Scope scope,String prefix,String cursor,int limit) {
         String bucket=bucket(scope);
         try (S3Client client=client(scope)) {
+            // R2 uses a flat namespace: the S3 delimiter produces virtual
+            // folders without changing or moving any existing object keys.
             var request=ListObjectsV2Request.builder().bucket(bucket).prefix(prefix)
-                .continuationToken(cursor).maxKeys(limit).build();
+                .delimiter("/").continuationToken(cursor).maxKeys(limit).build();
             var response=client.listObjectsV2(request);
             boolean truncated=Boolean.TRUE.equals(response.isTruncated());
-            return new Page(response.contents(),truncated?response.nextContinuationToken():null,truncated);
+            List<String> folders=response.commonPrefixes().stream()
+                .map(p -> p.prefix()).toList();
+            return new Page(response.contents(),folders,
+                truncated?response.nextContinuationToken():null,truncated);
         } catch (S3Exception | SdkClientException ex) {
             throw failure("Não foi possível listar o R2",ex);
         }
