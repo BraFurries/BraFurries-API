@@ -1,6 +1,5 @@
 package com.Brafurries.API.storage;
 
-import java.util.Objects;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,13 +31,17 @@ public class AdminStorageController {
         return service.list(auth,bucket,prefix,cursor,limit);
     }
 
-    @GetMapping("/objects/inspect")
+    public record InspectRequest(AdminStorageService.Scope bucket,String key) {}
+
+    // Keep exact private object keys out of query strings, proxy access logs,
+    // referrer headers and browser navigation history.
+    @PostMapping("/objects/inspect")
     public AdminStorageService.ObjectView inspect(
-        Authentication auth,
-        @RequestParam AdminStorageService.Scope bucket,
-        @RequestParam String key
+        Authentication auth,@RequestBody InspectRequest input
     ) {
-        return service.inspect(auth,bucket,key);
+        if(input==null) throw new org.springframework.web.server.ResponseStatusException(
+            HttpStatus.BAD_REQUEST,"Informe o objeto");
+        return service.inspect(auth,input.bucket(),input.key());
     }
 
     @PostMapping("/objects/delete-orphan")
