@@ -443,8 +443,9 @@ public class CommerceCatalogService {
         Integer preparations=jdbc.queryForObject("""
             SELECT COUNT(*) FROM commerce_contract_preparations WHERE generated_storage_key=?
             """,Integer.class,key);
-        if ((agreements!=null && agreements>0) ||
-            (preparations!=null && preparations>0)) {
+        // Fail closed unless both reference checks explicitly return zero.
+        if (!Integer.valueOf(0).equals(agreements) ||
+            !Integer.valueOf(0).equals(preparations)) {
             throw conflict("O PDF ainda está vinculado a um contrato ou minuta",null);
         }
         documents.deleteOrphanedDocument(artworkId,key);
