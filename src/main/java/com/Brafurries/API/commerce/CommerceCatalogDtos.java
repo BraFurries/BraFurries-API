@@ -21,8 +21,18 @@ public final class CommerceCatalogDtos {
         @NotBlank String modality,
         @NotBlank String royaltyMethod,
         @DecimalMin("0.0") @DecimalMax("100.0") BigDecimal royaltyPercent,
-        @DecimalMin("0.0") BigDecimal royaltyFixedAmount
-    ) {}
+        @DecimalMin("0.0") BigDecimal royaltyFixedAmount,
+        @NotBlank @Size(max = 60000) String fullText
+    ) {
+        // Source-level compatibility for historical tests/clients constructing
+        // this Java record directly. New HTTP writes require the full text.
+        public CreateTemplate(String name, String description, String modality,
+                String royaltyMethod, BigDecimal royaltyPercent,
+                BigDecimal royaltyFixedAmount) {
+            this(name,description,modality,royaltyMethod,royaltyPercent,
+                royaltyFixedAmount,null);
+        }
+    }
 
     public record CreateArtwork(
         @NotBlank @Size(max = 180) String title,
