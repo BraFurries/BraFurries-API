@@ -42,6 +42,24 @@ class CommerceContractPdfServiceTest {
     }
 
     @Test
+    void printsLegalRepresentativesAtBothSignatureLines() throws Exception {
+        var draft = draft("As partes assinam mediante seus representantes.");
+        var withRepresentatives = new CommerceContractPdfService.ContractDocument(
+            draft.title(), draft.artworkTitle(), draft.body(),
+            draft.contractorName(), draft.contractorDocument(), draft.contractorAddress(),
+            "Representante A", draft.artistName(), draft.artistDocument(),
+            draft.artistAddress(), "Representante B", draft.modality(),
+            draft.royaltyMethod(), draft.royaltyPercent(), draft.royaltyFixed(),
+            draft.oneTimeAmount(), draft.effectiveFrom(), draft.effectiveUntil(),
+            draft.preparedOn());
+        try (var document=Loader.loadPDF(service.render(withRepresentatives))) {
+            String text = new PDFTextStripper().getText(document);
+            assertTrue(text.contains("por Representante A"),text);
+            assertTrue(text.contains("por Representante B"),text);
+        }
+    }
+
+    @Test
     void paginatesLongContractWithoutClippingSignatureBlocks() throws Exception {
         String text=("O uso será permitido nos termos deste contrato.\n").repeat(240);
         byte[] pdf=service.render(draft(text));
