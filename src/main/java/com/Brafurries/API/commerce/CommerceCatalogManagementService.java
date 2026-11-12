@@ -219,14 +219,18 @@ public class CommerceCatalogManagementService {
                 rate==null && fixed!=null))) {
             throw invalid("Confira a modalidade e os valores da regra de royalties");
         }
+        String fullText = input.fullText();
+        if (fullText == null || fullText.isBlank() || fullText.length()>60000) {
+            throw invalid("Preencha as cláusulas, termos e concessões (até 60.000 caracteres)");
+        }
         try {
             jdbc.update("""
                 UPDATE commerce_contract_templates
-                   SET name=?,description=?,modality=?,royalty_method=?,
+                   SET name=?,description=?,full_text=?,modality=?,royalty_method=?,
                        royalty_percent=?,royalty_fixed_amount=?
                  WHERE id=?
                 """,text(input.name(),160,"Modelo"),optional(input.description(),5000),
-                    modality,method,rate,fixed,id);
+                    fullText.replace("\r\n","\n").trim(),modality,method,rate,fixed,id);
         } catch(DataIntegrityViolationException ex) {
             throw conflict("Já existe um modelo de contrato com esse nome");
         }
