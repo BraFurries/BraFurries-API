@@ -95,7 +95,9 @@ public class AdminStorageService {
             head.lastModified(),head.contentType(),head.eTag(),references);
     }
 
-    @Transactional(readOnly=true)
+    // Deliberately not @Transactional: in MariaDB REPEATABLE_READ a long-lived
+    // read snapshot opened before R2 HEAD could miss newly committed links.
+    // Each reference query must use a fresh database view before DELETE.
     public void deleteOrphan(Authentication auth,DeleteRequest input) {
         authorization.requireOwner(auth);
         if(input==null||input.bucket()!=Scope.PRIVATE) {
