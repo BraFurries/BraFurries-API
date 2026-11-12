@@ -70,6 +70,28 @@ class CommerceCatalogServiceTest {
     }
 
     @Test
+    void listsExistingContractTemplatesWithNullFullTextUsingSafeMariaDbAlias() {
+        // MariaDB reserves FULLTEXT (case-insensitive); an unquoted 'AS fullText'
+        // breaks the entire listing after the additive migration.
+        Map<String,Object> legacy = new java.util.HashMap<>();
+        legacy.put("id",1L);
+        legacy.put("name","Modelo legado");
+        legacy.put("fullText",null);
+        when(jdbc.queryForList(anyString())).thenReturn(List.of(legacy));
+
+        var templates = catalog.templates(auth);
+
+        assertEquals(1,templates.size());
+        assertEquals("Modelo legado",templates.get(0).get("name"));
+        assertNull(templates.get(0).get("fullText"));
+        verify(authorization).require(auth,PlatformPermission.CONTRACTS_MANAGE);
+        verify(jdbc).queryForList(argThat(sql ->
+            sql.contains("full_text AS `fullText`") &&
+            sql.contains("commerce_contract_templates") &&
+            !sql.contains("WHERE full_text IS NOT NULL")));
+    }
+
+    @Test
     void aRoyaltyTemplateMustSpecifyMatchingRateOrFixedAmount() {
         assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
             ()->catalog.createTemplate(auth,new CreateTemplate(
