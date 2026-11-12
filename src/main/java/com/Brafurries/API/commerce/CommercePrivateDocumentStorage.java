@@ -113,6 +113,15 @@ public class CommercePrivateDocumentStorage {
         }
     }
 
+    /** Owner-only discard: an unknown key must not silently be treated as deleted. */
+    public void deleteExistingContract(long artworkId, String key) {
+        if (!validKey(artworkId, key)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Chave do documento privado incompatível com a arte");
+        }
+        delete(artworkId, key);
+    }
+
     /** Compensating cleanup if the insertion fails after upload. */
     public void delete(long artworkId, String key) {
         if (!validKey(artworkId, key)) return;
