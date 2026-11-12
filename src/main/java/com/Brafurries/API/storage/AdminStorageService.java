@@ -5,6 +5,8 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -31,13 +33,14 @@ public class AdminStorageService {
     public enum ReferenceStatus { LINKED, ORPHAN, RECENT, UNVERIFIED }
     public enum Category { CONTRACT_DOCUMENT, ARTWORK_FILE, OTHER_PRIVATE, PUBLIC_MEDIA }
 
+    public record ReferenceView(String source,long recordId,long artworkId,String status) {}
     public record ObjectView(
         String key,long sizeBytes,Instant lastModified,String contentType,
         String etag,Category category,ReferenceStatus referenceStatus,
-        String referenceLabel,boolean deletable
+        String referenceLabel,boolean deletable,List<ReferenceView> references
     ) {}
     public record PageResult(
-        Scope bucket,String prefix,List<ObjectView> objects,
+        Scope bucket,String prefix,List<String> folders,List<ObjectView> objects,
         String nextCursor,boolean truncated,long pageBytes
     ) {}
     public record DeleteRequest(Scope bucket,String key,String etag) {}
@@ -73,15 +76,26 @@ public class AdminStorageService {
         if(limit<1||limit>100) throw invalid("Limite deve estar entre 1 e 100");
         var page=r2.list(scope,normalizedPrefix,cursor,limit);
         var items=page.objects()==null?List.<S3Object>of():page.objects();
-        var referenced=referencesFor(scope,items.stream().map(S3Object::key).toList());
+        // S3 zero-byte "folder objects" are only markers; use commonPrefixes
+        // for navigation, never render them as duplicate files.
+        Set<String> folders=new LinkedHashSet<>(
+            page.folders()==null?List.of():page.folders());
+        List<S3Object> realFiles=new ArrayList<>();
+        for(S3Object item:items) {
+            if(item.key().endsWith("/") && Long.valueOf(0L).equals(item.size())) {
+                if(!item.key().equals(normalizedPrefix)) folders.add(item.key());
+            } else realFiles.add(item);
+        }
+        var referenced=referencesFor(scope,realFiles.stream().map(S3Object::key).toList());
         List<ObjectView> views=new ArrayList<>();
         long bytes=0;
-        for(S3Object item:items) {
+        for(S3Object item:realFiles) {
             views.add(view(scope,item.key(),item.size()==null?0:item.size(),
                 item.lastModified(),null,item.eTag(),referenced));
             bytes+=item.size()==null?0:item.size();
         }
-        return new PageResult(scope,normalizedPrefix,views,page.nextCursor(),page.truncated(),bytes);
+        return new PageResult(scope,normalizedPrefix,folders.stream().sorted().toList(),
+            views,page.nextCursor(),page.truncated(),bytes);
     }
 
     @Transactional(readOnly=true)
@@ -91,8 +105,13 @@ public class AdminStorageService {
         validKey(key);
         HeadObjectResponse head=r2.head(scope,key);
         Set<String> references=referencesFor(scope,List.of(key));
-        return view(scope,key,head.contentLength()==null?0:head.contentLength(),
+        ObjectView object=view(scope,key,head.contentLength()==null?0:head.contentLength(),
             head.lastModified(),head.contentType(),head.eTag(),references);
+        if(object.referenceStatus()!=ReferenceStatus.LINKED) return object;
+        return new ObjectView(object.key(),object.sizeBytes(),object.lastModified(),
+            object.contentType(),object.etag(),object.category(),
+            object.referenceStatus(),object.referenceLabel(),object.deletable(),
+            referenceDetails(key));
     }
 
     // Deliberately not @Transactional: in MariaDB REPEATABLE_READ a long-lived
@@ -144,7 +163,7 @@ public class AdminStorageService {
             case PUBLIC_MEDIA -> "Possíveis referências externas ou legadas";
         };
         return new ObjectView(key,size,changed,contentType,etag,category,status,
-            label,status==ReferenceStatus.ORPHAN&&etag!=null&&!etag.isBlank());
+            label,status==ReferenceStatus.ORPHAN&&etag!=null&&!etag.isBlank(),List.of());
     }
 
     private Set<String> referencesFor(Scope scope,List<String> keys) {
@@ -166,6 +185,31 @@ public class AdminStorageService {
                 String.class,args));
         }
         return linked;
+    }
+
+    /** Explain exactly which rows block a destructive operation. These are
+     * platform-global commerce identifiers only; no user/artist PII returned.
+     */
+    private List<ReferenceView> referenceDetails(String key) {
+        List<ReferenceView> found=new ArrayList<>();
+        for(String[] source:new String[][] {
+            {"CONTRACT", "commerce_artwork_contracts", "signed_storage_key"},
+            {"PREPARATION", "commerce_contract_preparations", "generated_storage_key"},
+            {"ARTWORK_FILE", "commerce_artwork_files", "storage_key"}
+        }) {
+            // All SQL identifiers above are constants from this class, never
+            // supplied by a browser or a dynamic request parameter.
+            List<Map<String,Object>> rows=jdbc.queryForList(
+                "SELECT id,artwork_id,status FROM "+source[1]+
+                " WHERE "+source[2]+"=? ORDER BY id",key);
+            for(Map<String,Object> row:rows) {
+                found.add(new ReferenceView(source[0],
+                    ((Number)row.get("id")).longValue(),
+                    ((Number)row.get("artwork_id")).longValue(),
+                    String.valueOf(row.get("status"))));
+            }
+        }
+        return found;
     }
 
     private Category category(Scope scope,String key) {
