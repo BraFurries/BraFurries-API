@@ -57,7 +57,7 @@ public class CommerceCatalogService {
     public List<Map<String,Object>> templates(Authentication auth) {
         authorization.require(auth, PlatformPermission.CONTRACTS_MANAGE);
         return jdbc.queryForList("""
-            SELECT id,name,description,full_text AS fullText,modality,royalty_method AS royaltyMethod,
+            SELECT id,name,description,full_text AS `fullText`,modality,royalty_method AS royaltyMethod,
                    royalty_percent AS royaltyPercent,royalty_fixed_amount AS royaltyFixedAmount,
                    active,created_at AS createdAt
               FROM commerce_contract_templates ORDER BY id DESC LIMIT 500
