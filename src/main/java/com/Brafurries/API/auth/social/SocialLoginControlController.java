@@ -54,6 +54,13 @@ public class SocialLoginControlController {
         return controls.enableGoogleOAuth(authentication, request.ticket(), request.password());
     }
 
+    @PostMapping("/google/connect-oauth")
+    public SocialLoginControlService.ChangeResult connectGoogleWithOAuth(
+        Authentication authentication, @Valid @RequestBody GoogleEnableOAuthRequest request
+    ) {
+        return controls.connectGoogleOAuth(authentication, request.ticket(), request.password());
+    }
+
     @PostMapping("/discord/enable")
     public SocialLoginControlService.ChangeResult enableDiscord(
         Authentication auth, @Valid @RequestBody DiscordEnableRequest request
