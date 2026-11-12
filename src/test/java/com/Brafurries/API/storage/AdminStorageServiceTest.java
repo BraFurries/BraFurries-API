@@ -92,8 +92,10 @@ class AdminStorageServiceTest {
     @Test void inspectionExplainsWhichExistingRecordBlocksOrphanDeletion() {
         when(r2.head(AdminStorageService.Scope.PRIVATE,CONTRACT))
             .thenReturn(head(OLD,"\"etag\""));
-        when(jdbc.queryForList(contains("signed_storage_key FROM commerce_artwork_contracts"),
-            eq(String.class),any(Object[].class))).thenReturn(List.of(CONTRACT));
+        when(jdbc.queryForList(anyString(),eq(String.class),any(Object[].class)))
+            .thenAnswer(invocation -> ((String)invocation.getArgument(0))
+                .contains("signed_storage_key FROM commerce_artwork_contracts")
+                    ? List.of(CONTRACT) : List.of());
         when(jdbc.queryForList(contains("SELECT id,artwork_id,status FROM commerce_artwork_contracts"),
             eq(CONTRACT))).thenReturn(List.of(
                 java.util.Map.of("id",17L,"artwork_id",12L,"status","ACTIVE")));
