@@ -125,6 +125,27 @@ public class CommercePrivateDocumentStorage {
         }
     }
 
+    /** Destructive owner workflow: confirm the generated PDF is gone after deletion. */
+    public void deleteConfirmedGenerated(long artworkId,String key) {
+        if (!validKey(artworkId,key)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Chave privada do PDF gerado inválida");
+        }
+        delete(artworkId,key);
+        try (S3Client client=createClient()) {
+            try {
+                client.headObject(HeadObjectRequest.builder().bucket(bucket).key(key).build());
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "O R2 ainda apresenta o PDF após a exclusão");
+            } catch (S3Exception ex) {
+                if (ex.statusCode()!=404) {
+                    throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                        "Não foi possível confirmar a exclusão do PDF no R2",ex);
+                }
+            }
+        }
+    }
+
     byte[] verifiedPdf(MultipartFile file) {
         if (file == null || file.isEmpty() || file.getSize() > MAX_BYTES) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
