@@ -60,7 +60,7 @@ class AdminStorageServiceTest {
         when(r2.list(AdminStorageService.Scope.PRIVATE,"commerce/",null,50))
             .thenReturn(new AdminStorageR2Client.Page(
                 List.of(S3Object.builder().key(CONTRACT).size(123L)
-                    .eTag("\"abc\"").lastModified(OLD).build()),"opaque-token",true));
+                    .eTag("\"abc\"").lastModified(OLD).build()),List.of("commerce/artworks/"),"opaque-token",true));
         var page=service.list(auth,AdminStorageService.Scope.PRIVATE,"commerce/",null,50);
         assertEquals("opaque-token",page.nextCursor());
         assertTrue(page.truncated());
@@ -71,6 +71,40 @@ class AdminStorageServiceTest {
         assertTrue(page.objects().get(0).deletable());
         assertEquals(AdminStorageService.Scope.PRIVATE,page.bucket());
         verify(jdbc,times(3)).queryForList(anyString(),eq(String.class),any(Object[].class));
+    }
+
+    @Test void virtualDirectoriesAndZeroByteMarkersDoNotBecomeDocuments() {
+        String marker="eventos/";
+        when(r2.list(AdminStorageService.Scope.PUBLIC,"",null,50))
+            .thenReturn(new AdminStorageR2Client.Page(
+                List.of(S3Object.builder().key(marker).size(0L).build(),
+                    S3Object.builder().key("readme.txt").size(25L)
+                        .lastModified(OLD).build()),
+                List.of(marker,"fotos de perfil/"),null,false));
+        var page=service.list(auth,AdminStorageService.Scope.PUBLIC,"",null,50);
+        assertEquals(List.of("eventos/","fotos de perfil/"),page.folders());
+        assertEquals(1,page.objects().size());
+        assertEquals("readme.txt",page.objects().get(0).key());
+        assertEquals(25L,page.pageBytes());
+        verifyNoInteractions(jdbc);
+    }
+
+    @Test void inspectionExplainsWhichExistingRecordBlocksOrphanDeletion() {
+        when(r2.head(AdminStorageService.Scope.PRIVATE,CONTRACT))
+            .thenReturn(head(OLD,"\"etag\""));
+        when(jdbc.queryForList(contains("signed_storage_key FROM commerce_artwork_contracts"),
+            eq(String.class),any(Object[].class))).thenReturn(List.of(CONTRACT));
+        when(jdbc.queryForList(contains("SELECT id,artwork_id,status FROM commerce_artwork_contracts"),
+            eq(CONTRACT))).thenReturn(List.of(
+                java.util.Map.of("id",17L,"artwork_id",12L,"status","ACTIVE")));
+        var inspected=service.inspect(auth,AdminStorageService.Scope.PRIVATE,CONTRACT);
+        assertEquals(AdminStorageService.ReferenceStatus.LINKED,inspected.referenceStatus());
+        assertFalse(inspected.deletable());
+        assertEquals(1,inspected.references().size());
+        assertEquals("CONTRACT",inspected.references().get(0).source());
+        assertEquals(17L,inspected.references().get(0).recordId());
+        assertEquals(12L,inspected.references().get(0).artworkId());
+        assertEquals("ACTIVE",inspected.references().get(0).status());
     }
 
     @Test void unknownPrivateAndAllPublicObjectsAreNeverDeletable() {
