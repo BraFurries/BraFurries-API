@@ -131,6 +131,13 @@ public class CommerceCatalogController {
             .body(bytes);
     }
 
+    @DeleteMapping("/artworks/{artworkId}/contracts/{contractId}/unused-test")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void discardUnusedTestContract(Authentication auth,@PathVariable long artworkId,
+                                           @PathVariable long contractId) {
+        catalog.discardUnusedTestContract(auth,artworkId,contractId);
+    }
+
     @PostMapping("/artworks/{artworkId}/contracts/{contractId}/terminate")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void terminate(Authentication auth,@PathVariable long artworkId,
