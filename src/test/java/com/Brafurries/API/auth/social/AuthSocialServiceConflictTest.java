@@ -89,10 +89,17 @@ class AuthSocialServiceConflictTest {
         verify(verifiedIdentities, never()).bindProvenSubject(any(), any(), any(), any());
     }
 
+    private void unlinkedGoogle(Map<String, Object> attrs) {
+        principal("google", attrs);
+        // Mockito's default Boolean is false, which represents an explicitly
+        // disabled login. These scenarios have no prior Google identity.
+        when(verifiedIdentities.loginAllowed("google", "g-sub")).thenReturn(true);
+    }
+
     @Test
     void googleThirdPartyEmailCannotClaimAnExistingPasswordAccount() {
         User local = verifiedLocalUser(21, "person@example.com");
-        principal("google", Map.of(
+        unlinkedGoogle(Map.of(
             "sub", "g-sub", "email", "person@example.com",
             "email_verified", true, "name", "Person"));
         when(users.findByEmailForUpdate("person@example.com")).thenReturn(Optional.of(local));
@@ -113,7 +120,7 @@ class AuthSocialServiceConflictTest {
     }
 
     private void assertAutomaticallyLinkedGoogleAccount(User local, Map<String, Object> claims) {
-        principal("google", claims);
+        unlinkedGoogle(claims);
         when(users.findByEmailForUpdate(local.getEmail())).thenReturn(Optional.of(local));
         when(roles.findRoleNamesByUserId(local.getId())).thenReturn(List.of("member"));
         when(permissions.findPermissionNamesByUserId(local.getId())).thenReturn(List.of());
@@ -150,7 +157,7 @@ class AuthSocialServiceConflictTest {
     void missingLocalEmailVerificationNeverTriggersAutomaticLink() {
         User legacy = user(23, "legacy@gmail.com");
         legacy.setPasswordHash("legacy-hash");
-        principal("google", Map.of(
+        unlinkedGoogle(Map.of(
             "sub", "g-sub", "email", "legacy@gmail.com", "email_verified", true));
         when(users.findByEmailForUpdate("legacy@gmail.com")).thenReturn(Optional.of(legacy));
 
@@ -164,7 +171,7 @@ class AuthSocialServiceConflictTest {
     @Test
     void pendingLocalEmailConfirmationAlsoBlocksAutoLink() {
         User local = verifiedLocalUser(24, "person@gmail.com");
-        principal("google", Map.of(
+        unlinkedGoogle(Map.of(
             "sub", "g-sub", "email", "person@gmail.com", "email_verified", true));
         when(users.findByEmailForUpdate(local.getEmail())).thenReturn(Optional.of(local));
         when(userTokens.existsByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(
@@ -177,7 +184,7 @@ class AuthSocialServiceConflictTest {
     @Test
     void WorkspaceClaimForOtherDomainDoesNotAuthorizeAutoLink() {
         User local = verifiedLocalUser(25, "person@outsider.example");
-        principal("google", Map.of(
+        unlinkedGoogle(Map.of(
             "sub", "g-sub", "email", "person@outsider.example",
             "email_verified", true, "hd", "workspace.example"));
         when(users.findByEmailForUpdate(local.getEmail())).thenReturn(Optional.of(local));
@@ -201,7 +208,7 @@ class AuthSocialServiceConflictTest {
     @Test
     void alternateGoogleSubjectCannotReplaceAnExistingGoogleIdentity() {
         User local = verifiedLocalUser(26, "person@gmail.com");
-        principal("google", Map.of(
+        unlinkedGoogle(Map.of(
             "sub", "g-sub", "email", "person@gmail.com", "email_verified", true));
         when(users.findByEmailForUpdate(local.getEmail())).thenReturn(Optional.of(local));
         when(verifiedIdentities.hasDifferentSubject(local, "google", "g-sub")).thenReturn(true);
@@ -215,7 +222,7 @@ class AuthSocialServiceConflictTest {
     @Test
     void raceWithDisabledGoogleIdentityCannotCreateSession() {
         User local = verifiedLocalUser(27, "person@gmail.com");
-        principal("google", Map.of(
+        unlinkedGoogle(Map.of(
             "sub", "g-sub", "email", "person@gmail.com", "email_verified", true));
         when(users.findByEmailForUpdate(local.getEmail())).thenReturn(Optional.of(local));
         when(verifiedIdentities.loginDisabledAfterUserLock("google", "g-sub")).thenReturn(true);
@@ -229,7 +236,7 @@ class AuthSocialServiceConflictTest {
 
     @Test
     void unverifiedGoogleEmailDoesNotSearchForAUserToAutoLink() {
-        principal("google", Map.of(
+        unlinkedGoogle(Map.of(
             "sub", "g-sub", "email", "person@gmail.com", "email_verified", false));
         when(onboarding.create(eq("google"), eq("g-sub"), isNull(), anyString()))
             .thenReturn(new SocialOnboardingChallengeService.Created("secure-ticket", "google"));
