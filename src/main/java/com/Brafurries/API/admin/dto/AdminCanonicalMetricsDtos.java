@@ -10,8 +10,8 @@ public final class AdminCanonicalMetricsDtos {
         String date,
         Long brafurriesMembers,
         Long coddyReach,
-        long reconciledServers,
-        long activeServers,
+        Long reconciledServers,
+        Long activeServers,
         String sampledAt
     ) {}
 
@@ -25,7 +25,8 @@ public final class AdminCanonicalMetricsDtos {
         Long coddyReachDelta,
         long reconciledServers,
         long activeServers,
-        long commandsExecuted,
+        Long commandsExecuted,
+        boolean commandCoverageComplete,
         Long previousCommandsExecuted,
         Double commandsGrowthPercent
     ) {}
@@ -36,6 +37,7 @@ public final class AdminCanonicalMetricsDtos {
         String endDate,
         String commandTrackingSince,
         String snapshotTrackingSince,
+        String lastSnapshotAt,
         Summary summary,
         List<DailySnapshot> dailySnapshots,
         List<CommandDay> commandUsage,
