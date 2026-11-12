@@ -167,6 +167,10 @@ public class AuthSocialService {
             return new ExistingUserLogin(issueLoginResponse(user));
         }
 
+        Optional<User> verifiedEmailOwner = autoLinkGoogleToVerifiedEmailOwner(profile);
+        if (verifiedEmailOwner.isPresent()) {
+            return new ExistingUserLogin(issueLoginResponse(verifiedEmailOwner.get()));
+        }
         return new RegistrationRequired(createPendingRegistration(profile));
     }
 
@@ -190,7 +194,7 @@ public class AuthSocialService {
         }
         ProviderProfile profile = new ProviderProfile(proof.getProvider(),
             proof.getProviderSubject(), proof.getSuggestedEmail(),
-            request.displayName(), null);
+            request.displayName(), null, false);
         Optional<User> owner = findUserByProviderId(profile);
         // The optional provider e-mail NEVER claims another website user.
         // A pre-existing provider-owned legacy account may replace its old,
@@ -242,10 +246,45 @@ public class AuthSocialService {
 
     private LoginResponse socialLogin(ProviderProfile profile) {
         User user = findExistingSocialUser(profile)
+            .or(() -> autoLinkGoogleToVerifiedEmailOwner(profile))
             .orElseThrow(() -> new BadCredentialsException("SOCIAL_ONBOARDING_REQUIRED"));
         if (needsOnboarding(user)) throw new BadCredentialsException("SOCIAL_ONBOARDING_REQUIRED");
         updateExistingSocialUser(user, profile);
         return issueLoginResponse(user);
+    }
+
+    /**
+     * The Google subject remains authoritative for subsequent logins. A previously
+     * unlinked Google account may claim an existing local account ONLY when Google
+     * controls the verified mailbox and BraFurries has independently verified that
+     * same address. This does not merge two users or change Community ownership.
+     */
+    private Optional<User> autoLinkGoogleToVerifiedEmailOwner(ProviderProfile profile) {
+        if (!"google".equals(profile.provider()) || profile.email() == null) {
+            return Optional.empty();
+        }
+        // Lock the actual site owner before checking its proof and existing
+        // provider logins. Login-disable and consolidation use the same lock.
+        Optional<User> candidate = userRepository.findByEmailForUpdate(profile.email());
+        if (candidate.isEmpty()) return Optional.empty();
+
+        User owner = candidate.get();
+        if (!profile.authoritativeEmail() || owner.getMergedIntoUser() != null
+            || owner.getEmailVerifiedAt() == null || needsOnboarding(owner)
+            || userTokenRepository.existsByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(
+                owner, UserTokenType.EMAIL_VERIFICATION)
+            || verifiedIdentities.hasDifferentSubject(owner, "google", profile.providerUserId())) {
+            // Do not send a user into duplicate-account registration when
+            // another BraFurries account already owns this e-mail.
+            throw new BadCredentialsException("GOOGLE_ACCOUNT_LINK_REQUIRED");
+        }
+        if (verifiedIdentities.loginDisabledAfterUserLock(
+                "google", profile.providerUserId())) {
+            throw new BadCredentialsException("PROVIDER_LOGIN_DISABLED");
+        }
+        verifiedIdentities.bindProvenSubject(
+            owner, "google", profile.providerUserId(), profile.email());
+        return Optional.of(owner);
     }
 
     private User updateExistingSocialUser(User user, ProviderProfile profile) {
@@ -395,7 +434,8 @@ public class AuthSocialService {
             attributeAsString(attributes, "sub"),
             email,
             displayName,
-            attributeAsString(attributes, "picture")
+            attributeAsString(attributes, "picture"),
+            isGoogleAuthoritativeForEmail(email, attributeAsString(attributes, "hd"))
         );
     }
 
@@ -413,7 +453,8 @@ public class AuthSocialService {
             attributeAsString(attributes, "id"),
             email,
             displayName,
-            discordAvatarUrl(attributeAsString(attributes, "id"), attributeAsString(attributes, "avatar"))
+            discordAvatarUrl(attributeAsString(attributes, "id"), attributeAsString(attributes, "avatar")),
+            false
         );
     }
 
@@ -421,6 +462,21 @@ public class AuthSocialService {
         if (!verified || email == null || email.isBlank() || email.length() > 255
             || !email.contains("@")) return null;
         return email.trim().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Google is an e-mail authority for Gmail and for the domain in its signed
+     * Workspace hd claim. email_verified alone is NOT sufficient for a
+     * third-party mailbox hosted outside Google Workspace.
+     */
+    private boolean isGoogleAuthoritativeForEmail(String verifiedEmail, String hostedDomain) {
+        if (verifiedEmail == null) return false;
+        int separator = verifiedEmail.lastIndexOf('@');
+        if (separator < 1 || separator == verifiedEmail.length() - 1) return false;
+        String emailDomain = verifiedEmail.substring(separator + 1);
+        return "gmail.com".equals(emailDomain) || "googlemail.com".equals(emailDomain)
+            || (hostedDomain != null && !hostedDomain.isBlank()
+                && emailDomain.equalsIgnoreCase(hostedDomain.trim()));
     }
 
     private void linkDiscordAccount(User user, ProviderProfile profile) {
@@ -513,7 +569,8 @@ public class AuthSocialService {
             requestedDisplayName,
             "Usuário"
         );
-        return new ProviderProfile("google", response.subject(), normalizedEmail, displayName, response.picture());
+        return new ProviderProfile("google", response.subject(), normalizedEmail, displayName,
+            response.picture(), isGoogleAuthoritativeForEmail(normalizedEmail, response.hostedDomain()));
     }
 
     private ProviderProfile validateDiscordToken(String providerToken, String requestedEmail, String requestedDisplayName) {
@@ -547,7 +604,8 @@ public class AuthSocialService {
             response.id(),
             normalizedEmail,
             displayName,
-            discordAvatarUrl(response.id(), response.avatar())
+            discordAvatarUrl(response.id(), response.avatar()),
+            false
         );
     }
 
@@ -609,7 +667,8 @@ public class AuthSocialService {
         @JsonProperty("given_name") String givenName,
         String picture,
         @JsonProperty("email_verified") String emailVerified,
-        @JsonProperty("aud") String audience
+        @JsonProperty("aud") String audience,
+        @JsonProperty("hd") String hostedDomain
     ) {
     }
 
@@ -644,7 +703,8 @@ public class AuthSocialService {
         Instant expiresAt
     ) {
         private ProviderProfile toProviderProfile(String selectedDisplayName) {
-            return new ProviderProfile(provider, providerUserId, email, firstNonBlank(selectedDisplayName, displayName), avatarUrl);
+            return new ProviderProfile(provider, providerUserId, email,
+                firstNonBlank(selectedDisplayName, displayName), avatarUrl, false);
         }
 
         private String firstNonBlank(String... values) {
@@ -657,6 +717,7 @@ public class AuthSocialService {
         }
     }
 
-    private record ProviderProfile(String provider, String providerUserId, String email, String displayName, String avatarUrl) {
+    private record ProviderProfile(String provider, String providerUserId, String email,
+                                   String displayName, String avatarUrl, boolean authoritativeEmail) {
     }
 }
