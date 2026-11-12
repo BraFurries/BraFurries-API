@@ -241,6 +241,53 @@ class CommerceCatalogServiceTest {
     }
 
     @Test
+    void orphanPdfCleanupRequiresOwnerBeforeQueryingDocumentReferences() {
+        when(authorization.requireOwner(auth))
+            .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
+        assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
+            ()->catalog.deleteOrphanedContractPdf(auth,
+                "commerce/contracts/12/12345678-1234-1234-1234-123456789abc.pdf"))
+            .getStatusCode());
+        verifyNoInteractions(jdbc,documents);
+    }
+
+    @Test
+    void orphanPdfCleanupRejectsKeysOutsideExactPrivateContractPrefix() {
+        when(authorization.requireOwner(auth)).thenReturn(new User());
+        assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
+            ()->catalog.deleteOrphanedContractPdf(auth,
+                "commerce/artworks/12/12345678-1234-1234-1234-123456789abc.pdf"))
+            .getStatusCode());
+        verifyNoInteractions(jdbc,documents);
+    }
+
+    @Test
+    void orphanPdfCleanupPreservesAnyStillReferencedR2Object() {
+        String key="commerce/contracts/12/12345678-1234-1234-1234-123456789abc.pdf";
+        when(authorization.requireOwner(auth)).thenReturn(new User());
+        when(jdbc.queryForObject(contains("commerce_artwork_contracts"),
+            eq(Integer.class),eq(key))).thenReturn(0);
+        when(jdbc.queryForObject(contains("commerce_contract_preparations"),
+            eq(Integer.class),eq(key))).thenReturn(1);
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->catalog.deleteOrphanedContractPdf(auth,key)).getStatusCode());
+        verifyNoInteractions(documents);
+    }
+
+    @Test
+    void orphanPdfCleanupDeletesOnlyExactUnreferencedObject() {
+        String key="commerce/contracts/12/12345678-1234-1234-1234-123456789abc.pdf";
+        when(authorization.requireOwner(auth)).thenReturn(new User());
+        when(jdbc.queryForObject(contains("commerce_artwork_contracts"),
+            eq(Integer.class),eq(key))).thenReturn(0);
+        when(jdbc.queryForObject(contains("commerce_contract_preparations"),
+            eq(Integer.class),eq(key))).thenReturn(0);
+        catalog.deleteOrphanedContractPdf(auth,key);
+        verify(documents).deleteExistingContract(12L,key);
+        verifyNoMoreInteractions(documents);
+    }
+
+    @Test
     void doesNotDownloadPrivateContractWithoutExplicitPermission() {
         when(authorization.require(auth,PlatformPermission.CONTRACTS_MANAGE))
             .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
