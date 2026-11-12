@@ -54,7 +54,19 @@ public class CommercePrivateDocumentStorage {
     public record StoredDocument(String key, String sha256, long sizeBytes) {}
 
     public StoredDocument upload(long artworkId, MultipartFile file) {
-        byte[] bytes = verifiedPdf(file);
+        return uploadBytes(artworkId, verifiedPdf(file));
+    }
+
+    /** Save the exact unsigned PDF bytes, privately, before exposing a download. */
+    public StoredDocument uploadGenerated(long artworkId, byte[] bytes) {
+        if (!validPdfBytes(bytes)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                "O contrato gerado não é um PDF válido de até 8 MB");
+        }
+        return uploadBytes(artworkId, bytes);
+    }
+
+    private StoredDocument uploadBytes(long artworkId, byte[] bytes) {
         requireConfiguration();
         String key = "commerce/contracts/" + artworkId + "/" + UUID.randomUUID() + ".pdf";
         try (S3Client client = createClient()) {
