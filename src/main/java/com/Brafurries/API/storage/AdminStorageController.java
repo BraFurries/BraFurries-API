@@ -1,6 +1,8 @@
 package com.Brafurries.API.storage;
 
+import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,14 +23,15 @@ public class AdminStorageController {
     }
 
     @GetMapping("/objects")
-    public AdminStorageService.PageResult list(
+    public ResponseEntity<AdminStorageService.PageResult> list(
         Authentication auth,
         @RequestParam AdminStorageService.Scope bucket,
         @RequestParam(required=false) String prefix,
         @RequestParam(required=false) String cursor,
         @RequestParam(required=false) Integer limit
     ) {
-        return service.list(auth,bucket,prefix,cursor,limit);
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+            .body(service.list(auth,bucket,prefix,cursor,limit));
     }
 
     public record InspectRequest(AdminStorageService.Scope bucket,String key) {}
@@ -36,12 +39,13 @@ public class AdminStorageController {
     // Keep exact private object keys out of query strings, proxy access logs,
     // referrer headers and browser navigation history.
     @PostMapping("/objects/inspect")
-    public AdminStorageService.ObjectView inspect(
+    public ResponseEntity<AdminStorageService.ObjectView> inspect(
         Authentication auth,@RequestBody InspectRequest input
     ) {
         if(input==null) throw new org.springframework.web.server.ResponseStatusException(
             HttpStatus.BAD_REQUEST,"Informe o objeto");
-        return service.inspect(auth,input.bucket(),input.key());
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+            .body(service.inspect(auth,input.bucket(),input.key()));
     }
 
     @PostMapping("/objects/delete-orphan")
