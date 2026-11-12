@@ -388,20 +388,20 @@ public class CommerceCatalogService {
             SELECT COUNT(*) FROM commerce_royalty_accruals
              WHERE contract_id=?
             """,Integer.class,contractId)>0) {
-            throw conflict("Contrato com royalties registrados não pode ser excluído");
+            throw conflict("Contrato com royalties registrados não pode ser excluído",null);
         }
         if (jdbc.queryForObject("""
             SELECT COUNT(*) FROM commerce_contract_preparations
              WHERE signed_contract_id=?
             """,Integer.class,contractId)>0) {
-            throw conflict("Contrato vinculado a uma minuta assinada não pode ser excluído");
+            throw conflict("Contrato vinculado a uma minuta assinada não pode ser excluído",null);
         }
         try {
             if (jdbc.update("""
                 DELETE FROM commerce_artwork_contracts
                  WHERE id=? AND artwork_id=?
                 """,contractId,artworkId)!=1) {
-                throw conflict("Contrato alterado durante exclusão");
+                throw conflict("Contrato alterado durante exclusão",null);
             }
         } catch (DataIntegrityViolationException ex) {
             throw conflict("Contrato possui dependências e não pode ser excluído",ex);
