@@ -366,6 +366,58 @@ public class CommerceCatalogService {
         audit(actor,"ARTWORK_CONTRACT",contractId,"TERMINATED");
     }
 
+    /**
+     * Owner-only removal of a demonstrably unused test agreement and its
+     * private R2 PDF. This is not a general contract cancellation operation:
+     * any linked accrual or signed preparation prevents physical deletion.
+     *
+     * The R2 deletion is deliberately the last operation before the JDBC
+     * transaction commits. If R2 rejects the delete the DB transaction rolls
+     * back, keeping the signed agreement intact.
+     */
+    @Transactional
+    public void discardUnusedTestContract(Authentication auth,long artworkId,long contractId) {
+        authorization.requireOwner(auth);
+        lock("commerce_artworks",artworkId,"Arte");
+        List<Map<String,Object>> rows=jdbc.queryForList("""
+            SELECT id,signed_storage_key FROM commerce_artwork_contracts
+             WHERE id=? AND artwork_id=? FOR UPDATE
+            """,contractId,artworkId);
+        if (rows.isEmpty()) throw notFound("Contrato");
+        if (jdbc.queryForObject("""
+            SELECT COUNT(*) FROM commerce_royalty_accruals
+             WHERE contract_id=?
+            """,Integer.class,contractId)>0) {
+            throw conflict("Contrato com royalties registrados não pode ser excluído");
+        }
+        if (jdbc.queryForObject("""
+            SELECT COUNT(*) FROM commerce_contract_preparations
+             WHERE signed_contract_id=?
+            """,Integer.class,contractId)>0) {
+            throw conflict("Contrato vinculado a uma minuta assinada não pode ser excluído");
+        }
+        try {
+            if (jdbc.update("""
+                DELETE FROM commerce_artwork_contracts
+                 WHERE id=? AND artwork_id=?
+                """,contractId,artworkId)!=1) {
+                throw conflict("Contrato alterado durante exclusão");
+            }
+        } catch (DataIntegrityViolationException ex) {
+            throw conflict("Contrato possui dependências e não pode ser excluído",ex);
+        }
+        jdbc.update("""
+            UPDATE commerce_artworks a
+               SET status='DRAFT'
+             WHERE a.id=? AND a.status='ACTIVE'
+               AND NOT EXISTS(
+                   SELECT 1 FROM commerce_artwork_contracts c
+                    WHERE c.artwork_id=a.id AND c.status='ACTIVE')
+            """,artworkId);
+        // No object key is sent to the browser, and no other R2 prefix is allowed.
+        documents.deleteExistingContract(artworkId,(String)rows.get(0).get("signed_storage_key"));
+    }
+
     @Transactional(readOnly = true)
     public byte[] downloadContract(Authentication auth,long artworkId,long contractId) {
         authorization.require(auth,PlatformPermission.CONTRACTS_MANAGE);
