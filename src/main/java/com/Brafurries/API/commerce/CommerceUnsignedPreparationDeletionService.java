@@ -53,8 +53,9 @@ public class CommerceUnsignedPreparationDeletionService {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Minuta não encontrada");
             }
             Map<String,Object> row=matches.get(0);
-            if(!List.of("PENDING","CANCELLED").contains(row.get("status"))
-                || row.get("signed_contract_id")!=null) {
+            if(!("PENDING".equals(row.get("status")) ||
+                 "CANCELLED".equals(row.get("status"))) ||
+                row.get("signed_contract_id")!=null) {
                 throw conflict("Documentos já assinados não podem ser excluídos");
             }
             String storageKey=(String)row.get("generated_storage_key");
