@@ -87,6 +87,8 @@ class CommerceContractPreparationServiceTest {
 
     @Test void refusesLegacyTemplateWithoutFullTextBeforeStorage() {
         artwork();
+        when(jdbc.queryForList(contains("FROM commerce_artwork_contracts"),eq(41L)))
+            .thenReturn(List.of());
         when(jdbc.queryForList(contains("FROM commerce_contract_preparations"),eq(41L)))
             .thenReturn(List.of());
         when(jdbc.queryForList(contains("FROM commerce_contract_templates"),eq(2L)))
