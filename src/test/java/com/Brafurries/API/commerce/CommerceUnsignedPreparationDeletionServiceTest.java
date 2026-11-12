@@ -70,7 +70,7 @@ class CommerceUnsignedPreparationDeletionServiceTest {
         verify(jdbc).update(contains("DELETED_UNSIGNED"),eq(11),eq(5L));
         InOrder order=inOrder(transactionManager,documents);
         order.verify(transactionManager).commit(any());
-        order.verify(documents).delete(41L,KEY);
+        order.verify(documents).deleteConfirmedGenerated(41L,KEY);
     }
 
     @Test void canPurgeCancelledButNeverSignedDrafts() {
@@ -78,14 +78,14 @@ class CommerceUnsignedPreparationDeletionServiceTest {
         when(jdbc.update(contains("DELETE FROM commerce_contract_preparations"),
             eq(5L),eq(41L))).thenReturn(1);
         service.delete(auth,41L,5L,KEY);
-        verify(documents).delete(41L,KEY);
+        verify(documents).deleteConfirmedGenerated(41L,KEY);
     }
 
     @Test void signedDraftOrLinkedAgreementIsProtected() {
         unsigned("SIGNED");
         assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
             ()->service.delete(auth,41L,5L,null)).getStatusCode());
-        verify(documents,never()).delete(anyLong(),anyString());
+        verify(documents,never()).deleteConfirmedGenerated(anyLong(),anyString());
         verify(jdbc,never()).update(anyString(),any(Object[].class));
     }
 
@@ -97,7 +97,7 @@ class CommerceUnsignedPreparationDeletionServiceTest {
             .thenReturn(List.of(Map.of("id",99)));
         assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
             ()->service.delete(auth,41L,5L,null)).getStatusCode());
-        verify(documents,never()).delete(anyLong(),anyString());
+        verify(documents,never()).deleteConfirmedGenerated(anyLong(),anyString());
     }
 
     @Test void failedDatabaseRemovalDoesNotDeleteR2File() {
@@ -112,7 +112,7 @@ class CommerceUnsignedPreparationDeletionServiceTest {
         unsigned("PENDING");
         when(jdbc.update(contains("DELETE FROM commerce_contract_preparations"),
             eq(5L),eq(41L))).thenReturn(1);
-        doThrow(new IllegalStateException("R2 unavailable")).when(documents).delete(41L,KEY);
+        doThrow(new IllegalStateException("R2 unavailable")).when(documents).deleteConfirmedGenerated(41L,KEY);
         ResponseStatusException ex=assertThrows(ResponseStatusException.class,
             ()->service.delete(auth,41L,5L,null));
         assertEquals(HttpStatus.BAD_GATEWAY,ex.getStatusCode());
