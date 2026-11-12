@@ -447,7 +447,7 @@ public class CommerceCatalogService {
             (preparations!=null && preparations>0)) {
             throw conflict("O PDF ainda está vinculado a um contrato ou minuta",null);
         }
-        documents.deleteExistingContract(artworkId,key);
+        documents.deleteOrphanedDocument(artworkId,key);
     }
 
     @Transactional(readOnly = true)
