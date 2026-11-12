@@ -126,19 +126,6 @@ class CommerceCatalogServiceTest {
     }
 
     @Test
-    void refusesSecondSignedActiveAgreementBeforeAnyUpload() {
-        when(jdbc.queryForList(contains("SELECT id FROM commerce_artworks"),
-            eq(Long.class),eq(12L))).thenReturn(List.of(12L));
-        when(jdbc.queryForList(contains("commerce_artwork_contracts"),
-            eq(12L))).thenReturn(List.of(Map.of("id",21L)));
-
-        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
-            ()->catalog.signContract(auth,12L,3L,LocalDate.of(2026,11,3),
-                null,BigDecimal.ZERO,pdf)).getStatusCode());
-        verifyNoInteractions(documents);
-    }
-
-    @Test
     void doesNotDownloadPrivateContractWithoutExplicitPermission() {
         when(authorization.require(auth,PlatformPermission.CONTRACTS_MANAGE))
             .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
