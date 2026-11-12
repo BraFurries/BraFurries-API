@@ -13,7 +13,7 @@
 Rotas autenticadas sob `/user/me/administration/storage`:
 
 - `GET /objects?bucket=PRIVATE|PUBLIC&prefix=...&limit=50&cursor=...`: lista paginada, entre 1 e 100 objetos por página. `cursor` é opaco. `pageBytes` é **somente da página**, não o consumo global do bucket.
-- `GET /objects/inspect?bucket=...&key=...`: usa HEAD e retorna ETag, tamanho, content type e resultado do vínculo.
+- `POST /objects/inspect` com `{ "bucket":"PRIVATE|PUBLIC", "key":"..." }`: usa HEAD e retorna ETag, tamanho, content type e vínculo, sem colocar a chave privada na URL.
 - `POST /objects/delete-orphan`: `{ "bucket":"PRIVATE","key":"commerce/contracts/{artworkId}/{uuid}.pdf","etag":"..." }`. Autorização de owner, HEAD/ETag atual, chave em prefixo aprovado, idade mínima e ausência comprovada de vínculos; verifica via novo HEAD que R2 não serve mais o objeto. Resposta 204.
 
 ### Estados do objeto
