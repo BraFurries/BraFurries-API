@@ -44,6 +44,11 @@ public class AdminCanonicalMetricsSnapshotJob {
         }
     }
 
+    private static boolean isEnabled(Object value) {
+        return Boolean.TRUE.equals(value) ||
+            (value instanceof Number number && number.intValue()==1);
+    }
+
     void captureOnce() {
         int officialCommunityId=platform.officialCommunityId();
         LocalDateTime now=LocalDateTime.now(ZoneOffset.UTC);
@@ -54,7 +59,7 @@ public class AdminCanonicalMetricsSnapshotJob {
               FROM community_discord WHERE community_id=?
             """,officialCommunityId);
         boolean healthy=guilds.size()==1
-            && ((Number)guilds.getFirst().get("active")).intValue()==1
+            && isEnabled(guilds.getFirst().get("active"))
             && "HEALTHY".equals(guilds.getFirst().get("membership_sync_state"))
             && guilds.getFirst().get("last_full_reconciliation_at")!=null;
         Long members=null;
