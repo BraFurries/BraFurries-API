@@ -47,10 +47,10 @@ class CommerceContractPdfServiceTest {
         byte[] pdf=service.render(draft(text));
         try (var document=Loader.loadPDF(pdf)) {
             assertTrue(document.getNumberOfPages()>=3);
-            String last=new PDFTextStripper() {{
-                setStartPage(document.getNumberOfPages());
-                setEndPage(document.getNumberOfPages());
-            }}.getText(document);
+            PDFTextStripper stripper = new PDFTextStripper();
+            stripper.setStartPage(document.getNumberOfPages());
+            stripper.setEndPage(document.getNumberOfPages());
+            String last = stripper.getText(document);
             assertTrue(last.contains("Maria de Souza - CONTRATANTE"),last);
             assertTrue(last.contains("João da Silva - CONTRATADO(A)"),last);
         }
