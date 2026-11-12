@@ -283,7 +283,7 @@ class CommerceCatalogServiceTest {
         when(jdbc.queryForObject(contains("commerce_contract_preparations"),
             eq(Integer.class),eq(key))).thenReturn(0);
         catalog.deleteOrphanedContractPdf(auth,key);
-        verify(documents).deleteExistingContract(12L,key);
+        verify(documents).deleteOrphanedDocument(12L,key);
         verifyNoMoreInteractions(documents);
     }
 
