@@ -92,7 +92,7 @@ public class CommerceUnsignedPreparationDeletionService {
         });
         if(key==null) throw new IllegalStateException("Exclusão da minuta não confirmada");
         try {
-            documents.delete(artworkId,key);
+            documents.deleteConfirmedGenerated(artworkId,key);
         } catch(RuntimeException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
                 "Minuta removida do cadastro, mas o PDF não pôde ser excluído do R2. "
