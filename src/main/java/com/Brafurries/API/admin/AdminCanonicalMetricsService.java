@@ -139,10 +139,11 @@ public class AdminCanonicalMetricsService {
 
         String firstSnapshot=jdbc.queryForObject("""
             SELECT MIN(metric_date) FROM stats_admin_daily_snapshots WHERE community_id=?
-            """,String.class,communityId);
+            """,Date.class,communityId);
         return new Report(
             period,start.toString(),today.toString(),
-            first==null?null:first+"Z",firstSnapshot,
+            first==null?null:first+"Z",
+            firstSnapshot==null?null:firstSnapshot.toString(),
             last==null?null:last.sampledAt(),
             summary,timeline,usage,top);
     }
