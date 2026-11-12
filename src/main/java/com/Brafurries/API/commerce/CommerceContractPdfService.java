@@ -88,7 +88,9 @@ public class CommerceContractPdfService {
                 writer.space();
                 writer.body("Data de emissão do documento: " + value.preparedOn().format(DATE) + ".");
                 writer.space();
-                writer.signatures(value.contractorName(), value.artistName());
+                writer.signatures(
+                    value.contractorName(), value.contractorRepresentative(),
+                    value.artistName(), value.artistRepresentative());
             } finally {
                 writer.close();
             }
@@ -226,14 +228,21 @@ public class CommerceContractPdfService {
             return font.getStringWidth(text) / 1000f * fontSize;
         }
 
-        private void signatures(String contractor, String artist) throws IOException {
-            ensure(160f); // Keep both parties on the same page.
+        private void signatures(String contractor, String contractorRepresentative,
+                                String artist, String artistRepresentative) throws IOException {
+            ensure(190f); // Keep both signatures and legal representatives on one page.
             y -= 20f;
             body("________________________________________________");
-            body(contractor + " - CONTRATANTE");
+            body(signatureLabel(contractor, contractorRepresentative, "CONTRATANTE"));
             y -= 15f;
             body("________________________________________________");
-            body(artist + " - CONTRATADO(A)");
+            body(signatureLabel(artist, artistRepresentative, "CONTRATADO(A)"));
+        }
+
+        private String signatureLabel(String party, String representative, String role) {
+            return present(representative)
+                ? party + " - " + role + " (por " + representative + ")"
+                : party + " - " + role;
         }
 
         private void footer() throws IOException {
