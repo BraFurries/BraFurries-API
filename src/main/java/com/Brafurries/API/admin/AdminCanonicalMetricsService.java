@@ -137,7 +137,7 @@ public class AdminCanonicalMetricsService {
             executions,complete,previous,growth
         );
 
-        String firstSnapshot=jdbc.queryForObject("""
+        Date firstSnapshot=jdbc.queryForObject("""
             SELECT MIN(metric_date) FROM stats_admin_daily_snapshots WHERE community_id=?
             """,Date.class,communityId);
         return new Report(
