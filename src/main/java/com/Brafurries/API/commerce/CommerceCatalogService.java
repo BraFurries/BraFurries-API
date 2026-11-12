@@ -58,7 +58,7 @@ public class CommerceCatalogService {
     public List<Map<String,Object>> templates(Authentication auth) {
         authorization.require(auth, PlatformPermission.CONTRACTS_MANAGE);
         return jdbc.queryForList("""
-            SELECT id,name,description,modality,royalty_method AS royaltyMethod,
+            SELECT id,name,description,full_text AS fullText,modality,royalty_method AS royaltyMethod,
                    royalty_percent AS royaltyPercent,royalty_fixed_amount AS royaltyFixedAmount,
                    active,created_at AS createdAt
               FROM commerce_contract_templates ORDER BY id DESC LIMIT 500
@@ -76,14 +76,15 @@ public class CommerceCatalogService {
             ? null : money(input.royaltyFixedAmount(), "Valor fixo");
         validateRoyaltyTerms(method, percentage, fixed);
         String name = text(input.name(), 160, "Nome do modelo");
+        String fullText = contractText(input.fullText());
         try {
             long id = insert("""
                 INSERT INTO commerce_contract_templates
-                    (name,description,modality,royalty_method,royalty_percent,
-                     royalty_fixed_amount,created_by_user_id)
-                VALUES (?,?,?,?,?,?,?)
-                """, name, optional(input.description(), 5000), modality, method,
-                percentage, fixed, actor.getId());
+                    (name,description,full_text,modality,royalty_method,
+                     royalty_percent,royalty_fixed_amount,created_by_user_id)
+                VALUES (?,?,?,?,?,?,?,?)
+                """, name, optional(input.description(), 5000), fullText,modality,
+                method,percentage,fixed,actor.getId());
             audit(actor, "CONTRACT_TEMPLATE", id, "CREATED");
             return new Created(id);
         } catch (DataIntegrityViolationException ex) {
@@ -475,6 +476,13 @@ public class CommerceCatalogService {
         if (id==null || id.longValue()<1 ||
             jdbc.queryForObject("SELECT COUNT(*) FROM "+table+" WHERE id=? AND active=1",
                 Integer.class,id)==0) throw notFound(label+" ativo");
+    }
+
+    private String contractText(String body) {
+        if (body == null || body.isBlank() || body.length() > 60000) {
+            throw invalid("Preencha as cláusulas, termos e concessões (até 60.000 caracteres)");
+        }
+        return body.replace("\r\n","\n").trim();
     }
 
     private String requireCode(String code,Set<String> allowed,String label) {
