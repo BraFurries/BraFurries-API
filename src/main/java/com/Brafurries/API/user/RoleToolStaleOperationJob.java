@@ -20,13 +20,13 @@ public class RoleToolStaleOperationJob {
     }
 
     private record Candidate(long id, long guildId, int communityId,
-                             int addedCount, String status) {}
+                             int addedCount, String status, String operationType) {}
 
     @Scheduled(fixedDelay = 60_000)
     @Transactional
     public void reap() {
         List<Candidate> expired = jdbc.query("""
-            SELECT id,guild_id,community_id,added_count,status
+            SELECT id,guild_id,community_id,added_count,status,operation_type
             FROM guild_role_tool_operations
             WHERE (status='RUNNING'
                    AND updated_at < CURRENT_TIMESTAMP(6) - INTERVAL 10 MINUTE)
@@ -37,10 +37,16 @@ public class RoleToolStaleOperationJob {
             """, (rs, row) -> new Candidate(
                 rs.getLong("id"), rs.getLong("guild_id"),
                 rs.getInt("community_id"), rs.getInt("added_count"),
-                rs.getString("status")
+                rs.getString("status"), rs.getString("operation_type")
             ));
         for (Candidate candidate : expired) {
-            String outcome = candidate.addedCount() > 0 ? "PARTIAL" : "FAILED";
+            // A crashed worker may have changed Discord before the next DB checkpoint.
+            // Never represent a RUNNING mutating job as having no side effects.
+            boolean mutating = "BULK_ADD".equals(candidate.operationType())
+                || "RECOVERY_APPLY".equals(candidate.operationType());
+            String outcome = candidate.addedCount() > 0
+                || ("RUNNING".equals(candidate.status()) && mutating)
+                ? "PARTIAL" : "FAILED";
             String reason = "RUNNING".equals(candidate.status())
                 ? "WORKER_HEARTBEAT_EXPIRED" : "PENDING_DISPATCH_EXPIRED";
             int changed = jdbc.update("""
