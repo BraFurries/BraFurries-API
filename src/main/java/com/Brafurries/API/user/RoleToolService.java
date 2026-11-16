@@ -263,11 +263,12 @@ public class RoleToolService {
         long source = rs.getLong("source_operation_id");
         Long sourceId = rs.wasNull() ? null : source;
         long channel = rs.getLong("channel_id");
+        String channelId = rs.wasNull() ? null : String.valueOf(channel);
         return new Stored(rs.getLong("id"), rs.getLong("guild_id"),
             rs.getInt("community_id"), rs.getString("operation_key"),
             rs.getString("operation_type"), rs.getLong("actor_discord_user_id"),
             roleId, sourceId, rs.getString("source_bot"),
-            rs.wasNull() ? null : String.valueOf(channel),
+            channelId,
             rs.getString("role_key"), rs.getString("preview_fingerprint"),
             rs.getInt("expected_count"), rs.getString("status"), rs.getString("result_json"));
     }
