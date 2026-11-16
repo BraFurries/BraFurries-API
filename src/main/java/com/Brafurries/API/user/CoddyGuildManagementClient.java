@@ -401,6 +401,39 @@ public class CoddyGuildManagementClient {
         }
     }
 
+    public JsonNode channelPermissionCopyPreview(String guildId, Long discordUserId, Object request) {
+        return channelPermissionCopyRequest(guildId, discordUserId, request, "preview");
+    }
+
+    public JsonNode channelPermissionCopyApply(String guildId, Long discordUserId, Object request) {
+        return channelPermissionCopyRequest(guildId, discordUserId, request, "apply");
+    }
+
+    private JsonNode channelPermissionCopyRequest(String guildId, Long discordUserId,
+                                                   Object request, String action) {
+        try {
+            JsonNode response = operationRestClient.post()
+                .uri(baseUrl + "/guilds/{guildId}/channel-permissions/{action}/{discordUserId}",
+                    guildId, action, discordUserId)
+                .headers(this::authorize).body(request).retrieve().body(JsonNode.class);
+            if (response == null) throw unavailable();
+            return response;
+        } catch (HttpClientErrorException.Conflict ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "As permissões mudaram desde a prévia. Atualize a prévia e confirme novamente");
+        } catch (HttpClientErrorException.Forbidden ex) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                "É necessária a permissão Gerenciar canais e acesso ao servidor");
+        } catch (HttpClientErrorException.NotFound ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Canal não encontrado no servidor");
+        } catch (HttpClientErrorException.UnprocessableEntity | HttpClientErrorException.BadRequest ex) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                "Não foi possível migrar as permissões dos canais selecionados");
+        } catch (RestClientException ex) {
+            throw unavailable();
+        }
+    }
+
     public JsonNode reconcileVip(String guildId, Long discordUserId) {
         return operation(guildId, discordUserId, java.util.Map.of("operation", "vip-reconcile"));
     }

@@ -136,6 +136,15 @@ public final class GuildManagementDtos {
                                           List<String> channelNames, List<String> staffRoleIds,
                                           List<String> allowedRoleIds, boolean isolateVisitors) {}
     public record StructurePreviewResponse(JsonNode preview) {}
+    public record ChannelPermissionCopyRequest(
+        @NotBlank @Pattern(regexp = "[1-9]\\d*") String sourceChannelId,
+        @NotBlank @Pattern(regexp = "[1-9]\\d*") String targetChannelId
+    ) {}
+    public record ChannelPermissionCopyApplyRequest(
+        @NotBlank @Pattern(regexp = "[1-9]\\d*") String sourceChannelId,
+        @NotBlank @Pattern(regexp = "[1-9]\\d*") String targetChannelId,
+        @NotBlank @Pattern(regexp = "[0-9a-f]{64}") String fingerprint
+    ) {}
     public record GuildOperationRequest(@NotBlank String operation, String visitorRoleName, String categoryName,
                                         List<String> channelNames, List<String> allowedRoleIds,
                                         List<String> staffAccessRoleIds,

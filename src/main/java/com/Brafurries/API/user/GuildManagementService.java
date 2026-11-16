@@ -281,6 +281,38 @@ public class GuildManagementService {
         return coddy.preview(guildId, guild.discordUserId(), request);
     }
 
+    public JsonNode previewChannelPermissions(Authentication auth, String guildId,
+                                              ChannelPermissionCopyRequest request) {
+        AuthorizedGuild guild = access.authorize(auth, guildId);
+        validateChannelPermissionCopy(guild.resources(), request.sourceChannelId(), request.targetChannelId());
+        return coddy.channelPermissionCopyPreview(guildId, guild.discordUserId(), request);
+    }
+
+    public JsonNode applyChannelPermissions(Authentication auth, String guildId,
+                                            ChannelPermissionCopyApplyRequest request) {
+        AuthorizedGuild guild = access.authorize(auth, guildId);
+        validateChannelPermissionCopy(guild.resources(), request.sourceChannelId(), request.targetChannelId());
+        if (request.fingerprint() == null || !request.fingerprint().matches("[0-9a-f]{64}"))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Realize a prévia antes da confirmação");
+        return coddy.channelPermissionCopyApply(guildId, guild.discordUserId(), request);
+    }
+
+    private static void validateChannelPermissionCopy(GuildResources resources, String source, String target) {
+        if (source == null || target == null || !source.matches("[1-9]\\d*") || !target.matches("[1-9]\\d*")
+            || source.equals(target)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Selecione dois canais diferentes e válidos");
+        }
+        if (!resources.botCapabilities().canManageChannels()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "O Coddy não pode gerenciar os canais do servidor");
+        }
+        Set<String> allowed = new HashSet<>(resources.channels().stream()
+            .filter(channel -> Set.of("text", "news", "voice", "stage_voice", "forum", "category").contains(channel.type()))
+            .map(GuildChannel::id).toList());
+        resources.categories().forEach(category -> allowed.add(category.id()));
+        requireAvailable(List.of(source, target), allowed,
+            "Canal inexistente ou pertencente a outra rede Discord");
+    }
+
     private static void requireRoles(GuildResources resources, List<String> ids) {
         Set<String> available = new HashSet<>(resources.roles().stream().map(GuildRole::id).toList());
         requireAvailable(ids, available, "Cargo inválido ou pertencente a outro servidor");

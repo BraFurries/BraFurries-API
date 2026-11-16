@@ -37,6 +37,62 @@ class GuildManagementServiceTest {
         lenient().when(access.authorize(authentication, resources.guildId())).thenReturn(new AuthorizedGuild(42L, resources));
     }
 
+    @Test void previewsChannelPermissionCopyWithCurrentGuildAuthorizationAndNoMutation() {
+        ChannelPermissionCopyRequest request = new ChannelPermissionCopyRequest(
+            "800000000000000001", "700000000000000001");
+        com.fasterxml.jackson.databind.JsonNode preview = new ObjectMapper()
+            .createObjectNode().put("fingerprint", "a".repeat(64));
+        when(coddy.channelPermissionCopyPreview(resources.guildId(), 42L, request)).thenReturn(preview);
+
+        assertSame(preview, service.previewChannelPermissions(authentication, resources.guildId(), request));
+        verify(access).authorize(authentication, resources.guildId());
+        verify(coddy, never()).channelPermissionCopyApply(any(), any(), any());
+    }
+
+    @Test void rejectsInvalidAndForeignChannelPermissionTargetsBeforeCoddyMutation() {
+        ChannelPermissionCopyRequest foreign = new ChannelPermissionCopyRequest(
+            "800000000000000001", "800000000000009999");
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY,
+            assertThrows(ResponseStatusException.class,
+                () -> service.previewChannelPermissions(authentication, resources.guildId(), foreign)).getStatusCode());
+        ChannelPermissionCopyRequest same = new ChannelPermissionCopyRequest(
+            "800000000000000001", "800000000000000001");
+        assertEquals(HttpStatus.BAD_REQUEST,
+            assertThrows(ResponseStatusException.class,
+                () -> service.previewChannelPermissions(authentication, resources.guildId(), same)).getStatusCode());
+        verifyNoInteractions(coddy);
+    }
+
+    @Test void requiresPreviewFingerprintAndDelegatesApplyToSameGuildActor() {
+        ChannelPermissionCopyApplyRequest invalid = new ChannelPermissionCopyApplyRequest(
+            "800000000000000001", "700000000000000001", "invalid");
+        assertEquals(HttpStatus.BAD_REQUEST,
+            assertThrows(ResponseStatusException.class,
+                () -> service.applyChannelPermissions(authentication, resources.guildId(), invalid)).getStatusCode());
+        verifyNoInteractions(coddy);
+
+        ChannelPermissionCopyApplyRequest valid = new ChannelPermissionCopyApplyRequest(
+            "800000000000000001", "700000000000000001", "a".repeat(64));
+        com.fasterxml.jackson.databind.JsonNode outcome = new ObjectMapper()
+            .createObjectNode().put("changed", true);
+        when(coddy.channelPermissionCopyApply(resources.guildId(), 42L, valid)).thenReturn(outcome);
+        assertSame(outcome, service.applyChannelPermissions(authentication, resources.guildId(), valid));
+        verify(coddy).channelPermissionCopyApply(resources.guildId(), 42L, valid);
+    }
+
+    @Test void blocksChannelPermissionMigrationWhenBotCannotManageChannels() {
+        GuildResources blocked = new GuildResources(resources.guildId(), resources.roles(),
+            resources.channels(), resources.categories(),
+            new BotCapabilities(false, true, false, List.of("MANAGE_CHANNELS")));
+        when(access.authorize(authentication, resources.guildId()))
+            .thenReturn(new AuthorizedGuild(42L, blocked));
+        assertEquals(HttpStatus.FORBIDDEN,
+            assertThrows(ResponseStatusException.class,
+                () -> service.previewChannelPermissions(authentication, resources.guildId(),
+                    new ChannelPermissionCopyRequest("800000000000000001", "700000000000000001"))).getStatusCode());
+        verifyNoInteractions(coddy);
+    }
+
     @Test void readsAndWritesSharedStaffRoles() {
         when(store.readStaffRoleIds(Long.parseLong(resources.guildId()))).thenReturn(List.of("900000000000000001"));
         StaffRolesResponse read = service.staffRoles(authentication, resources.guildId());

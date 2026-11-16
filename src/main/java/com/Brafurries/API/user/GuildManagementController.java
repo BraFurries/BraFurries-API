@@ -63,4 +63,14 @@ public class GuildManagementController {
     @PatchMapping("/portaria/flows/{flowId}/result") public PortariaResponse updateResult(Authentication auth, @PathVariable String guildId, @PathVariable int flowId, @RequestBody @Valid ResultUpdateRequest request) { return service.updateResult(auth, guildId, flowId, request); }
     @PostMapping("/structure-preview") public JsonNode preview(Authentication auth, @PathVariable String guildId, @RequestBody @Valid StructurePreviewRequest request) { return service.preview(auth, guildId, request); }
     @PostMapping("/operations") public JsonNode operation(Authentication auth, @PathVariable String guildId, @RequestBody @Valid GuildOperationRequest request) { return service.operation(auth, guildId, request); }
+    @PostMapping("/channel-permissions/preview")
+    public JsonNode previewChannelPermissions(Authentication auth, @PathVariable String guildId,
+                                               @RequestBody @Valid ChannelPermissionCopyRequest request) {
+        return service.previewChannelPermissions(auth, guildId, request);
+    }
+    @PostMapping("/channel-permissions/apply")
+    public JsonNode applyChannelPermissions(Authentication auth, @PathVariable String guildId,
+                                             @RequestBody @Valid ChannelPermissionCopyApplyRequest request) {
+        return service.applyChannelPermissions(auth, guildId, request);
+    }
 }
