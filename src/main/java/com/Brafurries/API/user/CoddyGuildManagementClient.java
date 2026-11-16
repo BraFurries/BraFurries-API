@@ -99,6 +99,29 @@ public class CoddyGuildManagementClient {
         }
     }
 
+    public void requireRoleToolAdministrator(String guildId, Long discordUserId) {
+        try {
+            JsonNode result = operationRestClient.get()
+                .uri(baseUrl + "/guilds/{guildId}/role-tools/access/{discordUserId}",
+                    guildId, discordUserId)
+                .headers(this::authorize)
+                .retrieve().body(JsonNode.class);
+            if (result == null
+                || !guildId.equals(result.path("guildId").asText())
+                || !String.valueOf(discordUserId).equals(result.path("actorDiscordUserId").asText())
+                || !result.path("administrator").asBoolean(false)) {
+                throw unavailable();
+            }
+        } catch (HttpClientErrorException.Forbidden ex) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                "Somente administradores do servidor podem executar ferramentas de cargos");
+        } catch (HttpClientErrorException.NotFound ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Servidor não encontrado");
+        } catch (RestClientException ex) {
+            throw unavailable();
+        }
+    }
+
     /** Dispatches one persisted job; HTTP returns before Discord member loops. */
     public void dispatchRoleTool(String guildId, Long actorDiscordUserId, long operationId) {
         try {
