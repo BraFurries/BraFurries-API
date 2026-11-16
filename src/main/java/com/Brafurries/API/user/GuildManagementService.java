@@ -281,6 +281,15 @@ public class GuildManagementService {
         return coddy.preview(guildId, guild.discordUserId(), request);
     }
 
+    public JsonNode bulkRolePreview(Authentication auth, String guildId, String roleId) {
+        AuthorizedGuild guild = access.authorize(auth, guildId);
+        if (roleId == null || !roleId.matches("[1-9]\\d*")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cargo inválido");
+        }
+        requireAssignableRoles(guild.resources(), List.of(roleId));
+        return coddy.bulkRolePreview(guildId, guild.discordUserId(), roleId);
+    }
+
     public JsonNode previewChannelPermissions(Authentication auth, String guildId,
                                               ChannelPermissionCopyRequest request) {
         AuthorizedGuild guild = access.authorize(auth, guildId);

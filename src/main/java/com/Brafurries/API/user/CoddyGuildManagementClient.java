@@ -71,6 +71,34 @@ public class CoddyGuildManagementClient {
         }
     }
 
+    /** Read-only preflight. The runtime also checks the actor's administrator
+     * permission, current role hierarchy, and full Discord member cache. */
+    public JsonNode bulkRolePreview(String guildId, Long discordUserId, String roleId) {
+        try {
+            JsonNode response = operationRestClient.get()
+                .uri(
+                    baseUrl + "/guilds/{guildId}/roles/{roleId}/bulk-preview/{discordUserId}",
+                    guildId, roleId, discordUserId
+                )
+                .headers(this::authorize)
+                .retrieve()
+                .body(JsonNode.class);
+            if (response == null) throw unavailable();
+            return response;
+        } catch (HttpClientErrorException.Forbidden ex) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                "A atribuição de cargos em massa exige administrador e hierarquia adequada");
+        } catch (HttpClientErrorException.NotFound ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                "Servidor ou cargo não encontrado no Coddy");
+        } catch (HttpClientErrorException.UnprocessableEntity ex) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                "O cargo não está disponível para atribuição em massa");
+        } catch (RestClientException ex) {
+            throw unavailable();
+        }
+    }
+
     public Long getGuildOwner(String guildId) {
         try {
             JsonNode response = restClient.get()
