@@ -42,21 +42,22 @@ public class RoleToolService {
     private final ObjectMapper mapper;
 
     public record BulkRequest(String roleId, String fingerprint) {}
+    public record MigrationRequest(String sourceRoleId, String targetRoleId, String fingerprint) {}
     public record ScanRequest(String channelId, String bot) {}
     public record ApplyRequest(long scanId, String roleKey, String targetRoleId) {}
     public record RoleCandidate(String key, String name, String foundRoleId,
                                 int memberCount, boolean ambiguous) {}
     public record Operation(long id, String type, String status,
-                            String roleId, Long sourceOperationId, String sourceBot,
+                            String roleId, String sourceRoleId, Long sourceOperationId, String sourceBot,
                             String channelId, String roleKey, int expectedCount,
-                            int progressCurrent, int progressTotal, int addedCount,
+                            int progressCurrent, int progressTotal, int addedCount, int removedCount,
                             int skippedCount, int failedCount, int scannedCount,
                             String errorCode, List<RoleCandidate> roles) {}
 
     private record Context(long guildId, int communityId, int userId, long discordUserId,
                            GuildResources resources) {}
     private record Stored(long id, long guildId, int communityId, String key, String type,
-                          long actorDiscordUserId, String roleId, Long sourceId,
+                          long actorDiscordUserId, String roleId, String sourceRoleId, Long sourceId,
                           String bot, String channelId, String roleKey, String fingerprint,
                           int expectedCount, String status, String resultJson) {}
 
@@ -135,11 +136,69 @@ public class RoleToolService {
             }
             int eligible = preview.path("eligible").asInt(-1);
             if (eligible < 0) throw conflict("Prévia de membros inválida");
-            prior = create(ctx, key, "BULK_ADD", roleId, null, null, null, null,
+            prior = create(ctx, key, "BULK_ADD", roleId, null, null, null, null, null,
                 request.fingerprint(), eligible);
         }
         assertSame(prior, ctx, "BULK_ADD", roleId, null, null, null, request.fingerprint());
         return dispatch(ctx, prior);
+    }
+
+    public JsonNode migrationPreview(Authentication auth, String guildId,
+                                     String sourceRoleId, String targetRoleId) {
+        Context ctx = context(auth, guildId);
+        long source = snowflake(sourceRoleId);
+        long target = snowflake(targetRoleId);
+        if (source == target) throw bad("Os cargos de origem e destino precisam ser diferentes");
+        requireRole(ctx.resources(), sourceRoleId);
+        requireRole(ctx.resources(), targetRoleId);
+        coddy.requireRoleToolAdministrator(guildId, ctx.discordUserId());
+        JsonNode preview = coddy.roleMigrationPreview(guildId, ctx.discordUserId(),
+            sourceRoleId, targetRoleId);
+        if (!guildId.equals(preview.path("guildId").asText())
+                || !sourceRoleId.equals(preview.path("sourceRoleId").asText())
+                || !targetRoleId.equals(preview.path("targetRoleId").asText())
+                || !HASH.matcher(preview.path("fingerprint").asText()).matches()
+                || preview.path("sourceMembers").asInt(-1) < 0) {
+            throw conflict("A prévia de migração não está íntegra");
+        }
+        return preview;
+    }
+
+    public Operation migrate(Authentication auth, String guildId, MigrationRequest request,
+                             String key) {
+        Context ctx = context(auth, guildId);
+        operationKey(key);
+        if (request == null || request.fingerprint() == null
+                || !HASH.matcher(request.fingerprint()).matches()) {
+            throw bad("Prévia de migração obrigatória");
+        }
+        long source = snowflake(request.sourceRoleId());
+        long target = snowflake(request.targetRoleId());
+        if (source == target) throw bad("Os cargos de origem e destino precisam ser diferentes");
+        requireRole(ctx.resources(), request.sourceRoleId());
+        requireRole(ctx.resources(), request.targetRoleId());
+        coddy.requireRoleToolAdministrator(guildId, ctx.discordUserId());
+        Stored op = findByKey(ctx, key);
+        if (op == null) {
+            JsonNode preview = coddy.roleMigrationPreview(guildId, ctx.discordUserId(),
+                request.sourceRoleId(), request.targetRoleId());
+            if (!guildId.equals(preview.path("guildId").asText())
+                    || !request.sourceRoleId().equals(preview.path("sourceRoleId").asText())
+                    || !request.targetRoleId().equals(preview.path("targetRoleId").asText())
+                    || !request.fingerprint().equals(preview.path("fingerprint").asText())) {
+                throw conflict("Os membros ou cargos mudaram: refaça a prévia");
+            }
+            int count = preview.path("sourceMembers").asInt(-1);
+            if (count < 0) throw conflict("Quantidade de membros inválida");
+            op = create(ctx, key, "ROLE_MIGRATE", target, source,
+                null, null, null, null, request.fingerprint(), count);
+        }
+        assertSame(op, ctx, "ROLE_MIGRATE", target, null, null, null,
+            request.fingerprint());
+        if (!Objects.equals(op.sourceRoleId(), String.valueOf(source))) {
+            throw conflict("Idempotency-Key reutilizada para outra origem");
+        }
+        return dispatch(ctx, op);
     }
 
     public Operation scan(Authentication auth, String guildId, ScanRequest request, String key) {
@@ -155,7 +214,7 @@ public class RoleToolService {
         if (!belongs) throw bad("Canal inexistente ou de outra Community");
         coddy.requireRoleToolAdministrator(guildId, ctx.discordUserId());
         Stored op = findByKey(ctx, key);
-        if (op == null) op = create(ctx, key, "RECOVERY_SCAN", null, null, request.bot(),
+        if (op == null) op = create(ctx, key, "RECOVERY_SCAN", null, null, null, request.bot(),
             channel, null, null, 0);
         assertSame(op, ctx, "RECOVERY_SCAN", null, null, request.bot(), channel, null);
         return dispatch(ctx, op);
@@ -190,7 +249,7 @@ public class RoleToolService {
         }
         if (count < 0) throw bad("Cargo não pertence à análise selecionada");
         Stored op = findByKey(ctx, key);
-        if (op == null) op = create(ctx, key, "RECOVERY_APPLY", targetRole,
+        if (op == null) op = create(ctx, key, "RECOVERY_APPLY", targetRole, null,
             scan.id(), null, null, request.roleKey(), null, count);
         assertSame(op, ctx, "RECOVERY_APPLY", targetRole, scan.id(),
             null, null, null);
@@ -209,18 +268,18 @@ public class RoleToolService {
         }
     }
 
-    private Stored create(Context ctx, String key, String type, Long roleId, Long sourceId,
-                          String bot, Long channelId, String roleKey, String fingerprint,
+    private Stored create(Context ctx, String key, String type, Long roleId, Long sourceRoleId,
+                          Long sourceId, String bot, Long channelId, String roleKey, String fingerprint,
                           int expected) {
         return Objects.requireNonNull(transactions.execute(status -> {
             int changed = jdbc.update("""
                 INSERT IGNORE INTO guild_role_tool_operations
                     (community_id, guild_id, operation_key, operation_type, actor_user_id,
-                     actor_discord_user_id, role_id, source_operation_id, source_bot,
+                     actor_discord_user_id, role_id, source_role_id, source_operation_id, source_bot,
                      channel_id, role_key, preview_fingerprint, expected_count)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, ctx.communityId(), ctx.guildId(), key, type, ctx.userId(),
-                ctx.discordUserId(), roleId, sourceId, bot, channelId, roleKey,
+                ctx.discordUserId(), roleId, sourceRoleId, sourceId, bot, channelId, roleKey,
                 fingerprint, expected);
             Stored stored = findByKey(ctx, key);
             if (stored == null) throw conflict("Há outra ferramenta de cargos em execução neste servidor");
@@ -264,6 +323,8 @@ public class RoleToolService {
     private static Stored stored(java.sql.ResultSet rs) throws java.sql.SQLException {
         long role = rs.getLong("role_id");
         String roleId = rs.wasNull() ? null : String.valueOf(role);
+        long sourceRole = rs.getLong("source_role_id");
+        String sourceRoleId = rs.wasNull() ? null : String.valueOf(sourceRole);
         long source = rs.getLong("source_operation_id");
         Long sourceId = rs.wasNull() ? null : source;
         long channel = rs.getLong("channel_id");
@@ -271,7 +332,7 @@ public class RoleToolService {
         return new Stored(rs.getLong("id"), rs.getLong("guild_id"),
             rs.getInt("community_id"), rs.getString("operation_key"),
             rs.getString("operation_type"), rs.getLong("actor_discord_user_id"),
-            roleId, sourceId, rs.getString("source_bot"),
+            roleId, sourceRoleId, sourceId, rs.getString("source_bot"),
             channelId,
             rs.getString("role_key"), rs.getString("preview_fingerprint"),
             rs.getInt("expected_count"), rs.getString("status"), rs.getString("result_json"));
@@ -313,15 +374,17 @@ public class RoleToolService {
                 }
                 long role = rs.getLong("role_id");
                 String roleId = rs.wasNull() ? null : String.valueOf(role);
+                long originalRole = rs.getLong("source_role_id");
+                String sourceRoleId = rs.wasNull() ? null : String.valueOf(originalRole);
                 long source = rs.getLong("source_operation_id");
                 Long sourceId = rs.wasNull() ? null : source;
                 long channel = rs.getLong("channel_id");
                 String channelId = rs.wasNull() ? null : String.valueOf(channel);
                 return new Operation(rs.getLong("id"), rs.getString("operation_type"),
-                    rs.getString("status"), roleId, sourceId, rs.getString("source_bot"),
+                    rs.getString("status"), roleId, sourceRoleId, sourceId, rs.getString("source_bot"),
                     channelId, rs.getString("role_key"), rs.getInt("expected_count"),
                     rs.getInt("progress_current"), rs.getInt("progress_total"),
-                    rs.getInt("added_count"), rs.getInt("skipped_count"),
+                    rs.getInt("added_count"), rs.getInt("removed_count"), rs.getInt("skipped_count"),
                     rs.getInt("failed_count"), rs.getInt("scanned_count"),
                     rs.getString("error_code"), roles);
             }, ctx.guildId(), ctx.communityId(), id);
