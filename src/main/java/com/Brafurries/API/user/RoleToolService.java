@@ -344,7 +344,7 @@ public class RoleToolService {
             int updated = jdbc.update("""
                 UPDATE guild_role_tool_operations
                 SET status='CANCELLED', error_code='CANCELLED_BY_ADMIN',
-                    finished_at=UTC_TIMESTAMP(6)
+                    finished_at=CURRENT_TIMESTAMP(6)
                 WHERE id=? AND guild_id=? AND community_id=? AND status='PENDING'
                 """, operationId, ctx.guildId(), ctx.communityId());
             if (updated != 1) throw conflict("Somente operações ainda pendentes podem ser canceladas");
