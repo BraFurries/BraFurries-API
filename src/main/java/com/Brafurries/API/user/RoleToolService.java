@@ -331,6 +331,32 @@ public class RoleToolService {
         }
         return results.getFirst();
     }
+    public Operation cancelPending(Authentication auth, String guildId, long operationId) {
+        Context ctx = context(auth, guildId);
+        Stored op = find(ctx, operationId);
+        if (op == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Operação não encontrada");
+        }
+        if (op.actorDiscordUserId() != ctx.discordUserId()) {
+            coddy.requireRoleToolAdministrator(guildId, ctx.discordUserId());
+        }
+        transactions.executeWithoutResult(tx -> {
+            int updated = jdbc.update("""
+                UPDATE guild_role_tool_operations
+                SET status='CANCELLED', error_code='CANCELLED_BY_ADMIN',
+                    finished_at=UTC_TIMESTAMP(6)
+                WHERE id=? AND guild_id=? AND community_id=? AND status='PENDING'
+                """, operationId, ctx.guildId(), ctx.communityId());
+            if (updated != 1) throw conflict("Somente operações ainda pendentes podem ser canceladas");
+            jdbc.update("""
+                INSERT INTO guild_role_tool_audit
+                    (operation_id,community_id,guild_id,actor_user_id,event_type)
+                VALUES (?,?,?,?, 'CANCELLED')
+                """, operationId, ctx.communityId(), ctx.guildId(), ctx.userId());
+        });
+        return getOperation(ctx, operationId);
+    }
+
     public Operation get(Authentication auth, String guildId, long id) {
         return getOperation(context(auth, guildId), id);
     }
