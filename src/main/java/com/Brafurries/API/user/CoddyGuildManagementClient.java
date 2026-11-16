@@ -99,6 +99,30 @@ public class CoddyGuildManagementClient {
         }
     }
 
+    public JsonNode roleMigrationPreview(String guildId, Long discordUserId,
+                                         String sourceRoleId, String targetRoleId) {
+        try {
+            JsonNode response = operationRestClient.get()
+                .uri(baseUrl + "/guilds/{guildId}/roles/migration-preview/{sourceRoleId}/{targetRoleId}/{discordUserId}",
+                    guildId, sourceRoleId, targetRoleId, discordUserId)
+                .headers(this::authorize)
+                .retrieve().body(JsonNode.class);
+            if (response == null) throw unavailable();
+            return response;
+        } catch (HttpClientErrorException.Forbidden ex) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                "Somente administradores podem migrar cargos gerenciáveis pelo Coddy");
+        } catch (HttpClientErrorException.NotFound ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                "Servidor ou cargo não encontrado");
+        } catch (HttpClientErrorException.UnprocessableEntity ex) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                "Selecione cargos diferentes e gerenciáveis pelo Coddy");
+        } catch (RestClientException ex) {
+            throw unavailable();
+        }
+    }
+
     public void requireRoleToolAdministrator(String guildId, Long discordUserId) {
         try {
             JsonNode result = operationRestClient.get()
