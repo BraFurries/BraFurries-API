@@ -5,7 +5,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
-/** Global Coddy record policy. No Community-level permission fallback. */
+/** Global platform policy; no per-Community permission fallback. */
 @RestController
 @RequestMapping("/admin/records")
 @PreAuthorize("hasRole('ADMIN')")

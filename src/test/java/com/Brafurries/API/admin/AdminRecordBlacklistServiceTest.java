@@ -3,32 +3,24 @@ package com.Brafurries.API.admin;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
-import com.Brafurries.API.entity.platform.GlobalRecordBlacklistGame;
 import com.Brafurries.API.entity.user.User;
-import com.Brafurries.API.repository.platform.GlobalRecordBlacklistGameRepository;
 import com.Brafurries.API.repository.user.UserRepository;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.server.ResponseStatusException;
 
 class AdminRecordBlacklistServiceTest {
-    private final GlobalRecordBlacklistGameRepository games = mock(GlobalRecordBlacklistGameRepository.class);
     private final UserRepository users = mock(UserRepository.class);
     private final JdbcTemplate jdbc = mock(JdbcTemplate.class);
     private final Authentication auth = mock(Authentication.class);
-    private final AdminRecordBlacklistService service = new AdminRecordBlacklistService(games, users, jdbc);
-
-    private GlobalRecordBlacklistGame game(int id, String name) {
-        var item = new GlobalRecordBlacklistGame();
-        item.setId(id);
-        item.setGameName(name);
-        return item;
-    }
+    private final AdminRecordBlacklistService service = new AdminRecordBlacklistService(users, jdbc);
 
     @BeforeEach void setup() {
         when(auth.getName()).thenReturn("ADMIN@Example.org");
@@ -37,49 +29,54 @@ class AdminRecordBlacklistServiceTest {
         when(users.findByEmail("admin@example.org")).thenReturn(Optional.of(actor));
     }
 
-    @Test void returnsSingleListWithoutGuildOrCommunitySelection() {
-        when(games.findAllByOrderByGameNameAsc()).thenReturn(List.of(game(1, "Jogo A"), game(2, "Jogo B")));
-        var rows = service.list().games();
-        assertEquals(2, rows.size());
-        assertEquals("Jogo B", rows.get(1).name());
-        verify(games).findAllByOrderByGameNameAsc();
+    @Test void globalQueryNeverReceivesCommunityOrGuildId() {
+        service.list();
+        verify(jdbc).query(eq("SELECT id, game_name FROM record_global_blacklisted_games ORDER BY game_name, id"),
+            any(org.springframework.jdbc.core.RowMapper.class));
+        verifyNoInteractions(users);
     }
 
-    @Test void rejectsInvalidAndDuplicateNamesWithoutMutation() {
+    @Test void rejectsInvalidNameBeforeWrite() {
         assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
             () -> service.add(auth, new AdminRecordBlacklistService.CreateRequest("   "))).getStatusCode());
-        when(games.existsByGameNameIgnoreCase("Rocket League")).thenReturn(true);
+        verify(jdbc, never()).update(anyString(), any(Object[].class));
+    }
+
+    @Test void duplicateReturnsConflictWithoutAudit() {
+        doThrow(new DuplicateKeyException("duplicate"))
+            .when(jdbc).update(eq("INSERT INTO record_global_blacklisted_games (game_name) VALUES (?)"), eq("Jogo"));
         assertEquals(HttpStatus.CONFLICT, assertThrows(ResponseStatusException.class,
-            () -> service.add(auth, new AdminRecordBlacklistService.CreateRequest("Rocket League"))).getStatusCode());
-        verify(games, never()).saveAndFlush(any());
-        verifyNoInteractions(jdbc);
+            () -> service.add(auth, new AdminRecordBlacklistService.CreateRequest("Jogo"))).getStatusCode());
+        verify(jdbc, never()).update(contains("record_global_blacklist_audit"), any(Object[].class));
     }
 
-    @Test void addsGlobalEntryWithActorAuditInSameTransaction() {
-        service.add(auth, new AdminRecordBlacklistService.CreateRequest(" Novo jogo "));
-        verify(games).saveAndFlush(argThat(g -> "Novo jogo".equals(g.getGameName())));
-        verify(jdbc).update(contains("record_global_blacklist_audit"), any(), eq("Novo jogo"), eq(7));
+    @Test void addAuditsWithAdministratorIdentity() {
+        when(jdbc.queryForObject(anyString(), eq(Integer.class), eq("Jogo novo"))).thenReturn(12);
+        service.add(auth, new AdminRecordBlacklistService.CreateRequest(" Jogo novo "));
+        verify(jdbc).update("INSERT INTO record_global_blacklisted_games (game_name) VALUES (?)", "Jogo novo");
+        verify(jdbc).update(contains("record_global_blacklist_audit"), eq(12), eq("Jogo novo"), eq(7));
     }
 
-    @Test void deletesGlobalEntryWithActorAudit() {
-        var item = game(9, "Jogo");
-        when(games.findById(9)).thenReturn(Optional.of(item));
-        service.remove(auth, 9);
-        verify(games).delete(item);
-        verify(games).flush();
-        verify(jdbc).update(contains("record_global_blacklist_audit"), eq(9), eq("Jogo"), eq(7));
+    @Test void removeAuditsDeletedNameAndId() {
+        when(jdbc.queryForList(contains("FOR UPDATE"), eq(5)))
+            .thenReturn(List.of(Map.of("id", 5, "game_name", "Jogo")));
+        when(jdbc.update("DELETE FROM record_global_blacklisted_games WHERE id = ?", 5)).thenReturn(1);
+        service.remove(auth, 5);
+        verify(jdbc).update("DELETE FROM record_global_blacklisted_games WHERE id = ?", 5);
+        verify(jdbc).update(contains("record_global_blacklist_audit"), eq(5), eq("Jogo"), eq(7));
     }
 
-    @Test void refusesUnknownEntryWithoutAudit() {
-        var response = assertThrows(ResponseStatusException.class, () -> service.remove(auth, 100));
-        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
-        verifyNoInteractions(jdbc);
+    @Test void missingEntryDoesNotCreateAudit() {
+        when(jdbc.queryForList(contains("FOR UPDATE"), eq(55))).thenReturn(List.of());
+        assertEquals(HttpStatus.NOT_FOUND, assertThrows(ResponseStatusException.class,
+            () -> service.remove(auth, 55)).getStatusCode());
+        verify(jdbc, never()).update(contains("record_global_blacklist_audit"), any(Object[].class));
     }
 
-    @Test void deniesActorWithoutAccount() {
+    @Test void refusesUnknownActor() {
         when(users.findByEmail("admin@example.org")).thenReturn(Optional.empty());
         assertEquals(HttpStatus.UNAUTHORIZED, assertThrows(ResponseStatusException.class,
             () -> service.add(auth, new AdminRecordBlacklistService.CreateRequest("Jogo"))).getStatusCode());
-        verifyNoInteractions(games);
+        verifyNoInteractions(jdbc);
     }
 }
