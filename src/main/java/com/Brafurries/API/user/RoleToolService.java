@@ -358,10 +358,15 @@ public class RoleToolService {
     }
 
     public Operation get(Authentication auth, String guildId, long id) {
-        return getOperation(context(auth, guildId), id);
+        Context ctx = context(auth, guildId);
+        // Recovery summaries can reveal sensitive past role membership.
+        // A manage-guild permission alone must not expose admin role tools.
+        coddy.requireRoleToolAdministrator(guildId, ctx.discordUserId());
+        return getOperation(ctx, id);
     }
     public List<Operation> list(Authentication auth, String guildId) {
         Context ctx = context(auth, guildId);
+        coddy.requireRoleToolAdministrator(guildId, ctx.discordUserId());
         List<Long> ids = jdbc.query("""
             SELECT id FROM guild_role_tool_operations
             WHERE guild_id=? AND community_id=? ORDER BY id DESC LIMIT 30
