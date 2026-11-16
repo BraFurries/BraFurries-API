@@ -99,6 +99,31 @@ public class CoddyGuildManagementClient {
         }
     }
 
+    /** Dispatches one persisted job; HTTP returns before Discord member loops. */
+    public void dispatchRoleTool(String guildId, Long actorDiscordUserId, long operationId) {
+        try {
+            operationRestClient.post()
+                .uri(baseUrl + "/guilds/{guildId}/role-tools/{operationId}/dispatch/{actorId}",
+                    guildId, operationId, actorDiscordUserId)
+                .headers(this::authorize)
+                .retrieve().toBodilessEntity();
+        } catch (HttpClientErrorException.Conflict ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Operação de cargos já iniciada ou inválida");
+        } catch (HttpClientErrorException.Forbidden ex) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                "Você não possui permissão para esta ferramenta de cargos");
+        } catch (HttpClientErrorException.NotFound ex) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                "Operação de cargos não encontrada neste servidor");
+        } catch (HttpClientErrorException.UnprocessableEntity ex) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                "Não foi possível executar a ferramenta de cargos");
+        } catch (RestClientException ex) {
+            throw unavailable();
+        }
+    }
+
     public Long getGuildOwner(String guildId) {
         try {
             JsonNode response = restClient.get()
