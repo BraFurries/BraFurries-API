@@ -22,6 +22,13 @@ public class RoleToolStaleOperationJob {
     private record Candidate(long id, long guildId, int communityId,
                              int addedCount, String status, String operationType) {}
 
+    static String terminalStatus(String status, String operationType, int addedCount) {
+        // Discord mutations may have succeeded after the last progress checkpoint.
+        boolean mutating = "BULK_ADD".equals(operationType) || "RECOVERY_APPLY".equals(operationType);
+        return addedCount > 0 || ("RUNNING".equals(status) && mutating)
+            ? "PARTIAL" : "FAILED";
+    }
+
     @Scheduled(fixedDelay = 60_000)
     @Transactional
     public void reap() {
@@ -40,13 +47,8 @@ public class RoleToolStaleOperationJob {
                 rs.getString("status"), rs.getString("operation_type")
             ));
         for (Candidate candidate : expired) {
-            // A crashed worker may have changed Discord before the next DB checkpoint.
-            // Never represent a RUNNING mutating job as having no side effects.
-            boolean mutating = "BULK_ADD".equals(candidate.operationType())
-                || "RECOVERY_APPLY".equals(candidate.operationType());
-            String outcome = candidate.addedCount() > 0
-                || ("RUNNING".equals(candidate.status()) && mutating)
-                ? "PARTIAL" : "FAILED";
+            String outcome = terminalStatus(
+                candidate.status(), candidate.operationType(), candidate.addedCount());
             String reason = "RUNNING".equals(candidate.status())
                 ? "WORKER_HEARTBEAT_EXPIRED" : "PENDING_DISPATCH_EXPIRED";
             int changed = jdbc.update("""
