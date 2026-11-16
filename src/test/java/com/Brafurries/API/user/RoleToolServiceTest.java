@@ -96,4 +96,24 @@ class RoleToolServiceTest {
                     "")).getStatusCode());
         verifyNoInteractions(jdbc, coddy);
     }
+    @Test void nonAdminGuildManagerCannotListSensitiveRecoveryHistory() {
+        doThrow(new ResponseStatusException(HttpStatus.FORBIDDEN,
+            "Administrator required")).when(coddy)
+            .requireRoleToolAdministrator(GUILD, 77L);
+        ResponseStatusException denied = assertThrows(ResponseStatusException.class,
+            () -> service.list(actor, GUILD));
+        assertEquals(HttpStatus.FORBIDDEN, denied.getStatusCode());
+        verifyNoInteractions(jdbc);
+    }
+
+    @Test void nonAdminGuildManagerCannotReadRecoveryOperationById() {
+        doThrow(new ResponseStatusException(HttpStatus.FORBIDDEN,
+            "Administrator required")).when(coddy)
+            .requireRoleToolAdministrator(GUILD, 77L);
+        ResponseStatusException denied = assertThrows(ResponseStatusException.class,
+            () -> service.get(actor, GUILD, 88L));
+        assertEquals(HttpStatus.FORBIDDEN, denied.getStatusCode());
+        verifyNoInteractions(jdbc);
+    }
+
 }
