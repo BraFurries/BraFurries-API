@@ -38,7 +38,8 @@ class RoleToolServiceTest {
         when(actor.getName()).thenReturn("ADMIN@Example.org");
         GuildResources resources = new GuildResources(GUILD,
             List.of(new GuildRole("900000000000000001", "Membro", 2, false, true),
-                    new GuildRole("900000000000000002", "Staff", 12, false, false)),
+                    new GuildRole("900000000000000002", "Staff", 12, false, false),
+                    new GuildRole("900000000000000003", "Ex-membro", 3, false, true)),
             List.of(new GuildChannel("800000000000000001", "logs", "text", null)),
             List.of(),
             new BotCapabilities(true, true, true, List.of()));
@@ -113,6 +114,57 @@ class RoleToolServiceTest {
         ResponseStatusException denied = assertThrows(ResponseStatusException.class,
             () -> service.get(actor, GUILD, 88L));
         assertEquals(HttpStatus.FORBIDDEN, denied.getStatusCode());
+        verifyNoInteractions(jdbc);
+    }
+
+    @Test void migrationRejectsSameOrForeignOrUnassignableRolesBeforePersistence() {
+        var fingerprint = "a".repeat(64);
+        assertEquals(HttpStatus.BAD_REQUEST,
+            assertThrows(ResponseStatusException.class,
+                () -> service.migrate(actor, GUILD,
+                    new RoleToolService.MigrationRequest(
+                        "900000000000000001", "900000000000000001", fingerprint),
+                    "same")).getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST,
+            assertThrows(ResponseStatusException.class,
+                () -> service.migrate(actor, GUILD,
+                    new RoleToolService.MigrationRequest(
+                        "900000000000000999", "900000000000000003", fingerprint),
+                    "outside")).getStatusCode());
+        assertEquals(HttpStatus.FORBIDDEN,
+            assertThrows(ResponseStatusException.class,
+                () -> service.migrate(actor, GUILD,
+                    new RoleToolService.MigrationRequest(
+                        "900000000000000001", "900000000000000002", fingerprint),
+                    "protected")).getStatusCode());
+        verifyNoInteractions(jdbc, coddy);
+    }
+
+    @Test void migrationPreflightRejectsNonAdministratorBeforeReadingMembers() {
+        doThrow(new ResponseStatusException(HttpStatus.FORBIDDEN, "Administrator required"))
+            .when(coddy).requireRoleToolAdministrator(GUILD, 77L);
+        assertEquals(HttpStatus.FORBIDDEN,
+            assertThrows(ResponseStatusException.class,
+                () -> service.migrationPreview(actor, GUILD,
+                    "900000000000000001", "900000000000000003")).getStatusCode());
+        verify(coddy, never()).roleMigrationPreview(anyString(), anyLong(), anyString(), anyString());
+        verifyNoInteractions(jdbc);
+    }
+
+    @Test void migrationPreviewAcceptsOnlyMatchingGuildAndRoleIdentity() throws Exception {
+        var mapper = new ObjectMapper();
+        var payload = mapper.readTree("""
+            {"guildId":"123456789012345678",
+             "sourceRoleId":"900000000000000001",
+             "targetRoleId":"900000000000000003",
+             "sourceMembers":10,
+             "fingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+            """);
+        when(coddy.roleMigrationPreview(GUILD, 77L,
+            "900000000000000001", "900000000000000003")).thenReturn(payload);
+        var actual = service.migrationPreview(actor, GUILD,
+            "900000000000000001", "900000000000000003");
+        assertEquals(10, actual.path("sourceMembers").asInt());
         verifyNoInteractions(jdbc);
     }
 
