@@ -123,6 +123,7 @@ public class RoleToolService {
                 || !HASH.matcher(request.fingerprint()).matches()) throw bad("Prévia obrigatória");
         long roleId = snowflake(request.roleId());
         requireRole(ctx.resources(), request.roleId());
+        coddy.requireRoleToolAdministrator(guildId, ctx.discordUserId());
 
         Stored prior = findByKey(ctx, key);
         if (prior == null) {
@@ -144,13 +145,15 @@ public class RoleToolService {
     public Operation scan(Authentication auth, String guildId, ScanRequest request, String key) {
         Context ctx = context(auth, guildId);
         operationKey(key);
-        if (request == null || !List.of("Dyno", "Loritta", "mee6").contains(request.bot())) {
+        if (request == null || request.bot() == null
+                || !List.of("Dyno", "Loritta", "mee6").contains(request.bot())) {
             throw bad("Bot de origem inválido");
         }
         long channel = snowflake(request.channelId());
         boolean belongs = ctx.resources().channels().stream().anyMatch(c ->
             request.channelId().equals(c.id()) && List.of("text", "news").contains(c.type()));
         if (!belongs) throw bad("Canal inexistente ou de outra Community");
+        coddy.requireRoleToolAdministrator(guildId, ctx.discordUserId());
         Stored op = findByKey(ctx, key);
         if (op == null) op = create(ctx, key, "RECOVERY_SCAN", null, null, request.bot(),
             channel, null, null, 0);
@@ -167,6 +170,7 @@ public class RoleToolService {
         }
         long targetRole = snowflake(request.targetRoleId());
         requireRole(ctx.resources(), request.targetRoleId());
+        coddy.requireRoleToolAdministrator(guildId, ctx.discordUserId());
         Stored scan = find(ctx, request.scanId());
         if (scan == null || !"RECOVERY_SCAN".equals(scan.type())
                 || !"READY".equals(scan.status()) || scan.resultJson() == null) {
