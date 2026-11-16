@@ -25,6 +25,10 @@ public class GuildManagementController {
     }
 
     @GetMapping("/resources") public GuildResources resources(Authentication auth, @PathVariable String guildId) { return service.resources(auth, guildId); }
+    @GetMapping("/roles/{roleId}/bulk-preview")
+    public JsonNode bulkRolePreview(Authentication auth, @PathVariable String guildId, @PathVariable String roleId) {
+        return service.bulkRolePreview(auth, guildId, roleId);
+    }
     @GetMapping("/channels") public ServerChannelsConfig serverChannels(Authentication auth, @PathVariable String guildId) { return service.serverChannels(auth, guildId); }
     @PutMapping("/channels/birthday") public ServerChannelsConfig updateBirthdayChannel(Authentication auth, @PathVariable String guildId, @RequestBody(required=false) BirthdayChannelRequest request) { return service.updateBirthdayChannel(auth, guildId, request); }
     @PutMapping("/channels/ai") public ServerChannelsConfig updateAiChannels(Authentication auth, @PathVariable String guildId, @RequestBody @Valid AiChannelsRequest request) { return service.updateAiChannels(auth, guildId, request); }

@@ -37,6 +37,37 @@ class GuildManagementServiceTest {
         lenient().when(access.authorize(authentication, resources.guildId())).thenReturn(new AuthorizedGuild(42L, resources));
     }
 
+    @Test void previewsBulkRoleForCurrentGuildAndLinkedDiscordActorOnly() {
+        String roleId = "900000000000000001";
+        com.fasterxml.jackson.databind.JsonNode preview = new ObjectMapper()
+            .createObjectNode().put("eligible", 2).put("fingerprint", "a".repeat(64));
+        when(coddy.bulkRolePreview(resources.guildId(), 42L, roleId)).thenReturn(preview);
+
+        assertSame(preview, service.bulkRolePreview(authentication, resources.guildId(), roleId));
+        verify(access).authorize(authentication, resources.guildId());
+        verify(coddy).bulkRolePreview(resources.guildId(), 42L, roleId);
+        verifyNoMoreInteractions(coddy);
+    }
+
+    @Test void refusesInvalidForeignOrUnassignableRoleBeforeCoddy() {
+        String guildId = resources.guildId();
+        assertEquals(HttpStatus.BAD_REQUEST,
+            assertThrows(ResponseStatusException.class,
+                () -> service.bulkRolePreview(authentication, guildId, "bad-id")).getStatusCode());
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY,
+            assertThrows(ResponseStatusException.class,
+                () -> service.bulkRolePreview(authentication, guildId, "900000000000009999")).getStatusCode());
+
+        GuildResources blocked = new GuildResources(guildId,
+            List.of(new GuildRole("900000000000000001", "Cargo inacessível", 99, false, false)),
+            resources.channels(), resources.categories(), resources.botCapabilities());
+        when(access.authorize(authentication, guildId)).thenReturn(new AuthorizedGuild(42L, blocked));
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY,
+            assertThrows(ResponseStatusException.class,
+                () -> service.bulkRolePreview(authentication, guildId, "900000000000000001")).getStatusCode());
+        verifyNoInteractions(coddy);
+    }
+
     @Test void previewsChannelPermissionCopyWithCurrentGuildAuthorizationAndNoMutation() {
         ChannelPermissionCopyRequest request = new ChannelPermissionCopyRequest(
             "800000000000000001", "700000000000000001");
