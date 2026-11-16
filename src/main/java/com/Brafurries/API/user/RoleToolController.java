@@ -24,6 +24,12 @@ public class RoleToolController {
         return service.get(actor, guildId, operationId);
     }
 
+    @PostMapping("/operations/{operationId}/cancel")
+    public RoleToolService.Operation cancelPending(Authentication actor, @PathVariable String guildId,
+                                                  @PathVariable long operationId) {
+        return service.cancelPending(actor, guildId, operationId);
+    }
+
     @PostMapping("/bulk")
     public RoleToolService.Operation bulk(Authentication actor, @PathVariable String guildId,
             @RequestHeader("Idempotency-Key") String key,
