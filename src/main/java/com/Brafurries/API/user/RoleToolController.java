@@ -37,6 +37,20 @@ public class RoleToolController {
         return service.bulk(actor, guildId, request, key);
     }
 
+    @GetMapping("/migration/preview")
+    public com.fasterxml.jackson.databind.JsonNode migrationPreview(
+            Authentication actor, @PathVariable String guildId,
+            @RequestParam String sourceRoleId, @RequestParam String targetRoleId) {
+        return service.migrationPreview(actor, guildId, sourceRoleId, targetRoleId);
+    }
+
+    @PostMapping("/migration")
+    public RoleToolService.Operation migrate(Authentication actor, @PathVariable String guildId,
+            @RequestHeader("Idempotency-Key") String key,
+            @RequestBody RoleToolService.MigrationRequest request) {
+        return service.migrate(actor, guildId, request, key);
+    }
+
     @PostMapping("/recovery/scans")
     public RoleToolService.Operation scan(Authentication actor, @PathVariable String guildId,
             @RequestHeader("Idempotency-Key") String key,
