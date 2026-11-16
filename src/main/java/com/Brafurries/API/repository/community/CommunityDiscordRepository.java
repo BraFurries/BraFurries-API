@@ -41,12 +41,6 @@ public interface CommunityDiscordRepository extends JpaRepository<CommunityDisco
     long countByLastBotLeftAtGreaterThanEqual(java.time.LocalDateTime sinceUtc);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT link FROM CommunityDiscord link JOIN FETCH link.community " +
-           "WHERE link.guildId = :guildId AND link.community.id = :communityId AND link.active = true")
-    List<CommunityDiscord> lockActiveGuildInCommunity(@Param("guildId") Long guildId,
-                                                       @Param("communityId") Integer communityId);
-
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT link FROM CommunityDiscord link JOIN FETCH link.community WHERE link.guildId = :guildId")
     Optional<CommunityDiscord> findByGuildIdForUpdate(@Param("guildId") Long guildId);
     @Query("""

@@ -1,121 +1,102 @@
 package com.Brafurries.API.admin;
 
-import com.Brafurries.API.entity.community.BlacklistedGame;
-import com.Brafurries.API.entity.community.CommunityDiscord;
-import com.Brafurries.API.repository.community.BlacklistedGameRepository;
-import com.Brafurries.API.repository.community.CommunityDiscordRepository;
+import com.Brafurries.API.entity.platform.GlobalRecordBlacklistGame;
+import com.Brafurries.API.repository.platform.GlobalRecordBlacklistGameRepository;
+import com.Brafurries.API.repository.user.UserRepository;
 import java.util.List;
 import java.util.Locale;
-import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+/**
+ * One global policy for all Coddy guilds: deliberately NOT tenant scoped.
+ * Only the ADMIN-only controller may access this service.
+ */
 @Service
 public class AdminRecordBlacklistService {
     private static final Logger log = LoggerFactory.getLogger(AdminRecordBlacklistService.class);
-    private final CommunityDiscordRepository guilds;
-    private final BlacklistedGameRepository games;
+    private final GlobalRecordBlacklistGameRepository games;
+    private final UserRepository users;
+    private final JdbcTemplate jdbc;
 
-    public AdminRecordBlacklistService(CommunityDiscordRepository guilds,
-                                       BlacklistedGameRepository games) {
-        this.guilds = guilds;
+    public AdminRecordBlacklistService(GlobalRecordBlacklistGameRepository games,
+                                       UserRepository users, JdbcTemplate jdbc) {
         this.games = games;
+        this.users = users;
+        this.jdbc = jdbc;
     }
 
-    public record Guild(int communityId, String communityName, String guildId, String guildName) {}
     public record Game(int id, String name) {}
     public record ListView(List<Game> games) {}
     public record CreateRequest(String name) {}
 
-    public List<Guild> guildOptions() {
-        return guilds.findAllByActiveTrueOrderByGuildIdAsc().stream().map(g ->
-            new Guild(g.getCommunity().getId(), g.getCommunity().getName(),
-                Long.toString(g.getGuildId()), g.getName())
-        ).toList();
-    }
-
-    private static long snowflake(String guildId) {
-        if (guildId == null || !guildId.matches("[1-9][0-9]{0,18}")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Servidor Discord inválido");
-        }
-        try {
-            return Long.parseLong(guildId);
-        } catch (NumberFormatException invalid) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Servidor Discord inválido");
-        }
-    }
-
-    private CommunityDiscord resolveGuild(int communityId, String guildId, boolean lock) {
-        if (communityId <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Community inválida");
-        }
-        long id = snowflake(guildId);
-        List<CommunityDiscord> matches = lock
-            ? guilds.lockActiveGuildInCommunity(id, communityId)
-            : guilds.findAllByActiveTrueOrderByGuildIdAsc().stream()
-                .filter(g -> Objects.equals(g.getGuildId(), id)
-                    && g.getCommunity() != null
-                    && Objects.equals(g.getCommunity().getId(), communityId))
-                .toList();
-        if (matches.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND,
-            "Servidor não pertence à Community ativa solicitada");
-        if (matches.size() != 1) throw new ResponseStatusException(HttpStatus.CONFLICT,
-            "Mais de um vínculo Discord para esta Community; operação bloqueada");
-        return matches.getFirst();
-    }
-
-    private static ListView toView(List<BlacklistedGame> entries) {
+    private static ListView view(List<GlobalRecordBlacklistGame> entries) {
         return new ListView(entries.stream()
-            .map(item -> new Game(item.getId(), item.getGameName())).toList());
+            .map(e -> new Game(e.getId(), e.getGameName())).toList());
+    }
+
+    private int actorId(Authentication auth) {
+        if (auth == null || auth.getName() == null || auth.getName().isBlank())
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Usuário não autenticado");
+        return users.findByEmail(auth.getName().trim().toLowerCase(Locale.ROOT))
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Conta não encontrada"))
+            .getId();
     }
 
     @Transactional(readOnly = true)
-    public ListView list(int communityId, String guildId) {
-        CommunityDiscord guild = resolveGuild(communityId, guildId, false);
-        return toView(games.findAllByCommunityDiscordGuildIdOrderByGameNameAsc(guild.getGuildId()));
+    public ListView list() {
+        return view(games.findAllByOrderByGameNameAsc());
     }
 
     @Transactional
-    public ListView add(Authentication actor, int communityId, String guildId, CreateRequest request) {
-        if (request == null || request.name() == null) throw new ResponseStatusException(
-            HttpStatus.BAD_REQUEST, "Nome do jogo obrigatório");
+    public ListView add(Authentication actor, CreateRequest request) {
+        int userId = actorId(actor);
+        if (request == null || request.name() == null)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nome do jogo obrigatório");
         String name = request.name().trim();
-        if (name.isEmpty() || name.length() > 50 || name.chars().anyMatch(Character::isISOControl)) {
+        if (name.isEmpty() || name.length() > 50 || name.chars().anyMatch(Character::isISOControl))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                 "Nome do jogo deve conter de 1 a 50 caracteres válidos");
-        }
-        CommunityDiscord guild = resolveGuild(communityId, guildId, true);
-        var current = games.findAllByCommunityDiscordGuildIdOrderByGameNameAsc(guild.getGuildId());
-        if (current.stream().anyMatch(g -> g.getGameName().toLowerCase(Locale.ROOT)
-                                         .equals(name.toLowerCase(Locale.ROOT)))) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Jogo já está na blacklist");
-        }
-        var entry = new BlacklistedGame();
-        entry.setCommunityDiscord(guild);
+        if (games.existsByGameNameIgnoreCase(name))
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Jogo já está na blacklist global");
+        var entry = new GlobalRecordBlacklistGame();
         entry.setGameName(name);
-        games.saveAndFlush(entry);
-        log.info("record_blacklist_add actor={} community_id={} guild_id={} game={}",
-            actor.getName(), communityId, guildId, name);
-        return toView(games.findAllByCommunityDiscordGuildIdOrderByGameNameAsc(guild.getGuildId()));
+        try {
+            games.saveAndFlush(entry);
+        } catch (DataIntegrityViolationException duplicate) {
+            // The DB unique index is the final concurrency authority.
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Jogo já está na blacklist global");
+        }
+        jdbc.update("""
+            INSERT INTO record_global_blacklist_audit
+                (entry_id, game_name, action_type, actor_user_id)
+            VALUES (?, ?, 'ADD', ?)
+            """, entry.getId(), entry.getGameName(), userId);
+        log.info("record_global_blacklist_add actor_id={} entry_id={}", userId, entry.getId());
+        return view(games.findAllByOrderByGameNameAsc());
     }
 
     @Transactional
-    public ListView remove(Authentication actor, int communityId, String guildId, int gameId) {
-        CommunityDiscord guild = resolveGuild(communityId, guildId, true);
-        var existing = games.findById(gameId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Entrada não encontrada"));
-        if (!Objects.equals(existing.getCommunityDiscord().getGuildId(), guild.getGuildId())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Entrada não pertence a este servidor");
-        }
-        games.delete(existing);
+    public ListView remove(Authentication actor, int entryId) {
+        int userId = actorId(actor);
+        var entry = games.findById(entryId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Jogo não encontrado"));
+        String name = entry.getGameName();
+        games.delete(entry);
         games.flush();
-        log.info("record_blacklist_remove actor={} community_id={} guild_id={} entry_id={}",
-            actor.getName(), communityId, guildId, gameId);
-        return toView(games.findAllByCommunityDiscordGuildIdOrderByGameNameAsc(guild.getGuildId()));
+        jdbc.update("""
+            INSERT INTO record_global_blacklist_audit
+                (entry_id, game_name, action_type, actor_user_id)
+            VALUES (?, ?, 'REMOVE', ?)
+            """, entryId, name, userId);
+        log.info("record_global_blacklist_remove actor_id={} entry_id={}", userId, entryId);
+        return view(games.findAllByOrderByGameNameAsc());
     }
 }
