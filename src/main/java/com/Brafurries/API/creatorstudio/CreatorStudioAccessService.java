@@ -203,4 +203,89 @@ public class CreatorStudioAccessService {
               FROM creator_studio_subscriptions WHERE user_id=?
             """, targetUserId, issuer.getId(), targetUserId);
     }
+
+    /** Owner-only overview. No Community status or Commerce role can grant access. */
+    public record Invitation(int userId, String displayName, String tier,
+                             String sourceKind, String status, boolean active,
+                             LocalDateTime startsAtUtc, LocalDateTime expiresAtUtc,
+                             boolean mergedAccount) {}
+
+    public record InvitationPage(List<Invitation> items, int page, int pageSize, long total) {}
+
+    public record Candidate(int userId, String displayName, boolean mergedAccount,
+                            AccessStatus currentAccess) {}
+
+    private void requireActiveOwner(Authentication auth) {
+        User issuer = identity.requireOwner(auth);
+        if (issuer.getId() == null || issuer.getMergedIntoUser() != null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                "Conta proprietária consolidada ou indisponível");
+        }
+    }
+
+    /** Preview the canonical account BEFORE a grant; does not change any rights. */
+    @Transactional(readOnly = true)
+    public Candidate candidate(Authentication auth, int userId) {
+        requireActiveOwner(auth);
+        if (userId <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "ID de usuário inválido");
+        }
+        List<Candidate> users = jdbc.query("""
+            SELECT id, display_name, merged_into_user_id
+              FROM users WHERE id=?
+            """, (rs, n) -> new Candidate(
+                rs.getInt("id"),
+                rs.getString("display_name"),
+                rs.getObject("merged_into_user_id") != null,
+                new AccessStatus(false, null, "NOT_AUTHORIZED", null, null)
+            ), userId);
+        if (users.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conta não encontrada");
+        }
+        Candidate selected = users.get(0);
+        return new Candidate(selected.userId(), selected.displayName(),
+            selected.mergedAccount(), accessOf(selected.userId()));
+    }
+
+    /** Owner-only paginated grants list, including revoked and merged accounts. */
+    @Transactional(readOnly = true)
+    public InvitationPage invitations(Authentication auth, String status, int page, int pageSize) {
+        requireActiveOwner(auth);
+        String filter = status == null || status.isBlank()
+            ? "ALL" : status.trim().toUpperCase(java.util.Locale.ROOT);
+        if (!List.of("ALL", "ACTIVE", "REVOKED", "SUSPENDED").contains(filter)
+            || page < 1 || page > 100_000 || pageSize < 1 || pageSize > 50) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                "Filtro ou paginação inválida");
+        }
+        Long total = jdbc.queryForObject("""
+            SELECT COUNT(*) FROM creator_studio_subscriptions
+             WHERE (?='ALL' OR status=?)
+            """, Long.class, filter, filter);
+        List<Invitation> rows = jdbc.query("""
+            SELECT s.user_id,u.display_name,s.tier,s.source_kind,s.status,
+                   s.starts_at,s.expires_at,u.merged_into_user_id,
+                   CASE WHEN s.status='ACTIVE'
+                         AND s.starts_at<=UTC_TIMESTAMP(6)
+                         AND (s.expires_at IS NULL OR s.expires_at>UTC_TIMESTAMP(6))
+                         AND u.merged_into_user_id IS NULL
+                     THEN 1 ELSE 0 END AS effective_access
+              FROM creator_studio_subscriptions s
+              JOIN users u ON u.id=s.user_id
+             WHERE (?='ALL' OR s.status=?)
+             ORDER BY s.created_at DESC,s.user_id DESC
+             LIMIT ? OFFSET ?
+            """, (rs, n) -> new Invitation(
+                rs.getInt("user_id"),
+                rs.getString("display_name"),
+                rs.getString("tier"),
+                rs.getString("source_kind"),
+                rs.getString("status"),
+                rs.getInt("effective_access") == 1,
+                rs.getObject("starts_at", LocalDateTime.class),
+                rs.getObject("expires_at", LocalDateTime.class),
+                rs.getObject("merged_into_user_id") != null
+            ), filter, filter, pageSize, (page - 1) * pageSize);
+        return new InvitationPage(rows, page, pageSize, total == null ? 0 : total);
+    }
 }
