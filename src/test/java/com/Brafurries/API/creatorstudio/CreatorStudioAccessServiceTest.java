@@ -154,6 +154,70 @@ class CreatorStudioAccessServiceTest {
     }
 
     @Test
+    void onlyOwnerCanListOrPreviewPilotParticipants() {
+        when(identity.requireOwner(auth)).thenThrow(
+            new ResponseStatusException(HttpStatus.FORBIDDEN));
+        assertEquals(HttpStatus.FORBIDDEN, assertThrows(ResponseStatusException.class,
+            () -> access.invitations(auth, "ALL", 1, 25)).getStatusCode());
+        assertEquals(HttpStatus.FORBIDDEN, assertThrows(ResponseStatusException.class,
+            () -> access.candidate(auth, 22)).getStatusCode());
+        verifyNoInteractions(jdbc);
+    }
+
+    @Test
+    void rejectsInvalidPaginationAndInvitationStatusBeforeQuery() {
+        when(identity.requireOwner(auth)).thenReturn(user(1));
+        for (String bad : List.of("PRO", "BILLING", "ACTIVE' OR 1=1")) {
+            assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+                () -> access.invitations(auth, bad, 1, 25)).getStatusCode());
+        }
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+            () -> access.invitations(auth, "ALL", 1, 51)).getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+            () -> access.candidate(auth, -3)).getStatusCode());
+        verifyNoInteractions(jdbc);
+    }
+
+    @Test
+    void ownerListIsPaginatedAndNeverReturnsAllGrantsByDefault() {
+        when(identity.requireOwner(auth)).thenReturn(user(1));
+        when(jdbc.queryForObject(contains("creator_studio_subscriptions"),
+            eq(Long.class), eq("ACTIVE"), eq("ACTIVE"))).thenReturn(87L);
+        var result = access.invitations(auth, "ACTIVE", 2, 25);
+        assertEquals(87L, result.total());
+        assertTrue(result.items().isEmpty());
+        verify(jdbc).query(argThat(sql ->
+            sql.contains("JOIN users u ON u.id=s.user_id")
+            && sql.contains("LIMIT ? OFFSET ?")
+            && sql.contains("merged_into_user_id IS NULL")),
+            any(org.springframework.jdbc.core.RowMapper.class),
+            eq("ACTIVE"), eq("ACTIVE"), eq(25), eq(25));
+    }
+
+    @Test
+    void ownerCanPreviewExistingUninvitedUserWithoutChangingGrants() {
+        when(identity.requireOwner(auth)).thenReturn(user(1));
+        when(jdbc.query(contains("SELECT id, display_name"),
+            any(org.springframework.jdbc.core.RowMapper.class), eq(22)))
+            .thenReturn(List.of(new CreatorStudioAccessService.Candidate(
+                22, "Artista", false, new CreatorStudioAccessService.AccessStatus(
+                    false, null, "NOT_AUTHORIZED", null, null))));
+        var result = access.candidate(auth, 22);
+        assertEquals(22, result.userId());
+        assertFalse(result.currentAccess().allowed());
+        assertEquals("Artista", result.displayName());
+        verify(jdbc, never()).update(anyString(), any(Object[].class));
+    }
+
+    @Test
+    void ownerCannotPreviewNonexistentAccountAsValidParticipant() {
+        when(identity.requireOwner(auth)).thenReturn(user(1));
+        assertEquals(HttpStatus.NOT_FOUND, assertThrows(ResponseStatusException.class,
+            () -> access.candidate(auth, 999999)).getStatusCode());
+        verify(jdbc, never()).update(anyString(), any(Object[].class));
+    }
+
+    @Test
     void noRawUserIdMayBeSuppliedAsActiveActor() {
         when(identity.currentUser(auth)).thenReturn(user(8));
         when(jdbc.queryForObject(contains("creator_studio_subscriptions"),
