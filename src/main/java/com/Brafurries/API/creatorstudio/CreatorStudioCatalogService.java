@@ -176,14 +176,20 @@ public class CreatorStudioCatalogService {
         }
     }
 
+    private record WorkflowHeader(long id, String name, boolean isDefault) {}
+
     @Transactional(readOnly = true)
     public List<Workflow> workflows(Authentication auth) {
         int owner = access.requirePro(auth);
-        return jdbc.query("""
+        List<WorkflowHeader> headers = jdbc.query("""
             SELECT id,name,is_default FROM creator_studio_workflows
              WHERE owner_user_id=? ORDER BY is_default DESC,name,id
-            """, (rs, n) -> workflow(owner, rs.getLong("id"),
-                rs.getString("name"), rs.getBoolean("is_default")), owner);
+            """, (rs, n) -> new WorkflowHeader(
+                rs.getLong("id"), rs.getString("name"), rs.getBoolean("is_default")), owner);
+        // Do not issue a second JDBC query while the first ResultSet is open.
+        return headers.stream()
+            .map(h -> workflow(owner, h.id(), h.name(), h.isDefault()))
+            .toList();
     }
 
     private Workflow workflow(int owner, long id, String name, boolean isDefault) {
