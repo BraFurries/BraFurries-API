@@ -152,7 +152,11 @@ public class CreatorStudioAccessService {
                     "Não rebaixar o Pro vitalício do piloto para Free");
             }
             if (source.equals(previousSource) && "ACTIVE".equals(oldStatus)) {
-                return accessOf(targetUserId); // Idempotent, no spurious audit.
+                AccessStatus currentAccess = accessOf(targetUserId);
+                if (currentAccess.allowed()) {
+                    return currentAccess; // Idempotent, no duplicate audit.
+                }
+                // An expired or not-yet-started FREE invitation can be reissued.
             }
             action = "INVITE".equals(previousSource) && "PILOT".equals(source)
                 ? "PLAN_CHANGED" : "RENEWED";
