@@ -141,12 +141,13 @@ public class CreatorStudioCatalogService {
         if (id <= 0 || draft == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
         String name = requiredName(draft.name());
         checkWorkflow(owner, draft.workflowId());
+        requireOwnerRecord("creator_studio_art_types", owner, id);
         try {
-            int changed = jdbc.update("""
+            // MariaDB may report 0 changed rows for an idempotent PUT.
+            jdbc.update("""
                 UPDATE creator_studio_art_types SET name=?,workflow_id=?
                  WHERE id=? AND owner_user_id=?
                 """, name, draft.workflowId(), id, owner);
-            if (changed != 1) throw notFound();
             return new ArtType(id, name, draft.workflowId());
         } catch (DuplicateKeyException e) {
             throw conflict();
@@ -272,12 +273,12 @@ public class CreatorStudioCatalogService {
                      WHERE owner_user_id=? AND id<>? AND is_default=1
                     """, owner, id);
             }
-            int changed = jdbc.update("""
+            // Ownership was checked above, so a zero changed-row count is not 404.
+            jdbc.update("""
                 UPDATE creator_studio_workflows
                    SET name=?,is_default=?,updated_at=UTC_TIMESTAMP(6)
                  WHERE id=? AND owner_user_id=?
                 """, name, draft.isDefault(), id, owner);
-            if (changed != 1) throw notFound();
             // Updating the reusable model never touches materialized commission steps.
             jdbc.update("""
                 DELETE FROM creator_studio_workflow_steps
