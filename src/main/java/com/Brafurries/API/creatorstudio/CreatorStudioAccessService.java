@@ -2,6 +2,8 @@ package com.Brafurries.API.creatorstudio;
 
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.platform.PlatformAuthorizationService;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -13,16 +15,16 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * All private Creator Studio access is based on a canonical users.id and a
- * currently valid subscription period. No Community, commerce or Patreon role
- * grants access. No payment processor state is trusted from client input.
+ * A Creator Studio subscription is an explicit invitation as well as a tier.
+ * No row -> no access, even to Free. No Community/Patreon/commerce bypass.
+ * Pilot contributors receive PRO with no expiration.
  */
 @Service
 public class CreatorStudioAccessService {
     private final PlatformAuthorizationService identity;
     private final JdbcTemplate jdbc;
 
-    public record AccessStatus(boolean active, String status,
+    public record AccessStatus(boolean allowed, String tier, String status,
                                String sourceKind, LocalDateTime expiresAtUtc) {}
 
     public CreatorStudioAccessService(PlatformAuthorizationService identity,
@@ -31,7 +33,7 @@ public class CreatorStudioAccessService {
         this.jdbc = jdbc;
     }
 
-    private int actorId(Authentication authentication) {
+    int actorId(Authentication authentication) {
         User user = identity.currentUser(authentication);
         if (user.getId() == null || user.getMergedIntoUser() != null) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
@@ -45,25 +47,38 @@ public class CreatorStudioAccessService {
         return accessOf(actorId(authentication));
     }
 
+    private static AccessStatus mapAccess(ResultSet rs, int row) throws SQLException {
+        return new AccessStatus(rs.getInt("allowed") == 1, rs.getString("tier"),
+            rs.getString("status"), rs.getString("source_kind"),
+            rs.getObject("expires_at", LocalDateTime.class));
+    }
+
     private AccessStatus accessOf(int userId) {
         List<AccessStatus> rows = jdbc.query("""
-            SELECT source_kind,status,expires_at,
+            SELECT tier,source_kind,status,expires_at,
                    CASE WHEN status='ACTIVE'
                              AND starts_at<=UTC_TIMESTAMP(6)
-                             AND expires_at>UTC_TIMESTAMP(6)
-                        THEN 1 ELSE 0 END AS active
+                             AND (expires_at IS NULL OR expires_at>UTC_TIMESTAMP(6))
+                        THEN 1 ELSE 0 END AS allowed
               FROM creator_studio_subscriptions
              WHERE user_id=?
-            """, (rs, i) -> new AccessStatus(
-                rs.getInt("active") == 1,
-                rs.getString("status"),
-                rs.getString("source_kind"),
-                rs.getObject("expires_at", LocalDateTime.class)), userId);
-        return rows.isEmpty() ? new AccessStatus(false, "NONE", null, null) : rows.get(0);
+            """, CreatorStudioAccessService::mapAccess, userId);
+        return rows.isEmpty()
+            ? new AccessStatus(false, null, "NOT_AUTHORIZED", null, null)
+            : rows.get(0);
     }
 
     @Transactional(readOnly = true)
     public int requireActive(Authentication authentication) {
+        return requireTier(authentication, null);
+    }
+
+    @Transactional(readOnly = true)
+    public int requirePro(Authentication authentication) {
+        return requireTier(authentication, "PRO");
+    }
+
+    private int requireTier(Authentication authentication, String minimumTier) {
         int userId = actorId(authentication);
         Integer allowed = jdbc.queryForObject("""
             SELECT CASE WHEN EXISTS (
@@ -71,94 +86,116 @@ public class CreatorStudioAccessService {
                  WHERE user_id=?
                    AND status='ACTIVE'
                    AND starts_at<=UTC_TIMESTAMP(6)
-                   AND expires_at>UTC_TIMESTAMP(6)
+                   AND (expires_at IS NULL OR expires_at>UTC_TIMESTAMP(6))
+                   AND (? IS NULL OR tier=?)
             ) THEN 1 ELSE 0 END
-            """, Integer.class, userId);
+            """, Integer.class, userId, minimumTier, minimumTier);
         if (allowed == null || allowed != 1) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                "É necessária uma assinatura ativa do Creator Studio");
+                "Acesso autorizado ao plano Creator Studio necessário");
         }
         return userId;
     }
 
-    /** Only platform owner can issue time-limited pilot access. */
+    /** Explicit invitation for the limited, free edition. No self-enrollment. */
     @Transactional
-    public AccessStatus grantPilot(Authentication authentication, int targetUserId, int days) {
-        User issuer = identity.requireOwner(authentication);
+    public AccessStatus grantFree(Authentication auth, int targetUserId) {
+        return grant(auth, targetUserId, "INVITE", "FREE");
+    }
+
+    /** Founding pilot participant; permanent PRO, never auto-downgraded. */
+    @Transactional
+    public AccessStatus grantPilotLifetimePro(Authentication auth, int targetUserId) {
+        return grant(auth, targetUserId, "PILOT", "PRO");
+    }
+
+    private AccessStatus grant(Authentication auth, int targetUserId, String source, String tier) {
+        User issuer = identity.requireOwner(auth);
         if (issuer.getId() == null || issuer.getMergedIntoUser() != null) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         }
-        if (targetUserId <= 0 || days < 1 || days > 90) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                "Usuário ou duração de piloto inválidos (1 a 90 dias)");
-        }
-        Integer exists = jdbc.queryForObject("""
-            SELECT COUNT(*) FROM users
-             WHERE id=? AND merged_into_user_id IS NULL
-            """, Integer.class, targetUserId);
-        if (exists == null || exists != 1) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuário não encontrado");
+        if (targetUserId <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Usuário inválido");
         }
 
-        List<Map<String, Object>> previous = jdbc.queryForList("""
-            SELECT source_kind,status FROM creator_studio_subscriptions
+        Integer count = jdbc.queryForObject("""
+            SELECT COUNT(*) FROM users WHERE id=? AND merged_into_user_id IS NULL
+            """, Integer.class, targetUserId);
+        if (count == null || count != 1) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                "Usuário ativo não encontrado");
+        }
+
+        List<Map<String, Object>> oldRows = jdbc.queryForList("""
+            SELECT tier,source_kind,status
+              FROM creator_studio_subscriptions
              WHERE user_id=? FOR UPDATE
             """, targetUserId);
-        String previousStatus = null;
+        String oldStatus = null;
         String action = "ACTIVATED";
-        if (previous.isEmpty()) {
+        if (oldRows.isEmpty()) {
             jdbc.update("""
                 INSERT INTO creator_studio_subscriptions
-                    (user_id,source_kind,status,starts_at,expires_at,issued_by_user_id)
-                VALUES (?,'PILOT','ACTIVE',UTC_TIMESTAMP(6),
-                        DATE_ADD(UTC_TIMESTAMP(6),INTERVAL ? DAY),?)
-                """, targetUserId, days, issuer.getId());
+                    (user_id,tier,source_kind,status,starts_at,expires_at,issued_by_user_id)
+                VALUES (?,?,?,'ACTIVE',UTC_TIMESTAMP(6),NULL,?)
+                """, targetUserId, tier, source, issuer.getId());
         } else {
-            Map<String, Object> current = previous.get(0);
-            if (!"PILOT".equals(current.get("source_kind"))) {
+            Map<String, Object> old = oldRows.get(0);
+            String previousSource = String.valueOf(old.get("source_kind"));
+            oldStatus = String.valueOf(old.get("status"));
+            if ("BILLING".equals(previousSource)) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Não sobrescrever uma assinatura paga com acesso piloto");
+                    "Acesso associado a cobrança; não sobrescrever administrativamente");
             }
-            previousStatus = String.valueOf(current.get("status"));
-            action = "RENEWED";
+            if ("PILOT".equals(previousSource) && "INVITE".equals(source)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Não rebaixar o Pro vitalício do piloto para Free");
+            }
+            if (source.equals(previousSource) && "ACTIVE".equals(oldStatus)) {
+                return accessOf(targetUserId); // Idempotent, no spurious audit.
+            }
+            action = "INVITE".equals(previousSource) && "PILOT".equals(source)
+                ? "PLAN_CHANGED" : "RENEWED";
             jdbc.update("""
                 UPDATE creator_studio_subscriptions
-                   SET status='ACTIVE', starts_at=UTC_TIMESTAMP(6),
-                       expires_at=DATE_ADD(UTC_TIMESTAMP(6),INTERVAL ? DAY),
-                       issued_by_user_id=?, external_reference=NULL
-                 WHERE user_id=? AND source_kind='PILOT'
-                """, issuer.getId(), targetUserId);
+                   SET tier=?,source_kind=?,status='ACTIVE',starts_at=UTC_TIMESTAMP(6),
+                       expires_at=NULL,issued_by_user_id=?,external_reference=NULL
+                 WHERE user_id=?
+                """, tier, source, issuer.getId(), targetUserId);
         }
         jdbc.update("""
             INSERT INTO creator_studio_subscription_events
-                (user_id,actor_user_id,action,source_kind,previous_status,
+                (user_id,actor_user_id,action,tier,source_kind,previous_status,
                  new_status,starts_at,expires_at)
-            SELECT ?,?,?,'PILOT',?,'ACTIVE',starts_at,expires_at
+            SELECT ?,?,?,tier,source_kind,?,'ACTIVE',starts_at,expires_at
               FROM creator_studio_subscriptions WHERE user_id=?
-            """, targetUserId, issuer.getId(), action, previousStatus, targetUserId);
+            """, targetUserId, issuer.getId(), action, oldStatus, targetUserId);
         return accessOf(targetUserId);
     }
 
+    /** Explicit owner action. No automatic expiry or billing-triggered revocation. */
     @Transactional
-    public void revokePilot(Authentication authentication, int targetUserId) {
-        User issuer = identity.requireOwner(authentication);
+    public void revokeGrant(Authentication auth, int targetUserId) {
+        User issuer = identity.requireOwner(auth);
         if (issuer.getId() == null || issuer.getMergedIntoUser() != null) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         }
         int changed = jdbc.update("""
             UPDATE creator_studio_subscriptions
                SET status='REVOKED'
-             WHERE user_id=? AND source_kind='PILOT' AND status='ACTIVE'
+             WHERE user_id=? AND source_kind IN ('INVITE','PILOT')
+               AND status='ACTIVE'
             """, targetUserId);
         if (changed != 1) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,
-                "Assinatura piloto ativa não encontrada");
+                "Concessão Free/Pilot ativa não encontrada");
         }
         jdbc.update("""
             INSERT INTO creator_studio_subscription_events
-                (user_id,actor_user_id,action,source_kind,previous_status,
+                (user_id,actor_user_id,action,tier,source_kind,previous_status,
                  new_status,starts_at,expires_at)
-            SELECT ?,?,'REVOKED','PILOT','ACTIVE','REVOKED',starts_at,expires_at
+            SELECT ?,?,'REVOKED',tier,source_kind,'ACTIVE','REVOKED',
+                   starts_at,expires_at
               FROM creator_studio_subscriptions WHERE user_id=?
             """, targetUserId, issuer.getId(), targetUserId);
     }
