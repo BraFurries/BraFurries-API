@@ -26,6 +26,25 @@ public class CreatorStudioAccessController {
             .body(access.myAccess(authentication));
     }
 
+    @GetMapping("/admin/invitations")
+    public ResponseEntity<CreatorStudioAccessService.InvitationPage> invitations(
+        Authentication authentication,
+        @RequestParam(defaultValue = "ALL") String status,
+        @RequestParam(defaultValue = "1") int page,
+        @RequestParam(defaultValue = "25") int pageSize
+    ) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+            .body(access.invitations(authentication, status, page, pageSize));
+    }
+
+    @GetMapping("/admin/invitations/candidate/{userId}")
+    public ResponseEntity<CreatorStudioAccessService.Candidate> candidate(
+        Authentication authentication, @PathVariable int userId
+    ) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+            .body(access.candidate(authentication, userId));
+    }
+
     @PostMapping("/admin/invitations/free/{userId}")
     public ResponseEntity<AccessStatus> inviteFree(Authentication authentication,
                                                    @PathVariable int userId) {
