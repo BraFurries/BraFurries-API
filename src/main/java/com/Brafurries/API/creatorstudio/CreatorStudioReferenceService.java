@@ -53,7 +53,12 @@ public class CreatorStudioReferenceService {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Use um endereço HTTPS válido, sem credenciais ou fragmentos");
             }
-            return uri.toASCIIString();
+            String normalized = uri.toASCIIString();
+            if (normalized.length() > 1500) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "URL excede o limite após normalização");
+            }
+            return normalized;
         } catch (java.net.URISyntaxException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "URL inválida");
         }
