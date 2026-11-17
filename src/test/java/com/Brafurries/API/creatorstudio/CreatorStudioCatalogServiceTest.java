@@ -52,6 +52,19 @@ class CreatorStudioCatalogServiceTest {
     }
 
     @Test
+    void updatingAnUnchangedArtTypeIsIdempotent() {
+        when(access.requirePro(auth)).thenReturn(31);
+        when(jdbc.queryForObject(contains("creator_studio_art_types"),
+            eq(Integer.class), eq(31), eq(14L))).thenReturn(1);
+        // JdbcTemplate.update returns 0 changed rows by default.
+        ArtType saved = catalog.updateArtType(auth, 14L,
+            new ArtTypeDraft("Stickers", null));
+        assertEquals("Stickers", saved.name());
+        verify(jdbc).update(contains("UPDATE creator_studio_art_types"),
+            eq("Stickers"), isNull(), eq(14L), eq(31));
+    }
+
+    @Test
     void cannotBorrowAnotherArtistsReusableStage() {
         when(access.requirePro(auth)).thenReturn(31);
         when(jdbc.queryForObject(contains("creator_studio_stage_definitions"),
@@ -69,8 +82,6 @@ class CreatorStudioCatalogServiceTest {
             any(RowMapper.class), eq(31))).thenReturn(List.of(31));
         when(jdbc.queryForObject(contains("creator_studio_workflows"),
             eq(Integer.class), eq(31), eq(12L))).thenReturn(1);
-        when(jdbc.update(contains("UPDATE creator_studio_workflows"),
-            eq("Pro"), eq(false), eq(12L), eq(31))).thenReturn(1);
         catalog.updateWorkflow(auth, 12, new WorkflowDraft("Pro", false,
             List.of(new StepDraft(null, "Rascunho"))));
         verify(jdbc).update(contains("DELETE FROM creator_studio_workflow_steps"),
