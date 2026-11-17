@@ -24,7 +24,8 @@ public class RoleToolStaleOperationJob {
 
     static String terminalStatus(String status, String operationType, int addedCount) {
         // Discord mutations may have succeeded after the last progress checkpoint.
-        boolean mutating = "BULK_ADD".equals(operationType) || "RECOVERY_APPLY".equals(operationType);
+        boolean mutating = "BULK_ADD".equals(operationType) || "RECOVERY_APPLY".equals(operationType)
+            || "ROLE_MIGRATE".equals(operationType);
         return addedCount > 0 || ("RUNNING".equals(status) && mutating)
             ? "PARTIAL" : "FAILED";
     }

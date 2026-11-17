@@ -8,6 +8,7 @@ class RoleToolStaleOperationJobTest {
     @Test void runningMutationsAreReportedPartialEvenWhenCheckpointShowsZero() {
         assertEquals("PARTIAL", RoleToolStaleOperationJob.terminalStatus("RUNNING", "BULK_ADD", 0));
         assertEquals("PARTIAL", RoleToolStaleOperationJob.terminalStatus("RUNNING", "RECOVERY_APPLY", 0));
+        assertEquals("PARTIAL", RoleToolStaleOperationJob.terminalStatus("RUNNING", "ROLE_MIGRATE", 0));
     }
 
     @Test void aScanOrNeverStartedRequestHasNoDiscordMutations() {
