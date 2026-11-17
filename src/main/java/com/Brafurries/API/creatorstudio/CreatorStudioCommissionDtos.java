@@ -23,8 +23,17 @@ public final class CreatorStudioCommissionDtos {
         @Size(max = 8000) String privateNotes,
         @NotNull LocalDate requestedOn,
         LocalDate dueOn,
-        @Min(1) Long artTypeId
-    ) {}
+        @Min(1) Long artTypeId,
+        @Min(1) Long workflowId
+    ) {
+        // Keep the existing 7-argument constructor for tests/callers.
+        public SaveCommission(String title, String clientName, String description,
+                              String privateNotes, LocalDate requestedOn,
+                              LocalDate dueOn, Long artTypeId) {
+            this(title, clientName, description, privateNotes, requestedOn,
+                 dueOn, artTypeId, null);
+        }
+    }
 
     public record ChangeStatus(@NotNull Status status) {}
 
@@ -40,7 +49,9 @@ public final class CreatorStudioCommissionDtos {
         Status status,
         LocalDateTime createdAtUtc,
         LocalDateTime updatedAtUtc,
-        LocalDateTime completedAtUtc
+        LocalDateTime completedAtUtc,
+        String currentStageName,
+        Long currentStageDefinitionId
     ) {}
 
     public record CommissionPage(List<Commission> items, int page, int pageSize, long total) {}
