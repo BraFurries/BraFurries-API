@@ -200,7 +200,9 @@ public class CreatorStudioStepService {
                    AND status IN ('IN_PROGRESS','WAITING_APPROVAL')
                 """, owner, commissionId, stepId);
         }
-        int updated = jdbc.update("""
+        // The commission and step are both checked under the parent lock.
+        // An unchanged PUT may affect zero rows on MariaDB and remains valid.
+        jdbc.update("""
             UPDATE creator_studio_commission_steps
                SET name=?,stage_definition_id=?,status=?,notes=?,
                    completed_at=CASE WHEN ?='DONE'
@@ -208,7 +210,6 @@ public class CreatorStudioStepService {
              WHERE owner_user_id=? AND commission_id=? AND id=?
             """, name, input.stageDefinitionId(), input.status().name(),
             input.notes(), input.status().name(), owner, commissionId, stepId);
-        if (updated != 1) throw notFound();
         return findOwned(owner, commissionId, stepId);
     }
 
