@@ -31,7 +31,21 @@ public class CreatorStudioCommissionService {
     private static final String FIELDS = """
         SELECT id,title,client_name,description,private_notes,
                requested_on,due_on,art_type_id,status,
-               created_at,updated_at,completed_at
+               created_at,updated_at,completed_at,
+               (SELECT s.name FROM creator_studio_commission_steps s
+                 WHERE s.owner_user_id=creator_studio_commissions.owner_user_id
+                   AND s.commission_id=creator_studio_commissions.id
+                   AND s.status<>'DONE'
+                 ORDER BY CASE s.status WHEN 'IN_PROGRESS' THEN 0
+                   WHEN 'WAITING_APPROVAL' THEN 1 ELSE 2 END,s.position,s.id
+                 LIMIT 1) AS current_stage_name,
+               (SELECT s.stage_definition_id FROM creator_studio_commission_steps s
+                 WHERE s.owner_user_id=creator_studio_commissions.owner_user_id
+                   AND s.commission_id=creator_studio_commissions.id
+                   AND s.status<>'DONE'
+                 ORDER BY CASE s.status WHEN 'IN_PROGRESS' THEN 0
+                   WHEN 'WAITING_APPROVAL' THEN 1 ELSE 2 END,s.position,s.id
+                 LIMIT 1) AS current_stage_definition_id
           FROM creator_studio_commissions
         """;
 
@@ -48,7 +62,9 @@ public class CreatorStudioCommissionService {
             Status.valueOf(rs.getString("status")),
             timestamp(rs, "created_at"),
             timestamp(rs, "updated_at"),
-            timestamp(rs, "completed_at")
+            timestamp(rs, "completed_at"),
+            rs.getString("current_stage_name"),
+            nullableLong(rs, "current_stage_definition_id")
         );
 
     private final CreatorStudioAccessService access;
@@ -82,7 +98,8 @@ public class CreatorStudioCommissionService {
             || input.requestedOn() == null
             || (input.description() != null && input.description().length() > 8000)
             || (input.privateNotes() != null && input.privateNotes().length() > 8000)
-            || (input.artTypeId() != null && input.artTypeId() <= 0)) {
+            || (input.artTypeId() != null && input.artTypeId() <= 0)
+            || (input.workflowId() != null && input.workflowId() <= 0)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                 "Dados da commission inválidos");
         }
@@ -100,11 +117,41 @@ public class CreatorStudioCommissionService {
         }
     }
 
+    private Long workflowToCopy(int owner, Long artTypeId, Long explicitWorkflowId) {
+        Long chosen = explicitWorkflowId;
+        if (chosen == null && artTypeId != null) {
+            List<Long> rows = jdbc.query("""
+                SELECT workflow_id FROM creator_studio_art_types
+                 WHERE owner_user_id=? AND id=?
+                """, (rs, n) -> nullableLong(rs, "workflow_id"), owner, artTypeId);
+            if (!rows.isEmpty()) chosen = rows.get(0);
+        }
+        if (chosen == null) {
+            List<Long> defaults = jdbc.query("""
+                SELECT id FROM creator_studio_workflows
+                 WHERE owner_user_id=? AND is_default=1
+                """, (rs, n) -> rs.getLong("id"), owner);
+            if (!defaults.isEmpty()) chosen = defaults.get(0);
+        }
+        if (chosen != null) {
+            Integer owned = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM creator_studio_workflows
+                 WHERE owner_user_id=? AND id=?
+                """, Integer.class, owner, chosen);
+            if (owned == null || owned != 1) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Modelo de etapas não pertence a este artista");
+            }
+        }
+        return chosen;
+    }
+
     @Transactional
     public Commission create(Authentication auth, SaveCommission input) {
         int ownerId = access.requirePro(auth);
         validate(input);
         validateType(ownerId, input.artTypeId());
+        Long workflowId = workflowToCopy(ownerId, input.artTypeId(), input.workflowId());
 
         String sql = """
             INSERT INTO creator_studio_commissions
@@ -128,6 +175,17 @@ public class CreatorStudioCommissionService {
         }, keys);
         Number id = keys.getKey();
         if (id == null) throw new IllegalStateException("Commission sem ID gerado");
+        if (workflowId != null) {
+            // Snapshot in the SAME transaction as the commission insert.
+            // Future template edits never retroactively alter the order.
+            jdbc.update("""
+                INSERT INTO creator_studio_commission_steps
+                    (owner_user_id,commission_id,stage_definition_id,name,position,status)
+                SELECT ?,?,stage_definition_id,name,position,'PENDING'
+                  FROM creator_studio_workflow_steps
+                 WHERE owner_user_id=? AND workflow_id=?
+                """, ownerId, id.longValue(), ownerId, workflowId);
+        }
         return byOwner(ownerId, id.longValue());
     }
 
