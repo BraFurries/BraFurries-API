@@ -243,8 +243,12 @@ public class CreatorStudioAccessService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Conta não encontrada");
         }
         Candidate selected = users.get(0);
+        AccessStatus stored = accessOf(selected.userId());
+        AccessStatus effective = selected.mergedAccount()
+            ? new AccessStatus(false, stored.tier(), stored.status(),
+                stored.sourceKind(), stored.expiresAtUtc()) : stored;
         return new Candidate(selected.userId(), selected.displayName(),
-            selected.mergedAccount(), accessOf(selected.userId()));
+            selected.mergedAccount(), effective);
     }
 
     /** Owner-only paginated grants list, including revoked and merged accounts. */
