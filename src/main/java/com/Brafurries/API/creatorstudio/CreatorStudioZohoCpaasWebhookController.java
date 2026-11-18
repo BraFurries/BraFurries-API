@@ -78,6 +78,11 @@ public class CreatorStudioZohoCpaasWebhookController {
         }
         String kind = types.get(0).asText();
         JsonNode detail = messages.get(0);
+        // Only SMTP events originating from our trackable sender can
+        // become retention evidence. Reject unrelated CPaaS API events.
+        if (!detail.at("/email_info/is_smtp_trigger").asBoolean(false)) {
+            return ResponseEntity.ok().build();
+        }
         String eventRef = root.path("webhook_request_id").asText("");
         String clientRef = detail.at("/email_info/client_reference").asText("");
         if (eventRef.isBlank() || eventRef.length() > 190 ||
