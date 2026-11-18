@@ -85,6 +85,15 @@ class CreatorStudioStepServiceTest {
     }
 
     @Test
+    void unauthorizedAndInvalidProgressMovesNeverTouchCommissionData() {
+        when(access.requirePro(auth)).thenThrow(
+            new ResponseStatusException(HttpStatus.FORBIDDEN));
+        assertEquals(HttpStatus.FORBIDDEN, assertThrows(ResponseStatusException.class,
+            () -> steps.moveToStep(auth, 66L, 77L)).getStatusCode());
+        verifyNoInteractions(jdbc);
+    }
+
+    @Test
     void canMoveOnlyWithinAnOwnedCommissionsRealStepsAndPreservesPausedStatus() {
         when(access.requirePro(auth)).thenReturn(31);
         when(jdbc.query(contains("FOR UPDATE"), any(RowMapper.class),
