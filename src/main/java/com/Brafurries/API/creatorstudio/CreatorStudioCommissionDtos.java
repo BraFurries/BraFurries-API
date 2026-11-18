@@ -52,7 +52,8 @@ public final class CreatorStudioCommissionDtos {
         LocalDateTime completedAtUtc,
         String currentStageName,
         Long currentStageDefinitionId,
-        Long sourceWorkflowId
+        Long sourceWorkflowId,
+        Integer currentStagePosition
     ) {
         // Keep the existing constructor for legacy tests and integrations.
         public Commission(long id, String title, String clientName, String description,
@@ -62,7 +63,7 @@ public final class CreatorStudioCommissionDtos {
                           String currentStageName, Long currentStageDefinitionId) {
             this(id, title, clientName, description, privateNotes, requestedOn, dueOn,
                  artTypeId, status, createdAtUtc, updatedAtUtc, completedAtUtc,
-                 currentStageName, currentStageDefinitionId, null);
+                 currentStageName, currentStageDefinitionId, null, null);
         }
     }
 
