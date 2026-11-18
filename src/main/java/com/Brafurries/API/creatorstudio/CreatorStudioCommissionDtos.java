@@ -51,8 +51,21 @@ public final class CreatorStudioCommissionDtos {
         LocalDateTime updatedAtUtc,
         LocalDateTime completedAtUtc,
         String currentStageName,
-        Long currentStageDefinitionId
-    ) {}
+        Long currentStageDefinitionId,
+        Long sourceWorkflowId,
+        Integer currentStagePosition
+    ) {
+        // Keep the existing constructor for legacy tests and integrations.
+        public Commission(long id, String title, String clientName, String description,
+                          String privateNotes, LocalDate requestedOn, LocalDate dueOn,
+                          Long artTypeId, Status status, LocalDateTime createdAtUtc,
+                          LocalDateTime updatedAtUtc, LocalDateTime completedAtUtc,
+                          String currentStageName, Long currentStageDefinitionId) {
+            this(id, title, clientName, description, privateNotes, requestedOn, dueOn,
+                 artTypeId, status, createdAtUtc, updatedAtUtc, completedAtUtc,
+                 currentStageName, currentStageDefinitionId, null, null);
+        }
+    }
 
     public record CommissionPage(List<Commission> items, int page, int pageSize, long total) {}
 }

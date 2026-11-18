@@ -10,6 +10,7 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.sql.Types;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -30,7 +31,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class CreatorStudioCommissionService {
     private static final String FIELDS = """
         SELECT id,title,client_name,description,private_notes,
-               requested_on,due_on,art_type_id,status,
+               requested_on,due_on,art_type_id,source_workflow_id,status,
                created_at,updated_at,completed_at,
                (SELECT s.name FROM creator_studio_commission_steps s
                  WHERE s.owner_user_id=creator_studio_commissions.owner_user_id
@@ -45,7 +46,14 @@ public class CreatorStudioCommissionService {
                    AND s.status<>'DONE'
                  ORDER BY CASE s.status WHEN 'IN_PROGRESS' THEN 0
                    WHEN 'WAITING_APPROVAL' THEN 1 ELSE 2 END,s.position,s.id
-                 LIMIT 1) AS current_stage_definition_id
+                 LIMIT 1) AS current_stage_definition_id,
+               (SELECT s.position FROM creator_studio_commission_steps s
+                 WHERE s.owner_user_id=creator_studio_commissions.owner_user_id
+                   AND s.commission_id=creator_studio_commissions.id
+                   AND s.status<>'DONE'
+                 ORDER BY CASE s.status WHEN 'IN_PROGRESS' THEN 0
+                   WHEN 'WAITING_APPROVAL' THEN 1 ELSE 2 END,s.position,s.id
+                 LIMIT 1) AS current_stage_position
           FROM creator_studio_commissions
         """;
 
@@ -64,7 +72,9 @@ public class CreatorStudioCommissionService {
             timestamp(rs, "updated_at"),
             timestamp(rs, "completed_at"),
             rs.getString("current_stage_name"),
-            nullableLong(rs, "current_stage_definition_id")
+            nullableLong(rs, "current_stage_definition_id"),
+            nullableLong(rs, "source_workflow_id"),
+            nullableInteger(rs, "current_stage_position")
         );
 
     private final CreatorStudioAccessService access;
@@ -77,6 +87,11 @@ public class CreatorStudioCommissionService {
 
     private static Long nullableLong(ResultSet rs, String field) throws SQLException {
         long value = rs.getLong(field);
+        return rs.wasNull() ? null : value;
+    }
+
+    private static Integer nullableInteger(ResultSet rs, String field) throws SQLException {
+        int value = rs.getInt(field);
         return rs.wasNull() ? null : value;
     }
 
@@ -155,22 +170,23 @@ public class CreatorStudioCommissionService {
 
         String sql = """
             INSERT INTO creator_studio_commissions
-                (owner_user_id,art_type_id,title,client_name,description,
-                 private_notes,requested_on,due_on,status,created_at,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,'QUEUED',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))
+                (owner_user_id,art_type_id,source_workflow_id,title,client_name,
+                 description,private_notes,requested_on,due_on,status,created_at,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,'QUEUED',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))
             """;
         KeyHolder keys = new GeneratedKeyHolder();
         jdbc.update(connection -> {
             PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
             ps.setInt(1, ownerId);
             setType(ps, 2, input.artTypeId());
-            ps.setString(3, input.title().trim());
-            ps.setString(4, input.clientName().trim());
-            ps.setString(5, input.description());
-            ps.setString(6, input.privateNotes());
-            ps.setDate(7, Date.valueOf(input.requestedOn()));
-            if (input.dueOn() == null) ps.setNull(8, Types.DATE);
-            else ps.setDate(8, Date.valueOf(input.dueOn()));
+            setType(ps, 3, workflowId);
+            ps.setString(4, input.title().trim());
+            ps.setString(5, input.clientName().trim());
+            ps.setString(6, input.description());
+            ps.setString(7, input.privateNotes());
+            ps.setDate(8, Date.valueOf(input.requestedOn()));
+            if (input.dueOn() == null) ps.setNull(9, Types.DATE);
+            else ps.setDate(9, Date.valueOf(input.dueOn()));
             return ps;
         }, keys);
         Number id = keys.getKey();
@@ -236,6 +252,64 @@ public class CreatorStudioCommissionService {
                 + " ORDER BY requested_on ASC,id ASC LIMIT ? OFFSET ?",
                 COMMISSION_MAPPER, ownerId, status.name(), pageSize, offset);
         return new CommissionPage(items, page, pageSize, count == null ? 0 : count);
+    }
+
+    /**
+     * Scoped filters for process and reusable-stage views. Artist ownership
+     * comes from the authenticated principal; no Community or user ID input.
+     */
+    @Transactional(readOnly = true)
+    public CommissionPage filteredList(Authentication auth, Status status, int page, int pageSize,
+                                       Long workflowId, Long stageDefinitionId, boolean unlinked) {
+        if (workflowId == null && stageDefinitionId == null && !unlinked)
+            return list(auth, status, page, pageSize);
+        int ownerId = access.requirePro(auth);
+        if (page < 1 || page > 100_000 || pageSize < 1 || pageSize > 100
+                || (workflowId != null && workflowId <= 0)
+                || (stageDefinitionId != null && stageDefinitionId <= 0)
+                || (unlinked && stageDefinitionId != null)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Filtro inválido");
+        }
+        StringBuilder where = new StringBuilder(" WHERE owner_user_id=?");
+        List<Object> params = new ArrayList<>();
+        params.add(ownerId);
+        if (status == null) where.append(" AND status <> 'COMPLETED'");
+        else {
+            where.append(" AND status=?");
+            params.add(status.name());
+        }
+        if (workflowId != null) {
+            where.append(" AND source_workflow_id=?");
+            params.add(workflowId);
+        }
+        // Match the exact current-stage selection in FIELDS; checking all
+        // non-DONE steps would incorrectly include future pending stages.
+        if (stageDefinitionId != null || unlinked) {
+            where.append("""
+                AND (SELECT s.stage_definition_id
+                       FROM creator_studio_commission_steps s
+                      WHERE s.owner_user_id=creator_studio_commissions.owner_user_id
+                        AND s.commission_id=creator_studio_commissions.id
+                        AND s.status<>'DONE'
+                      ORDER BY CASE s.status WHEN 'IN_PROGRESS' THEN 0
+                        WHEN 'WAITING_APPROVAL' THEN 1 ELSE 2 END,s.position,s.id
+                      LIMIT 1)
+                """);
+            if (unlinked) where.append(" IS NULL");
+            else {
+                where.append("=?");
+                params.add(stageDefinitionId);
+            }
+        }
+        Long count = jdbc.queryForObject("SELECT COUNT(*) FROM creator_studio_commissions"
+            + where, Long.class, params.toArray());
+        List<Object> pageArgs = new ArrayList<>(params);
+        pageArgs.add(pageSize);
+        pageArgs.add((page - 1) * pageSize);
+        List<Commission> rows = jdbc.query(FIELDS + where
+            + " ORDER BY requested_on ASC,id ASC LIMIT ? OFFSET ?",
+            COMMISSION_MAPPER, pageArgs.toArray());
+        return new CommissionPage(rows, page, pageSize, count == null ? 0 : count);
     }
 
     @Transactional

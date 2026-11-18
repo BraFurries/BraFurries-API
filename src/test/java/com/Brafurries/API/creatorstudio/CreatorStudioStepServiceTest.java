@@ -62,6 +62,26 @@ class CreatorStudioStepServiceTest {
     }
 
     @Test
+    void applyingWorkflowToAnExistingEmptyCommissionRecordsProvenanceAtomically() {
+        when(access.requirePro(auth)).thenReturn(31);
+        when(jdbc.query(contains("FOR UPDATE"), any(RowMapper.class),
+            eq(31), eq(12L))).thenReturn(List.of(12L));
+        when(jdbc.queryForObject(contains("creator_studio_commission_steps"),
+            eq(Integer.class), eq(31), eq(12L))).thenReturn(0);
+        when(jdbc.queryForObject(contains("creator_studio_workflows"),
+            eq(Integer.class), eq(31), eq(77L))).thenReturn(1);
+
+        steps.importWorkflow(auth, 12L, 77L);
+
+        verify(jdbc).update(contains("INSERT INTO creator_studio_commission_steps"),
+            eq(31), eq(12L), eq(31), eq(77L));
+        verify(jdbc).update(argThat(sql ->
+            sql.contains("source_workflow_id=?")
+            && sql.contains("WHERE owner_user_id=? AND id=?")),
+            eq(77L), eq(31), eq(12L));
+    }
+
+    @Test
     void cannotImportForeignWorkflowIntoOwnedCommission() {
         when(access.requirePro(auth)).thenReturn(31);
         when(jdbc.query(contains("FOR UPDATE"), any(RowMapper.class),
@@ -81,6 +101,63 @@ class CreatorStudioStepServiceTest {
         when(access.requirePro(auth)).thenReturn(31);
         assertEquals(HttpStatus.NOT_FOUND, assertThrows(ResponseStatusException.class,
             () -> steps.delete(auth, 66L, 77L)).getStatusCode());
+        verify(jdbc, never()).update(anyString(), any(Object[].class));
+    }
+
+    @Test
+    void unauthorizedAndInvalidProgressMovesNeverTouchCommissionData() {
+        when(access.requirePro(auth)).thenThrow(
+            new ResponseStatusException(HttpStatus.FORBIDDEN));
+        assertEquals(HttpStatus.FORBIDDEN, assertThrows(ResponseStatusException.class,
+            () -> steps.moveToStep(auth, 66L, 77L)).getStatusCode());
+        verifyNoInteractions(jdbc);
+    }
+
+    @Test
+    void canMoveOnlyWithinAnOwnedCommissionsRealStepsAndPreservesPausedStatus() {
+        when(access.requirePro(auth)).thenReturn(31);
+        when(jdbc.query(contains("FOR UPDATE"), any(RowMapper.class),
+            eq(31), eq(66L))).thenReturn(List.of(66L));
+        when(jdbc.queryForObject(contains("SELECT status FROM creator_studio_commissions"),
+            eq(String.class), eq(31), eq(66L))).thenReturn("PAUSED");
+        when(jdbc.query(contains("FROM creator_studio_commission_steps"), any(RowMapper.class),
+            eq(31), eq(66L), eq(77L))).thenReturn(List.of(
+                new CommissionStep(77L, 66L, "Pintura", 5L, 2,
+                    StepStatus.PENDING, "Anotação", null)));
+        steps.moveToStep(auth, 66L, 77L);
+        verify(jdbc).update(argThat(sql ->
+                sql.contains("UPDATE creator_studio_commission_steps")
+                && sql.contains("position < ?") && sql.contains("owner_user_id=?")),
+            eq(2), eq(2), eq(2), eq(31), eq(66L));
+        verify(jdbc).update(contains("UPDATE creator_studio_commissions"),
+            eq(31), eq(66L));
+        verify(jdbc, never()).update(contains("SET status=?"),
+            any(Object[].class));
+    }
+
+    @Test
+    void cannotMoveACompletedOrForeignCommission() {
+        when(access.requirePro(auth)).thenReturn(31);
+        assertEquals(HttpStatus.NOT_FOUND, assertThrows(ResponseStatusException.class,
+            () -> steps.moveToStep(auth, 999L, 77L)).getStatusCode());
+        when(jdbc.query(contains("FOR UPDATE"), any(RowMapper.class),
+            eq(31), eq(66L))).thenReturn(List.of(66L));
+        when(jdbc.queryForObject(contains("SELECT status FROM creator_studio_commissions"),
+            eq(String.class), eq(31), eq(66L))).thenReturn("COMPLETED");
+        assertEquals(HttpStatus.CONFLICT, assertThrows(ResponseStatusException.class,
+            () -> steps.moveToStep(auth, 66L, 77L)).getStatusCode());
+        verify(jdbc, never()).update(anyString(), any(Object[].class));
+    }
+
+    @Test
+    void cannotMoveToAStepThatBelongsToAnotherCommission() {
+        when(access.requirePro(auth)).thenReturn(31);
+        when(jdbc.query(contains("FOR UPDATE"), any(RowMapper.class),
+            eq(31), eq(66L))).thenReturn(List.of(66L));
+        when(jdbc.queryForObject(contains("SELECT status FROM creator_studio_commissions"),
+            eq(String.class), eq(31), eq(66L))).thenReturn("IN_PROGRESS");
+        assertEquals(HttpStatus.NOT_FOUND, assertThrows(ResponseStatusException.class,
+            () -> steps.moveToStep(auth, 66L, 1234L)).getStatusCode());
         verify(jdbc, never()).update(anyString(), any(Object[].class));
     }
 
