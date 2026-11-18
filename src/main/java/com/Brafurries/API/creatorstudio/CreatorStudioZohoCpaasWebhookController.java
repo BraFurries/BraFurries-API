@@ -80,8 +80,9 @@ public class CreatorStudioZohoCpaasWebhookController {
         } catch (NumberFormatException invalid) {
             return ResponseEntity.ok().build();
         }
-        // Correlate the event to exactly one currently verified recipient.
-        // If the account's e-mail changed or merged, no old message may count.
+        // Correlate to the original locally verified address captured
+        // atomically at claim time. A later account email change must never
+        // make a bounce for the original address invisible.
         JsonNode recipients = root.at("/event_message/email_info/to");
         if (!recipients.isArray() || recipients.size()!=1) return ResponseEntity.ok().build();
         String destination = recipients.get(0).at("/email_address/address").asText("");
@@ -92,7 +93,6 @@ public class CreatorStudioZohoCpaasWebhookController {
                 UPDATE creator_studio_retention_notices n
                 JOIN creator_studio_commissions c
                   ON c.owner_user_id=n.owner_user_id AND c.id=n.commission_id
-                JOIN users u ON u.id=n.owner_user_id
                    SET n.delivery_state='SERVER_ACCEPTED',
                        n.delivery_provider=?,
                        n.delivery_event_ref=?,
@@ -100,9 +100,7 @@ public class CreatorStudioZohoCpaasWebhookController {
                  WHERE n.id=? AND n.status='SENT' AND n.sent_at IS NOT NULL
                    AND n.delivery_state='UNCONFIRMED'
                    AND c.status='COMPLETED' AND c.completed_at=n.completed_at
-                   AND u.merged_into_user_id IS NULL
-                   AND u.email_verified_at IS NOT NULL
-                   AND u.email=?
+                   AND n.recipient_email=?
                 """, PROVIDER, eventRef, noticeId, destination);
         } else if ("hardbounce".equals(kind) || "softbounce".equals(kind)
                 || "hard_bounce".equals(kind) || "soft_bounce".equals(kind)
@@ -110,14 +108,13 @@ public class CreatorStudioZohoCpaasWebhookController {
             String targetState = "fbl_complaint".equals(kind) ? "COMPLAINT" : "BOUNCED";
             jdbc.update("""
                 UPDATE creator_studio_retention_notices n
-                JOIN users u ON u.id=n.owner_user_id
                    SET n.delivery_state=?,
                        n.delivery_provider=?,
                        n.delivery_event_ref=?,
                        n.delivery_evidence_at=NULL
                  WHERE n.id=? AND n.status='SENT'
                    AND n.delivery_state<>'COMPLAINT'
-                   AND u.email=?
+                   AND n.recipient_email=?
                 """, targetState, PROVIDER, eventRef, noticeId, destination);
         }
         return ResponseEntity.ok().build();
