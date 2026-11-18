@@ -20,9 +20,22 @@ public class CreatorStudioRetentionPurgeWorker {
 
     @Transactional
     public boolean purgeEligibleCommission(long id) {
+        // Acquire the parent lock FIRST, before evaluating any notice or hold.
+        // The webhook, hold service and commission edits serialize on this row.
+        // A predicate evaluated while waiting for the lock could otherwise
+        // observe stale delivery evidence and authorize an irreversible purge.
         List<Integer> owners = jdbc.query("""
             SELECT owner_user_id FROM creator_studio_commissions
-             WHERE id=? AND status='COMPLETED'
+             WHERE id=? FOR UPDATE
+            """, (rs, n) -> rs.getInt("owner_user_id"), id);
+        if (owners.isEmpty()) return false;
+        int ownerId = owners.get(0);
+
+        // Re-evaluate every precondition AFTER acquiring the parent lock.
+        // Use an explicit locking read; no optimistic/snapshot-only shortcut.
+        List<Long> eligible = jdbc.query("""
+            SELECT id FROM creator_studio_commissions
+             WHERE id=? AND owner_user_id=? AND status='COMPLETED'
                AND completed_at IS NOT NULL
                AND completed_at<=DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 364 DAY)
                AND DATE_ADD(completed_at,INTERVAL 1 YEAR)<=UTC_TIMESTAMP(6)
@@ -55,9 +68,9 @@ public class CreatorStudioRetentionPurgeWorker {
                       AND n.delivery_event_ref IS NOT NULL
                )
              FOR UPDATE
-            """, (rs, n) -> rs.getInt("owner_user_id"), id);
-        if (owners.isEmpty()) return false;
-        int ownerId = owners.get(0);
+            """, (rs, n) -> rs.getLong("id"), id, ownerId);
+        if (eligible.size()!=1) return false;
+
         // Exact composite owner+commission conditions are important here:
         // no other artist's data is ever addressed by a child deletion.
         jdbc.update("""
