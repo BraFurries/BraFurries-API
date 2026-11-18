@@ -93,6 +93,11 @@ public class SecurityConfig {
                 .requestMatchers("/auth/**", "/oauth/token").permitAll()
                 .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
                 .requestMatchers("/public/**").permitAll()
+                // Provider callbacks are public at the transport boundary only.
+                // The disabled-by-default controller independently verifies the
+                // signed, time-bounded raw body before processing any event.
+                .requestMatchers(HttpMethod.POST,
+                    "/webhooks/zoho-cpaas/creator-studio-retention").permitAll()
                 .requestMatchers(HttpMethod.GET, "/meta/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/internal/identity/**").permitAll()
                 .requestMatchers("/internal/community-networks/**").permitAll()

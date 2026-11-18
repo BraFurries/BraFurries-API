@@ -320,3 +320,67 @@ jobs:
 
       - name: Package without rerunning tests
         run: ./mvnw -DskipTests package
+
+  # Independent of existing smoke; no shared datasource, scheduler, SMTP or DML in production.
+  creator-studio-disposable-integration:
+    name: Creator Studio on disposable MariaDB
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout API candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Checkout exact reviewed Database Creator Studio schema
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: BraFurries/BraFurries-Database
+          ref: 2d7d273e3e8f6b5bdab6b8bd94d79d2e11217bc3 # Database PR #73
+          path: .ci/creator-studio-db
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Assemble synthetic fixture using exact Database migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .ci/creator-studio-db rev-parse HEAD)" = "2d7d273e3e8f6b5bdab6b8bd94d79d2e11217bc3"
+          db=".ci/creator-studio-db/flyway/sql"
+          base="$db/baseline/B20261020_001__adopt_production_schema.sql"
+          test "$(grep -c '^CREATE TABLE ' "$base")" -eq 107
+          src="$db/versioned"
+          files=(
+            V20261105_002__create_self_service_social_account_reconciliation.sql
+            V20261107_001__social_onboarding_independent_account_email.sql
+            V20261107_002__local_email_proof_and_social_login_audit.sql
+            V20261107_003__social_login_fresh_oauth_proofs.sql
+            V20261117_001__creator_studio_subscription_and_commissions.sql
+            V20261117_002__creator_studio_activity.sql
+            V20261117_003__creator_studio_retention_index.sql
+            V20261117_004__creator_studio_retention_notices_holds.sql
+            V20261118_001__creator_studio_retention_delivery_evidence.sql
+          )
+          test -s "$base"
+          for filename in "${files[@]}"; do
+            test -s "$src/$filename"
+          done
+          mkdir -p src/test/resources
+          {
+            cat "$base"
+            for filename in "${files[@]}"; do
+              printf '\n'
+              cat "$src/$filename"
+            done
+          } > src/test/resources/creator_studio_integration_schema.sql
+
+      - name: Verify Creator Studio SQL, ownership, callback, hold and purge gates
+        env:
+          BRF_CREATOR_STUDIO_JDBC_INTEGRATION: "true"
+        run: |
+          chmod +x mvnw
+          ./mvnw -B -Dtest=CreatorStudioMariaDbIntegrationTest test
