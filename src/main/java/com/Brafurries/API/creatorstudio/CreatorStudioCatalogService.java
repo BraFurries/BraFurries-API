@@ -291,6 +291,38 @@ public class CreatorStudioCatalogService {
         }
     }
 
+    /**
+     * Resolve an opted-in stage by artist and name. The lookup uses MariaDB's
+     * existing case-insensitive collation, and UNIQUE(owner_user_id,name)
+     * prevents duplicates even if another request creates it concurrently.
+     * Called within the surrounding workflow create/update transaction.
+     */
+    private Long reusableStageId(int owner, StepDraft item) {
+        if (item.stageDefinitionId() != null) return item.stageDefinitionId();
+        if (!Boolean.TRUE.equals(item.reuse())) return null;
+        String name = requiredName(item.name());
+        List<Long> existing = jdbc.query("""
+            SELECT id FROM creator_studio_stage_definitions
+             WHERE owner_user_id=? AND name=?
+            """, (rs, row) -> rs.getLong("id"), owner, name);
+        if (!existing.isEmpty()) return existing.get(0);
+        try {
+            return insertName("""
+                INSERT INTO creator_studio_stage_definitions (owner_user_id,name)
+                VALUES (?,?)
+                """, name, owner);
+        } catch (DuplicateKeyException race) {
+            // Another artist-owned catalog action may create this name while
+            // we hold the workflow owner lock. Reuse only our own record.
+            List<Long> winner = jdbc.query("""
+                SELECT id FROM creator_studio_stage_definitions
+                 WHERE owner_user_id=? AND name=?
+                """, (rs, row) -> rs.getLong("id"), owner, name);
+            if (!winner.isEmpty()) return winner.get(0);
+            throw race;
+        }
+    }
+
     private void writeSteps(int owner, long workflowId, List<StepDraft> steps) {
         int position = 0;
         for (StepDraft item : steps) {
@@ -298,7 +330,7 @@ public class CreatorStudioCatalogService {
                 INSERT INTO creator_studio_workflow_steps
                     (owner_user_id,workflow_id,stage_definition_id,name,position)
                 VALUES (?,?,?,?,?)
-                """, owner, workflowId, item.stageDefinitionId(),
+                """, owner, workflowId, reusableStageId(owner, item),
                 requiredName(item.name()), position++);
         }
     }
