@@ -169,6 +169,14 @@ public class CreatorStudioStepService {
               FROM creator_studio_workflow_steps
              WHERE owner_user_id=? AND workflow_id=?
             """, owner, commissionId, owner, workflowId);
+        // A process may also be applied to an existing commission whose step
+        // list is empty. Record the actual source only after the snapshot
+        // succeeds, in this same transaction under the commission row lock.
+        jdbc.update("""
+            UPDATE creator_studio_commissions
+               SET source_workflow_id=?,updated_at=UTC_TIMESTAMP(6)
+             WHERE owner_user_id=? AND id=?
+            """, workflowId, owner, commissionId);
         return jdbc.query("""
             SELECT id,commission_id,name,stage_definition_id,position,status,notes,completed_at
               FROM creator_studio_commission_steps
