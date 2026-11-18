@@ -66,9 +66,20 @@ public class CreatorStudioZohoCpaasWebhookController {
             expectedAgent.isBlank() || !expectedAgent.equals(root.path("mailagent_key").asText())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Unrecognized mail agent");
         }
-        String kind = root.path("event_name").asText("");
+        // Zoho CPaaS sends event_name and event_message as arrays, even
+        // for a single event. Never infer event meaning from a different
+        // array entry; ignore ambiguous batches until explicitly supported.
+        JsonNode types = root.path("event_name");
+        JsonNode messages = root.path("event_message");
+        if (!types.isArray() || types.size()!=1 ||
+            !messages.isArray() || messages.size()!=1 ||
+            !types.get(0).isTextual() || !messages.get(0).isObject()) {
+            return ResponseEntity.ok().build();
+        }
+        String kind = types.get(0).asText();
+        JsonNode detail = messages.get(0);
         String eventRef = root.path("webhook_request_id").asText("");
-        String clientRef = root.at("/event_message/email_info/client_reference").asText("");
+        String clientRef = detail.at("/email_info/client_reference").asText("");
         if (eventRef.isBlank() || eventRef.length() > 190 ||
             !clientRef.matches("cs-ret-[1-9][0-9]{0,17}")) {
             // A valid signed event from an unrelated mail must not affect retention.
@@ -83,7 +94,7 @@ public class CreatorStudioZohoCpaasWebhookController {
         // Correlate to the original locally verified address captured
         // atomically at claim time. A later account email change must never
         // make a bounce for the original address invisible.
-        JsonNode recipients = root.at("/event_message/email_info/to");
+        JsonNode recipients = detail.at("/email_info/to");
         if (!recipients.isArray() || recipients.size()!=1) return ResponseEntity.ok().build();
         String destination = recipients.get(0).at("/email_address/address").asText("");
         if (destination.isBlank() || destination.length()>254) return ResponseEntity.ok().build();
