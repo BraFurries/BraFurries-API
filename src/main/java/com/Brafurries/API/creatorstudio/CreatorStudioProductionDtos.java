@@ -20,7 +20,16 @@ public final class CreatorStudioProductionDtos {
     public record StageDefinitionDraft(@NotBlank @Size(max = 100) String name) {}
     public record StageDefinition(long id, String name) {}
 
-    public record StepDraft(Long stageDefinitionId, @NotBlank @Size(max = 100) String name) {}
+    /**
+     * reuse=true opts into the artist's shared stage library. Absent/false
+     * preserves the old behavior for existing callers and custom-only steps.
+     */
+    public record StepDraft(Long stageDefinitionId, @NotBlank @Size(max = 100) String name,
+                            Boolean reuse) {
+        public StepDraft(Long stageDefinitionId, String name) {
+            this(stageDefinitionId, name, null);
+        }
+    }
 
     public record WorkflowDraft(
         @NotBlank @Size(max = 100) String name,

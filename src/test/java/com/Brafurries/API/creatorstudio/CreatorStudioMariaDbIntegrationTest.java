@@ -296,11 +296,16 @@ class CreatorStudioMariaDbIntegrationTest {
                 new CreatorStudioGlobalWorkflowService.ImportDraft(true));
             assertEquals(5, copied.steps().size());
             assertTrue(copied.isDefault());
-            assertEquals(0, jdbc.queryForObject("""
+            // Import now links stages to THIS artist's private reusable library.
+            assertEquals(5, jdbc.queryForObject("""
                 SELECT COUNT(*) FROM creator_studio_workflow_steps
                  WHERE workflow_id=? AND owner_user_id=?
                    AND stage_definition_id IS NOT NULL
                 """, Integer.class, copied.id(), ARTIST_A));
+            assertEquals(5, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM creator_studio_stage_definitions
+                 WHERE owner_user_id=?
+                """, Integer.class, ARTIST_A));
             assertEquals(0, jdbc.queryForObject("""
                 SELECT COUNT(*) FROM creator_studio_workflows
                  WHERE owner_user_id=?

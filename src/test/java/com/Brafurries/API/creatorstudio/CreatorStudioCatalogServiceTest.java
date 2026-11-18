@@ -93,6 +93,41 @@ class CreatorStudioCatalogServiceTest {
     }
 
     @Test
+    void optingInReusesTheArtistsExistingStageInTheSameWorkflowTransaction() {
+        when(access.requirePro(auth)).thenReturn(31);
+        when(jdbc.query(contains("SELECT id FROM users"),
+            any(RowMapper.class), eq(31))).thenReturn(List.of(31));
+        when(jdbc.queryForObject(contains("creator_studio_workflows"),
+            eq(Integer.class), eq(31), eq(12L))).thenReturn(1);
+        when(jdbc.query(contains("SELECT id FROM creator_studio_stage_definitions"),
+            any(RowMapper.class), eq(31), eq("Sketch"))).thenReturn(List.of(7L));
+
+        catalog.updateWorkflow(auth, 12L, new WorkflowDraft("Ícones", false,
+            List.of(new StepDraft(null, "Sketch", true))));
+        verify(jdbc).update(contains("INSERT INTO creator_studio_workflow_steps"),
+            eq(31), eq(12L), eq(7L), eq("Sketch"), eq(0));
+        verify(jdbc, never()).update(any(org.springframework.jdbc.core.PreparedStatementCreator.class),
+            any(org.springframework.jdbc.support.KeyHolder.class));
+    }
+
+    @Test
+    void reusableIntentIsOptionalAndNeverChangesCustomOnlyLegacySteps() {
+        when(access.requirePro(auth)).thenReturn(31);
+        when(jdbc.query(contains("SELECT id FROM users"),
+            any(RowMapper.class), eq(31))).thenReturn(List.of(31));
+        when(jdbc.queryForObject(contains("creator_studio_workflows"),
+            eq(Integer.class), eq(31), eq(12L))).thenReturn(1);
+        catalog.updateWorkflow(auth, 12L, new WorkflowDraft("Ícones", false,
+            List.of(new StepDraft(null, "Exclusiva"), new StepDraft(null, "Rascunho", false))));
+        verify(jdbc, never()).query(contains("SELECT id FROM creator_studio_stage_definitions"),
+            any(RowMapper.class), anyInt(), anyString());
+        verify(jdbc).update(contains("INSERT INTO creator_studio_workflow_steps"),
+            eq(31), eq(12L), isNull(), eq("Exclusiva"), eq(0));
+        verify(jdbc).update(contains("INSERT INTO creator_studio_workflow_steps"),
+            eq(31), eq(12L), isNull(), eq("Rascunho"), eq(1));
+    }
+
+    @Test
     void refusesRewritingWorkflowOwnedBySomeoneElse() {
         when(access.requirePro(auth)).thenReturn(31);
         when(jdbc.query(contains("SELECT id FROM users"),
