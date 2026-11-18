@@ -117,12 +117,12 @@ class CreatorStudioCatalogServiceTest {
             any(RowMapper.class), eq(31))).thenReturn(List.of(31));
         when(jdbc.queryForObject(contains("creator_studio_workflows"),
             eq(Integer.class), eq(31), eq(12L))).thenReturn(1);
-        when(jdbc.update(any(org.springframework.jdbc.core.PreparedStatementCreator.class),
-            any(org.springframework.jdbc.support.KeyHolder.class))).thenAnswer(call -> {
+        doAnswer(call -> {
                 org.springframework.jdbc.support.KeyHolder keys = call.getArgument(1);
                 keys.getKeyList().add(java.util.Map.of("id", 66L));
                 return 1;
-            });
+            }).when(jdbc).update(any(org.springframework.jdbc.core.PreparedStatementCreator.class),
+                any(org.springframework.jdbc.support.KeyHolder.class));
 
         catalog.updateWorkflow(auth, 12L, new WorkflowDraft("Ícones", false,
             List.of(new StepDraft(null, "Pintura", true))));
