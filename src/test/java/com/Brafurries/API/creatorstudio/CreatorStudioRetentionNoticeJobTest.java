@@ -4,7 +4,10 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import jakarta.mail.Session;
+import jakarta.mail.internet.MimeMessage;
 import java.time.LocalDateTime;
+import java.util.Properties;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -13,6 +16,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class CreatorStudioRetentionNoticeJobTest {
@@ -42,6 +46,25 @@ class CreatorStudioRetentionNoticeJobTest {
         assertFalse(sent.getValue().getText().contains("commission #51"));
         verify(ledger).markSmtpAccepted(41L);
         verify(ledger,never()).markDeliveryUnknown(anyLong());
+    }
+
+    @Test void cpaasMailIncludesTraceableNoticeIdButNoArtistIdentityInHeader()
+            throws Exception {
+        when(ledger.pendingIds()).thenReturn(List.of(43L));
+        when(ledger.claim(43L)).thenReturn(new CreatorStudioRetentionNoticeLedger.ClaimedNotice(
+            43L,7,52L,"D7","artist@example.invalid",
+            LocalDateTime.of(2025,11,17,12,0)));
+        when(sender.createMimeMessage()).thenReturn(
+            new MimeMessage(Session.getInstance(new Properties())));
+        var job=new CreatorStudioRetentionNoticeJob(ledger,sender,
+            "alerts@brafurries.com.br","https://brafurries.com.br");
+        ReflectionTestUtils.setField(job,"cpaasSmtp",true);
+        job.queueAndSendNotices();
+        ArgumentCaptor<MimeMessage> sent=ArgumentCaptor.forClass(MimeMessage.class);
+        verify(sender).send(sent.capture());
+        assertEquals("cs-ret-43", sent.getValue().getHeader("X-TM-CLIENT-REF")[0]);
+        assertTrue(sent.getValue().getSubject().contains("retenção"));
+        verify(ledger).markSmtpAccepted(43L);
     }
 
     @Test void ambiguousSmtpResultNeverAutoRetriesOrClaimsDelivery() {
