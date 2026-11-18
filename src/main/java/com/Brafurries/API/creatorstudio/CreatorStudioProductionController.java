@@ -104,6 +104,13 @@ public class CreatorStudioProductionController {
             .body(steps.update(auth, commissionId, stepId, input));
     }
 
+    @PatchMapping("/commissions/{commissionId}/current-step")
+    public ResponseEntity<List<CommissionStep>> moveToStep(Authentication auth,
+            @PathVariable long commissionId, @Valid @RequestBody MoveToStep input) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+            .body(steps.moveToStep(auth, commissionId, input.stepId()));
+    }
+
     @DeleteMapping("/commissions/{commissionId}/steps/{stepId}")
     public ResponseEntity<Void> deleteStep(Authentication auth, @PathVariable long commissionId,
                                            @PathVariable long stepId) {
