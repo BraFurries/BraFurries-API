@@ -10,6 +10,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.List;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.BeforeEach;
@@ -269,6 +270,58 @@ class CreatorStudioMariaDbIntegrationTest {
             transactions.execute(t ->
                 webhook.event(signature(tampered), (tampered + " ").getBytes(StandardCharsets.UTF_8))));
         assertEquals(HttpStatus.FORBIDDEN, bad.getStatusCode());
+    }
+
+    @Test
+    void platformStarterCanBeImportedAndEditedWithoutRewritingArtistPrivateCopy() {
+        var access = mock(CreatorStudioAccessService.class);
+        var platform = mock(PlatformAuthorizationService.class);
+        Authentication artistAuthentication = mock(Authentication.class);
+        Authentication adminAuthentication = mock(Authentication.class);
+        when(access.requirePro(artistAuthentication)).thenReturn(ARTIST_A);
+        User owner = new User();
+        owner.setId(PLATFORM_OWNER);
+        when(platform.requireOwner(adminAuthentication)).thenReturn(owner);
+
+        var catalog = new CreatorStudioCatalogService(access, jdbc);
+        var library = new CreatorStudioGlobalWorkflowService(access, platform, catalog, jdbc);
+        transactions.execute(tx -> {
+            var published = library.published(artistAuthentication);
+            assertEquals(1, published.size());
+            var starter = published.get(0);
+            assertEquals("Processo básico", starter.name());
+            assertEquals(5, starter.steps().size());
+
+            var copied = library.importAsPersonal(artistAuthentication, starter.id(),
+                new CreatorStudioGlobalWorkflowService.ImportDraft(true));
+            assertEquals(5, copied.steps().size());
+            assertTrue(copied.isDefault());
+            assertEquals(0, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM creator_studio_workflow_steps
+                 WHERE workflow_id=? AND owner_user_id=?
+                   AND stage_definition_id IS NOT NULL
+                """, Integer.class, copied.id(), ARTIST_A));
+            assertEquals(0, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM creator_studio_workflows
+                 WHERE owner_user_id=?
+                """, Integer.class, ARTIST_B));
+
+            // Platform edits are only changes to the reusable source.
+            library.update(adminAuthentication, starter.id(),
+                new CreatorStudioGlobalWorkflowService.GlobalWorkflowDraft(
+                    "Processo básico", "Versão atualizada", true,
+                    List.of("Novo briefing", "Entrega")));
+            assertEquals(5, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM creator_studio_workflow_steps
+                 WHERE owner_user_id=? AND workflow_id=?
+                """, Integer.class, ARTIST_A, copied.id()));
+            assertEquals("Alinhamento do pedido", jdbc.queryForObject("""
+                SELECT name FROM creator_studio_workflow_steps
+                 WHERE owner_user_id=? AND workflow_id=? AND position=0
+                """, String.class, ARTIST_A, copied.id()));
+            tx.setRollbackOnly(); // Never mutate the seeded global catalog between tests.
+            return null;
+        });
     }
 
     private String event(long noticeId, String kind, String eventId) {
