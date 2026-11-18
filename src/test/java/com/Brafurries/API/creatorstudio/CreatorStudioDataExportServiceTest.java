@@ -32,8 +32,13 @@ class CreatorStudioDataExportServiceTest {
     @Test
     void streamsPrivateArchiveForOwnerEvenWhenTheirProEntitlementWasRevoked() throws Exception {
         when(access.actorId(auth)).thenReturn(31);
-        when(jdbc.queryForList(contains("FROM creator_studio_commissions"),
-            eq(31),eq(0L))).thenReturn(List.of(Map.of("id",101L,"title","Rascunho privado")));
+        doAnswer(invocation -> {
+            String sql = invocation.getArgument(0);
+            if (sql.contains("FROM creator_studio_commissions")) {
+                return List.of(Map.of("id",101L,"title","Rascunho privado"));
+            }
+            return List.of();
+        }).when(jdbc).queryForList(anyString(),any(Object[].class));
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         service.export(auth).writeTo(bytes);
         JsonNode root = mapper.readTree(bytes.toByteArray());
