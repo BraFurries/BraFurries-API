@@ -334,7 +334,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: BraFurries/BraFurries-Database
-          ref: 2d7d273e3e8f6b5bdab6b8bd94d79d2e11217bc3 # Database PR #73
+          ref: 34c2c38b111b5da4e2a69ba1957129a26768985e # Database PR #73
           path: .ci/creator-studio-db
           persist-credentials: false
 
@@ -349,7 +349,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C .ci/creator-studio-db rev-parse HEAD)" = "2d7d273e3e8f6b5bdab6b8bd94d79d2e11217bc3"
+          test "$(git -C .ci/creator-studio-db rev-parse HEAD)" = "34c2c38b111b5da4e2a69ba1957129a26768985e"
           db=".ci/creator-studio-db/flyway/sql"
           base="$db/baseline/B20261020_001__adopt_production_schema.sql"
           test "$(grep -c '^CREATE TABLE ' "$base")" -eq 107
@@ -364,6 +364,7 @@ jobs:
             V20261117_003__creator_studio_retention_index.sql
             V20261117_004__creator_studio_retention_notices_holds.sql
             V20261118_001__creator_studio_retention_delivery_evidence.sql
+            V20261118_002__creator_studio_global_workflow_library.sql
           )
           test -s "$base"
           for filename in "${files[@]}"; do
