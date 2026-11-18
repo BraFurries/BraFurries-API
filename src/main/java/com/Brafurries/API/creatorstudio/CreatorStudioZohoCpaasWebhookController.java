@@ -36,6 +36,10 @@ public class CreatorStudioZohoCpaasWebhookController {
     private static final int MAX_BODY_BYTES = 32768;
     private static final Duration MAX_SKEW = Duration.ofMinutes(5);
     private static final String PROVIDER = "ZOHO_CPAAS";
+
+    // The notice records both parts of the artist-owned commission key.
+    // Read without locking, then take the parent's FOR UPDATE lock first.
+    record NoticeScope(int ownerUserId, long commissionId) {}
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
     private final String secret;
@@ -107,14 +111,18 @@ public class CreatorStudioZohoCpaasWebhookController {
         // Lock the SAME parent row as the destructive retention worker.
         // This serializes bounce/revocation against the final eligibility
         // check + purge. Parent lock MUST precede the notice UPDATE.
-        var ids = jdbc.queryForList("""
-            SELECT commission_id FROM creator_studio_retention_notices
+        var scopes = jdbc.query("""
+            SELECT owner_user_id,commission_id FROM creator_studio_retention_notices
              WHERE id=? AND recipient_email=?
-            """, Long.class, noticeId, destination);
-        if (ids.size()!=1) return ResponseEntity.ok().build();
+            """, (rs, row) -> new NoticeScope(
+                rs.getInt("owner_user_id"), rs.getLong("commission_id")),
+            noticeId, destination);
+        if (scopes.size()!=1) return ResponseEntity.ok().build();
+        NoticeScope scope = scopes.get(0);
         var locked = jdbc.queryForList("""
-            SELECT id FROM creator_studio_commissions WHERE id=? FOR UPDATE
-            """, Long.class, ids.get(0));
+            SELECT id FROM creator_studio_commissions
+             WHERE owner_user_id=? AND id=? FOR UPDATE
+            """, Long.class, scope.ownerUserId(), scope.commissionId());
         if (locked.size()!=1) return ResponseEntity.ok().build();
 
         if ("delivered".equals(kind) || "email_delivered".equals(kind)) {
@@ -126,7 +134,7 @@ public class CreatorStudioZohoCpaasWebhookController {
                        n.delivery_provider=?,
                        n.delivery_event_ref=?,
                        n.delivery_evidence_at=UTC_TIMESTAMP(6)
-                 WHERE n.id=? AND n.status='SENT' AND n.sent_at IS NOT NULL
+                 WHERE n.id=? AND n.status IN ('SENDING','SENT')
                    AND n.delivery_state='UNCONFIRMED'
                    AND c.status='COMPLETED' AND c.completed_at=n.completed_at
                    AND n.recipient_email=?
@@ -141,7 +149,7 @@ public class CreatorStudioZohoCpaasWebhookController {
                        n.delivery_provider=?,
                        n.delivery_event_ref=?,
                        n.delivery_evidence_at=NULL
-                 WHERE n.id=? AND n.status='SENT'
+                 WHERE n.id=? AND n.status IN ('SENDING','SENT','UNKNOWN')
                    AND n.delivery_state<>'COMPLAINT'
                    AND n.recipient_email=?
                 """, targetState, PROVIDER, eventRef, noticeId, destination);
