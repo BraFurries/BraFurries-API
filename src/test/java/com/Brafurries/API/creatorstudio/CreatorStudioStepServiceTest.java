@@ -62,6 +62,26 @@ class CreatorStudioStepServiceTest {
     }
 
     @Test
+    void applyingWorkflowToAnExistingEmptyCommissionRecordsProvenanceAtomically() {
+        when(access.requirePro(auth)).thenReturn(31);
+        when(jdbc.query(contains("FOR UPDATE"), any(RowMapper.class),
+            eq(31), eq(12L))).thenReturn(List.of(12L));
+        when(jdbc.queryForObject(contains("creator_studio_commission_steps"),
+            eq(Integer.class), eq(31), eq(12L))).thenReturn(0);
+        when(jdbc.queryForObject(contains("creator_studio_workflows"),
+            eq(Integer.class), eq(31), eq(77L))).thenReturn(1);
+
+        steps.importWorkflow(auth, 12L, 77L);
+
+        verify(jdbc).update(contains("INSERT INTO creator_studio_commission_steps"),
+            eq(31), eq(12L), eq(31), eq(77L));
+        verify(jdbc).update(argThat(sql ->
+            sql.contains("source_workflow_id=?")
+            && sql.contains("WHERE owner_user_id=? AND id=?")),
+            eq(77L), eq(31), eq(12L));
+    }
+
+    @Test
     void cannotImportForeignWorkflowIntoOwnedCommission() {
         when(access.requirePro(auth)).thenReturn(31);
         when(jdbc.query(contains("FOR UPDATE"), any(RowMapper.class),
