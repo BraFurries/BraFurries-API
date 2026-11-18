@@ -35,6 +35,7 @@ public class CreatorStudioRetentionJob {
         List<Long> candidates = jdbc.query("""
             SELECT id FROM creator_studio_commissions
              WHERE status='COMPLETED' AND completed_at IS NOT NULL
+               AND completed_at<=DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 364 DAY)
                AND DATE_ADD(completed_at,INTERVAL 1 YEAR)<=UTC_TIMESTAMP(6)
              ORDER BY completed_at ASC,id ASC LIMIT 50
             """, (rs, n) -> rs.getLong("id"));
