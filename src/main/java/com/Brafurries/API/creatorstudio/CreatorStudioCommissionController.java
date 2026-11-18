@@ -27,10 +27,20 @@ public class CreatorStudioCommissionController {
         Authentication auth,
         @RequestParam(required = false) Status status,
         @RequestParam(defaultValue = "1") int page,
-        @RequestParam(defaultValue = "25") int pageSize
+        @RequestParam(defaultValue = "25") int pageSize,
+        @RequestParam(required = false) Long workflowId,
+        @RequestParam(required = false) Long stageDefinitionId,
+        @RequestParam(defaultValue = "false") boolean unlinked
     ) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-            .body(commissions.list(auth, status, page, pageSize));
+            .body(commissions.filteredList(auth, status, page, pageSize,
+                workflowId, stageDefinitionId, unlinked));
+    }
+
+    // Keep direct Java callers/tests of the original contract compatible.
+    public ResponseEntity<CommissionPage> list(Authentication auth, Status status, int page,
+                                                int pageSize) {
+        return list(auth, status, page, pageSize, null, null, false);
     }
 
     @PostMapping
