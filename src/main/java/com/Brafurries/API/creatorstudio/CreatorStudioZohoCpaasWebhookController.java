@@ -104,6 +104,19 @@ public class CreatorStudioZohoCpaasWebhookController {
         String destination = recipients.get(0).at("/email_address/address").asText("");
         if (destination.isBlank() || destination.length()>254) return ResponseEntity.ok().build();
 
+        // Lock the SAME parent row as the destructive retention worker.
+        // This serializes bounce/revocation against the final eligibility
+        // check + purge. Parent lock MUST precede the notice UPDATE.
+        var ids = jdbc.queryForList("""
+            SELECT commission_id FROM creator_studio_retention_notices
+             WHERE id=? AND recipient_email=?
+            """, Long.class, noticeId, destination);
+        if (ids.size()!=1) return ResponseEntity.ok().build();
+        var locked = jdbc.queryForList("""
+            SELECT id FROM creator_studio_commissions WHERE id=? FOR UPDATE
+            """, Long.class, ids.get(0));
+        if (locked.size()!=1) return ResponseEntity.ok().build();
+
         if ("delivered".equals(kind) || "email_delivered".equals(kind)) {
             jdbc.update("""
                 UPDATE creator_studio_retention_notices n
