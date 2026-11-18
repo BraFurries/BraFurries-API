@@ -53,6 +53,7 @@ class CreatorStudioRetentionNoticeLedgerTest {
         assertEquals(31,claimed.ownerUserId());
         verify(jdbc).update(argThat(sql ->
                 sql.contains("n.status='PENDING'") &&
+                sql.contains("n.recipient_email=u.email") &&
                 sql.contains("SET n.status='SENDING'") &&
                 sql.contains("c.completed_at=n.completed_at") &&
                 sql.contains("u.email_verified_at IS NOT NULL") &&
