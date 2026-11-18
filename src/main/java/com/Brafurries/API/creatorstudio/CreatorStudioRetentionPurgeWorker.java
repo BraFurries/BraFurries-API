@@ -38,6 +38,10 @@ public class CreatorStudioRetentionPurgeWorker {
                       AND n.commission_id=creator_studio_commissions.id
                       AND n.completed_at=creator_studio_commissions.completed_at
                       AND n.notice_kind='D30' AND n.status='SENT' AND n.sent_at IS NOT NULL
+                      AND n.delivery_state='SERVER_ACCEPTED'
+                      AND n.delivery_evidence_at IS NOT NULL
+                      AND n.delivery_provider IS NOT NULL
+                      AND n.delivery_event_ref IS NOT NULL
                )
                AND EXISTS (
                    SELECT 1 FROM creator_studio_retention_notices n
@@ -45,6 +49,10 @@ public class CreatorStudioRetentionPurgeWorker {
                       AND n.commission_id=creator_studio_commissions.id
                       AND n.completed_at=creator_studio_commissions.completed_at
                       AND n.notice_kind='D7' AND n.status='SENT' AND n.sent_at IS NOT NULL
+                      AND n.delivery_state='SERVER_ACCEPTED'
+                      AND n.delivery_evidence_at IS NOT NULL
+                      AND n.delivery_provider IS NOT NULL
+                      AND n.delivery_event_ref IS NOT NULL
                )
              FOR UPDATE
             """, (rs, n) -> rs.getInt("owner_user_id"), id);
