@@ -67,6 +67,10 @@ class CreatorStudioRetentionNoticeLedgerTest {
     }
 
     @Test void unknownSmtpOutcomeIsDistinctFromAcceptedSmtp() {
+        doAnswer(invocation -> {
+            String sql = invocation.getArgument(0);
+            return sql.contains("status='SENT'") ? 1 : 0;
+        }).when(jdbc).update(anyString(),any(Object[].class));
         ledger.markDeliveryUnknown(44L);
         verify(jdbc).update(argThat(sql ->
             sql.contains("status='UNKNOWN'") &&
