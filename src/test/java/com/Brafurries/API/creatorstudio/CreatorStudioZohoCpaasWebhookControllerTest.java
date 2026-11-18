@@ -59,9 +59,7 @@ class CreatorStudioZohoCpaasWebhookControllerTest {
             && sql.contains("n.delivery_state='UNCONFIRMED'")
             && sql.contains("n.status='SENT'")
             && sql.contains("c.completed_at=n.completed_at")
-            && sql.contains("u.email_verified_at IS NOT NULL")
-            && sql.contains("u.merged_into_user_id IS NULL")
-            && sql.contains("u.email=?")),
+            && sql.contains("n.recipient_email=?")),
             eq("ZOHO_CPAAS"),eq("evt-123"),eq(42L),eq("artist@example.invalid"));
     }
 
