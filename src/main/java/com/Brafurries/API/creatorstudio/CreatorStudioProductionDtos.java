@@ -51,4 +51,7 @@ public final class CreatorStudioProductionDtos {
         long id, long commissionId, String name, Long stageDefinitionId,
         int position, StepStatus status, String notes, LocalDateTime completedAtUtc
     ) {}
+
+    /** A commission step ID, not a global/template stage or browser-supplied owner ID. */
+    public record MoveToStep(@jakarta.validation.constraints.Min(1) long stepId) {}
 }
