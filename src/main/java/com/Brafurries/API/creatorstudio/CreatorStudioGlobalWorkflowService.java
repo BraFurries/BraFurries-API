@@ -203,12 +203,13 @@ public class CreatorStudioGlobalWorkflowService {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                 "Modelo global sem etapas válidas");
         }
-        // Personal copy has NO global FK and NO cross-user stage_definition_id.
-        // A later edit/deactivation cannot rewrite an artist's private history.
+        // Personal copy has NO global FK. Shared stages resolve only within the
+        // importing artist's catalog; a later global edit cannot rewrite
+        // this artist's process or already materialized commission steps.
         return artistCatalog.createWorkflow(auth, new CreatorStudioProductionDtos.WorkflowDraft(
             headers.get(0).name(), draft != null && draft.setAsDefault(),
             steps.stream().map(step ->
-                new CreatorStudioProductionDtos.StepDraft(null,step.name())).toList()
+                new CreatorStudioProductionDtos.StepDraft(null,step.name(),true)).toList()
         ));
     }
 }
