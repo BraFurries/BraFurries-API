@@ -14,8 +14,9 @@ import org.springframework.web.server.ResponseStatusException;
  * Owner-only, read-only inventory of expired Creator Studio commissions.
  *
  * Buckets are mutually exclusive: active hold, missing D30, missing D7,
- * or both notices accepted by SMTP. An SMTP acceptance is NOT proof of
- * final delivery; this report never authorizes or executes a deletion.
+ * both notices accepted by SMTP without provider evidence, or both
+ * independently confirmed by a provider as received by the recipient server.
+ * Neither state proves inbox delivery/read. This report never authorizes deletion.
  */
 @Service
 public class CreatorStudioRetentionDryRunService {
@@ -28,7 +29,9 @@ public class CreatorStudioRetentionDryRunService {
                COALESCE(SUM(CASE WHEN b.reason='MISSING_D7' THEN 1 ELSE 0 END),0)
                    AS missing_d7_count,
                COALESCE(SUM(CASE WHEN b.reason='SMTP_ACCEPTED_BOTH' THEN 1 ELSE 0 END),0)
-                   AS smtp_accepted_both_count
+                   AS smtp_accepted_both_count,
+               COALESCE(SUM(CASE WHEN b.reason='PROVIDER_CONFIRMED_BOTH' THEN 1 ELSE 0 END),0)
+                   AS provider_confirmed_both_count
           FROM (
             SELECT CASE
               WHEN EXISTS (
@@ -52,6 +55,29 @@ public class CreatorStudioRetentionDryRunService {
                    AND n.notice_kind='D7' AND n.status='SENT'
                    AND n.sent_at IS NOT NULL
               ) THEN 'MISSING_D7'
+              WHEN EXISTS (
+                SELECT 1 FROM creator_studio_retention_notices n
+                 WHERE n.owner_user_id=c.owner_user_id
+                   AND n.commission_id=c.id
+                   AND n.completed_at=c.completed_at
+                   AND n.notice_kind='D30' AND n.status='SENT'
+                   AND n.sent_at IS NOT NULL
+                   AND n.delivery_state='SERVER_ACCEPTED'
+                   AND n.delivery_evidence_at IS NOT NULL
+                   AND n.delivery_provider IS NOT NULL
+                   AND n.delivery_event_ref IS NOT NULL
+              ) AND EXISTS (
+                SELECT 1 FROM creator_studio_retention_notices n
+                 WHERE n.owner_user_id=c.owner_user_id
+                   AND n.commission_id=c.id
+                   AND n.completed_at=c.completed_at
+                   AND n.notice_kind='D7' AND n.status='SENT'
+                   AND n.sent_at IS NOT NULL
+                   AND n.delivery_state='SERVER_ACCEPTED'
+                   AND n.delivery_evidence_at IS NOT NULL
+                   AND n.delivery_provider IS NOT NULL
+                   AND n.delivery_event_ref IS NOT NULL
+              ) THEN 'PROVIDER_CONFIRMED_BOTH'
               ELSE 'SMTP_ACCEPTED_BOTH'
             END AS reason
               FROM creator_studio_commissions c
@@ -62,12 +88,13 @@ public class CreatorStudioRetentionDryRunService {
         """;
 
     /**
-     * smtpAcceptedBoth counts records that pass *database* preconditions
-     * only. It deliberately does not claim the artist actually received email.
+     * smtpAcceptedBoth is the SMTP-only count (without BOTH provider
+     * confirmations). providerConfirmedBoth is also NOT inbox/read proof.
      */
     public record DryRun(long expiredCommissions, long blockedByHold,
                          long blockedByMissingD30, long blockedByMissingD7,
-                         long smtpAcceptedBoth, boolean deliveryProofSupported) {}
+                         long smtpAcceptedBoth, long providerConfirmedBoth,
+                         boolean deliveryProofSupported) {}
 
     private final PlatformAuthorizationService identity;
     private final JdbcTemplate jdbc;
@@ -90,6 +117,7 @@ public class CreatorStudioRetentionDryRunService {
             rs.getLong("missing_d30_count"),
             rs.getLong("missing_d7_count"),
             rs.getLong("smtp_accepted_both_count"),
+            rs.getLong("provider_confirmed_both_count"),
             false
         ));
         if (rows.size() != 1) {
@@ -98,7 +126,7 @@ public class CreatorStudioRetentionDryRunService {
         DryRun result = rows.get(0);
         if (result.expiredCommissions() != result.blockedByHold()
                 + result.blockedByMissingD30() + result.blockedByMissingD7()
-                + result.smtpAcceptedBoth()) {
+                + result.smtpAcceptedBoth() + result.providerConfirmedBoth()) {
             throw new IllegalStateException("Retention dry-run buckets inconsistent");
         }
         return result;
