@@ -36,8 +36,10 @@ class CreatorStudioRetentionPurgeWorkerTest {
     void expiredCommissionDeletesOnlyItsOwnChildrenThenParentInOneTransaction() {
         when(jdbc.query(contains("FOR UPDATE"),any(RowMapper.class),eq(101L)))
             .thenReturn(List.of(31));
-        when(jdbc.update(contains("DELETE FROM creator_studio_commissions"),
-            eq(31),eq(101L))).thenReturn(1);
+        doAnswer(invocation -> {
+            String sql = invocation.getArgument(0);
+            return sql.contains("DELETE FROM creator_studio_commissions") ? 1 : 0;
+        }).when(jdbc).update(anyString(),any(Object[].class));
         assertTrue(worker.purgeEligibleCommission(101L));
         var ordered = inOrder(jdbc);
         ordered.verify(jdbc).update(contains("DELETE FROM creator_studio_activity"),
