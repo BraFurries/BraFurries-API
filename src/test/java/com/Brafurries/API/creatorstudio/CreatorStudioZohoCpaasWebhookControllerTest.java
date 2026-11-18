@@ -31,12 +31,13 @@ class CreatorStudioZohoCpaasWebhookControllerTest {
 
     private static byte[] payload(String event, String clientRef) {
         String json = """
-            {"event_name":"%s","webhook_request_id":"evt-123",
+            {"event_name":["%s"],"webhook_request_id":"evt-123",
              "mailagent_key":"agent-test",
-             "event_message":{"email_info":{
+             "event_message":[{"email_info":{
                "client_reference":"%s",
+               "is_smtp_trigger":true,
                "to":[{"email_address":{"address":"artist@example.invalid"}}]
-             }}}""".formatted(event,clientRef);
+             }}]}""".formatted(event,clientRef);
         return json.getBytes(StandardCharsets.UTF_8);
     }
 
@@ -88,6 +89,16 @@ class CreatorStudioZohoCpaasWebhookControllerTest {
 
     @Test void unrelatedSignedMailDoesNotTouchRetentionLedger() throws Exception {
         byte[] body=payload("delivered","marketing-42");
+        assertEquals(HttpStatus.OK,endpoint().event(
+            signature(body,System.currentTimeMillis()),body).getStatusCode());
+        verifyNoInteractions(jdbc);
+    }
+
+    @Test void ambiguousZohoBatchWithMultipleEventsIsIgnoredFailClosed() throws Exception {
+        byte[] body=("{\"event_name\":[\"delivered\",\"hardbounce\"],"
+            +"\"mailagent_key\":\"agent-test\",\"webhook_request_id\":\"evt-123\","
+            +"\"event_message\":[{\"email_info\":{\"client_reference\":\"cs-ret-42\"}}]}")
+            .getBytes(StandardCharsets.UTF_8);
         assertEquals(HttpStatus.OK,endpoint().event(
             signature(body,System.currentTimeMillis()),body).getStatusCode());
         verifyNoInteractions(jdbc);
