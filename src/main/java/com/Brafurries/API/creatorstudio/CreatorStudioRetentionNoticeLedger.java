@@ -55,8 +55,25 @@ public class CreatorStudioRetentionNoticeLedger {
     @Transactional(readOnly = true)
     public List<Long> pendingIds() {
         return jdbc.query("""
-            SELECT id FROM creator_studio_retention_notices
-             WHERE status='PENDING' ORDER BY created_at,id LIMIT 30
+            SELECT n.id
+              FROM creator_studio_retention_notices n
+              JOIN creator_studio_commissions c
+                ON c.id=n.commission_id AND c.owner_user_id=n.owner_user_id
+              JOIN users u ON u.id=n.owner_user_id
+              LEFT JOIN creator_studio_retention_holds h
+                ON h.owner_user_id=n.owner_user_id
+               AND h.commission_id=n.commission_id AND h.active=1
+             WHERE n.status='PENDING' AND c.status='COMPLETED'
+               AND c.completed_at=n.completed_at
+               AND u.merged_into_user_id IS NULL
+               AND u.email_verified_at IS NOT NULL AND u.email IS NOT NULL
+               AND u.email<>'' AND h.commission_id IS NULL
+               AND DATE_ADD(c.completed_at,INTERVAL 1 YEAR)>UTC_TIMESTAMP(6)
+               AND ((n.notice_kind='D30'
+                      AND DATE_ADD(c.completed_at,INTERVAL 1 YEAR)
+                        >DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 7 DAY))
+                    OR n.notice_kind='D7')
+             ORDER BY n.created_at,n.id LIMIT 30
             """, (rs, n) -> rs.getLong("id"));
     }
 
