@@ -91,7 +91,7 @@ class CreatorStudioStepServiceTest {
             eq(31), eq(66L))).thenReturn(List.of(66L));
         when(jdbc.queryForObject(contains("SELECT status FROM creator_studio_commissions"),
             eq(String.class), eq(31), eq(66L))).thenReturn("PAUSED");
-        when(jdbc.query(contains("AND id=?"), any(RowMapper.class),
+        when(jdbc.query(contains("FROM creator_studio_commission_steps"), any(RowMapper.class),
             eq(31), eq(66L), eq(77L))).thenReturn(List.of(
                 new CommissionStep(77L, 66L, "Pintura", 5L, 2,
                     StepStatus.PENDING, "Anotação", null)));
