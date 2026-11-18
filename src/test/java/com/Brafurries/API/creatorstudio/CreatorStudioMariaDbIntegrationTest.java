@@ -161,7 +161,8 @@ class CreatorStudioMariaDbIntegrationTest {
 
         var report = new CreatorStudioRetentionDryRunService(identity, jdbc).inspect(authentication);
         assertEquals(2, report.expiredCommissions());
-        assertEquals(2, report.blockedByMissingD30());
+        assertEquals(1, report.blockedByMissingD30());
+        assertEquals(1, report.blockedByMissingD7());
 
         // An old completion epoch must not enter a current-epoch health tally.
         jdbc.update("""
