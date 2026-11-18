@@ -213,6 +213,49 @@ public class CreatorStudioStepService {
         return findOwned(owner, commissionId, stepId);
     }
 
+    /**
+     * Explicit, atomic progress transition. Only the authenticated artist's
+     * *actual copied* commission step is a valid destination. Never infer
+     * steps from workflow templates (which may have changed since creation).
+     * Notes and the commission's independent QUEUED/PAUSED/etc status remain.
+     */
+    @Transactional
+    public List<CommissionStep> moveToStep(Authentication auth, long commissionId, long stepId) {
+        int owner = access.requirePro(auth);
+        if (commissionId <= 0 || stepId <= 0)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Etapa inválida");
+        lockCommission(owner, commissionId);
+        String status = jdbc.queryForObject("""
+            SELECT status FROM creator_studio_commissions
+             WHERE owner_user_id=? AND id=?
+            """, String.class, owner, commissionId);
+        if ("COMPLETED".equals(status)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Reabra o pedido antes de mudar a etapa de produção");
+        }
+        CommissionStep target = findOwned(owner, commissionId, stepId);
+        // Every stage changes in one statement under a parent-row lock, so no
+        // concurrent request can leave two active production stages.
+        jdbc.update("""
+            UPDATE creator_studio_commission_steps
+               SET status=CASE WHEN position < ? THEN 'DONE'
+                     WHEN position=? THEN 'IN_PROGRESS' ELSE 'PENDING' END,
+                   completed_at=CASE WHEN position < ?
+                     THEN COALESCE(completed_at,UTC_TIMESTAMP(6)) ELSE NULL END
+             WHERE owner_user_id=? AND commission_id=?
+            """, target.position(), target.position(), target.position(), owner, commissionId);
+        jdbc.update("""
+            UPDATE creator_studio_commissions
+               SET updated_at=UTC_TIMESTAMP(6)
+             WHERE owner_user_id=? AND id=?
+            """, owner, commissionId);
+        return jdbc.query("""
+            SELECT id,commission_id,name,stage_definition_id,position,status,notes,completed_at
+              FROM creator_studio_commission_steps
+             WHERE owner_user_id=? AND commission_id=? ORDER BY position,id
+            """, STEP_MAPPER, owner, commissionId);
+    }
+
     @Transactional
     public void delete(Authentication auth, long commissionId, long stepId) {
         int owner = access.requirePro(auth);
