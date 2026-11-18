@@ -52,6 +52,9 @@ public class CreatorStudioRetentionService {
               FROM creator_studio_commissions
              WHERE owner_user_id=? AND status='COMPLETED'
                AND completed_at IS NOT NULL
+               -- Broad indexed prefilter; exact calendar-year comparison below
+               -- remains authoritative (including leap-year edge cases).
+               AND completed_at<=DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 334 DAY)
                AND DATE_ADD(completed_at,INTERVAL 1 YEAR)
                    <=DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 30 DAY)
              ORDER BY completed_at ASC,id ASC
