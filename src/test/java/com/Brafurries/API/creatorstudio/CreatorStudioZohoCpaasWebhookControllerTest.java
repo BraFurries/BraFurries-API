@@ -94,6 +94,15 @@ class CreatorStudioZohoCpaasWebhookControllerTest {
         verifyNoInteractions(jdbc);
     }
 
+    @Test void cpaaSApiEventCannotMasqueradeAsTrackedSmtpNotice() throws Exception {
+        byte[] body = new String(payload("delivered", "cs-ret-42"),
+            StandardCharsets.UTF_8).replace("\"is_smtp_trigger\":true",
+            "\"is_smtp_trigger\":false").getBytes(StandardCharsets.UTF_8);
+        assertEquals(HttpStatus.OK, endpoint().event(
+            signature(body, System.currentTimeMillis()), body).getStatusCode());
+        verifyNoInteractions(jdbc);
+    }
+
     @Test void ambiguousZohoBatchWithMultipleEventsIsIgnoredFailClosed() throws Exception {
         byte[] body=("{\"event_name\":[\"delivered\",\"hardbounce\"],"
             +"\"mailagent_key\":\"agent-test\",\"webhook_request_id\":\"evt-123\","
