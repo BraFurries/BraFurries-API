@@ -139,6 +139,45 @@ class CreatorStudioCommissionServiceTest {
     }
 
     @Test
+    void processFilterUsesOnlyAuthenticatedArtistsSourceWorkflow() {
+        when(access.requirePro(authentication)).thenReturn(55);
+        commissions.filteredList(authentication, null, 1, 12, 99L, null, false);
+        verify(jdbc).query(argThat(sql ->
+            sql.contains("source_workflow_id=?")
+                && sql.contains("WHERE owner_user_id=?")
+                && sql.contains("status <> 'COMPLETED'")),
+            any(org.springframework.jdbc.core.RowMapper.class),
+            eq(55), eq(99L), eq(12), eq(0));
+    }
+
+    @Test
+    void reusableStageFilterSelectsActualCurrentStepNotAnyPendingFutureStep() {
+        when(access.requirePro(authentication)).thenReturn(55);
+        commissions.filteredList(authentication, null, 2, 12, null, 7L, false);
+        verify(jdbc).query(argThat(sql ->
+            sql.contains("AND s.status<>'DONE'")
+                && sql.contains("ORDER BY CASE s.status WHEN 'IN_PROGRESS'")
+                && sql.contains("AND s.commission_id=creator_studio_commissions.id")),
+            any(org.springframework.jdbc.core.RowMapper.class),
+            eq(55), eq(7L), eq(12), eq(12));
+    }
+
+    @Test
+    void customOrUnlinkedStagesCanBeRequestedSeparatelyAndInvalidFiltersAreRejected() {
+        when(access.requirePro(authentication)).thenReturn(55);
+        commissions.filteredList(authentication, null, 1, 25, null, null, true);
+        verify(jdbc).query(argThat(sql -> sql.contains("stage_definition_id")
+            && sql.contains("IS NULL")), any(org.springframework.jdbc.core.RowMapper.class),
+            eq(55), eq(25), eq(0));
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+            () -> commissions.filteredList(authentication, null, 1, 25,
+                null, 7L, true)).getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
+            () -> commissions.filteredList(authentication, null, 1, 25,
+                -1L, null, false)).getStatusCode());
+    }
+
+    @Test
     void rejectsUnboundedPagination() {
         when(access.requirePro(authentication)).thenReturn(55);
         assertEquals(HttpStatus.BAD_REQUEST, assertThrows(ResponseStatusException.class,
