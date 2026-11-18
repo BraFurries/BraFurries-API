@@ -2,6 +2,7 @@ package com.Brafurries.API.creatorstudio;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -16,6 +17,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class CreatorStudioRetentionService {
     private final CreatorStudioAccessService access;
     private final JdbcTemplate jdbc;
+    @Value("${app.creator-studio.retention.purge-enabled:false}")
+    private boolean purgeEnabled;
+
+    @Value("${app.creator-studio.retention.notification-delivery-ready:false}")
+    private boolean noticeDeliveryReady;
 
     public record ExpiringCommission(long id, String title, LocalDateTime completedAtUtc,
                                      LocalDateTime expiresAtUtc, String warning) {}
@@ -57,6 +63,6 @@ public class CreatorStudioRetentionService {
                 rs.getString("warning")
             ), ownerId);
         return new RetentionOverview("12_MONTHS_AFTER_LAST_COMPLETION",12,30,7,
-            false,rows);
+            purgeEnabled && noticeDeliveryReady,rows);
     }
 }
