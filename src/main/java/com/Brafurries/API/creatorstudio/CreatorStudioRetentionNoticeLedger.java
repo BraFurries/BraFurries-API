@@ -93,7 +93,8 @@ public class CreatorStudioRetentionNoticeLedger {
               ON h.owner_user_id=n.owner_user_id
              AND h.commission_id=n.commission_id AND h.active=1
                SET n.status='SENDING',n.claimed_at=UTC_TIMESTAMP(6),
-                   n.attempts=n.attempts+1,n.last_error_code=NULL
+                   n.attempts=n.attempts+1,n.last_error_code=NULL,
+                   n.recipient_email=u.email
              WHERE n.id=? AND n.status='PENDING'
                AND c.status='COMPLETED' AND c.completed_at=n.completed_at
                AND h.commission_id IS NULL
@@ -109,9 +110,8 @@ public class CreatorStudioRetentionNoticeLedger {
         if (claimed != 1) return null;
         List<ClaimedNotice> found = jdbc.query("""
             SELECT n.id,n.owner_user_id,n.commission_id,n.notice_kind,
-                   n.completed_at,u.email
+                   n.completed_at,n.recipient_email AS email
               FROM creator_studio_retention_notices n
-              JOIN users u ON u.id=n.owner_user_id
              WHERE n.id=? AND n.status='SENDING'
             """, (rs, i) -> new ClaimedNotice(
                 rs.getLong("id"), rs.getInt("owner_user_id"),
