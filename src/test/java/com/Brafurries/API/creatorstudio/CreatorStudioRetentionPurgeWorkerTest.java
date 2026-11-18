@@ -31,6 +31,10 @@ class CreatorStudioRetentionPurgeWorkerTest {
             sql.contains("creator_studio_retention_holds") &&
             sql.contains("n.notice_kind='D30' AND n.status='SENT'") &&
             sql.contains("n.notice_kind='D7' AND n.status='SENT'") &&
+            sql.contains("n.delivery_state='SERVER_ACCEPTED'") &&
+            sql.contains("n.delivery_evidence_at IS NOT NULL") &&
+            sql.contains("n.delivery_provider IS NOT NULL") &&
+            sql.contains("n.delivery_event_ref IS NOT NULL") &&
             sql.contains("n.completed_at=creator_studio_commissions.completed_at")),
             any(RowMapper.class),eq(101L));
         verify(jdbc,never()).update(anyString(),any(Object[].class));
