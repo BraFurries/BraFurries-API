@@ -24,6 +24,7 @@ public class CreatorStudioRetentionPurgeWorker {
             SELECT owner_user_id FROM creator_studio_commissions
              WHERE id=? AND status='COMPLETED'
                AND completed_at IS NOT NULL
+               AND completed_at<=DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 364 DAY)
                AND DATE_ADD(completed_at,INTERVAL 1 YEAR)<=UTC_TIMESTAMP(6)
              FOR UPDATE
             """, (rs, n) -> rs.getInt("owner_user_id"), id);
@@ -47,6 +48,7 @@ public class CreatorStudioRetentionPurgeWorker {
             DELETE FROM creator_studio_commissions
              WHERE owner_user_id=? AND id=? AND status='COMPLETED'
                AND completed_at IS NOT NULL
+               AND completed_at<=DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 364 DAY)
                AND DATE_ADD(completed_at,INTERVAL 1 YEAR)<=UTC_TIMESTAMP(6)
             """, ownerId, id);
         if (parent != 1) {
