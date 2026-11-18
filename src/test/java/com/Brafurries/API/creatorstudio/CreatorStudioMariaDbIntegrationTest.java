@@ -273,6 +273,94 @@ class CreatorStudioMariaDbIntegrationTest {
     }
 
     @Test
+    void processBoardMovementAndProvenanceUseRealArtistScopedMariaDbSnapshots() {
+        CreatorStudioAccessService access = mock(CreatorStudioAccessService.class);
+        Authentication artist = mock(Authentication.class);
+        Authentication outsider = mock(Authentication.class);
+        when(access.requirePro(artist)).thenReturn(ARTIST_A);
+        when(access.requirePro(outsider)).thenReturn(ARTIST_B);
+        var commissions = new CreatorStudioCommissionService(access, jdbc);
+        var steps = new CreatorStudioStepService(access, jdbc);
+
+        transactions.execute(tx -> {
+            jdbc.update("""
+                INSERT INTO creator_studio_workflows(owner_user_id,name,is_default)
+                VALUES (?,'CI - Ícones',0)
+                """, ARTIST_A);
+            long workflowId = jdbc.queryForObject("""
+                SELECT id FROM creator_studio_workflows
+                 WHERE owner_user_id=? AND name='CI - Ícones'
+                """, Long.class, ARTIST_A);
+            jdbc.update("""
+                INSERT INTO creator_studio_stage_definitions(owner_user_id,name)
+                VALUES (?,'CI - Rascunho')
+                """, ARTIST_A);
+            long stageId = jdbc.queryForObject("""
+                SELECT id FROM creator_studio_stage_definitions
+                 WHERE owner_user_id=? AND name='CI - Rascunho'
+                """, Long.class, ARTIST_A);
+            jdbc.update("""
+                INSERT INTO creator_studio_workflow_steps
+                  (owner_user_id,workflow_id,stage_definition_id,name,position)
+                VALUES (?, ?, ?, 'CI - Rascunho', 0),
+                       (?, ?, NULL, 'CI - Pintura', 1)
+                """, ARTIST_A, workflowId, stageId, ARTIST_A, workflowId);
+
+            var order = commissions.create(artist,
+                new CreatorStudioCommissionDtos.SaveCommission(
+                    "Ícone de teste", "Cliente sintético", null, null,
+                    java.time.LocalDate.of(2026,11,18), null, null, workflowId));
+            assertEquals(workflowId, order.sourceWorkflowId());
+            assertEquals(Integer.valueOf(0), order.currentStagePosition());
+            assertEquals(stageId, order.currentStageDefinitionId());
+            assertEquals(1, commissions.filteredList(
+                artist, null, 1, 12, workflowId, null, false).total());
+            assertEquals(1, commissions.filteredList(
+                artist, null, 1, 12, null, stageId, false).total());
+
+            var original = steps.list(artist, order.id());
+            assertEquals(2, original.size());
+            commissions.changeStatus(artist, order.id(),
+                new CreatorStudioCommissionDtos.ChangeStatus(
+                    CreatorStudioCommissionDtos.Status.PAUSED));
+            steps.moveToStep(artist, order.id(), original.get(1).id());
+            var updated = steps.list(artist, order.id());
+            assertEquals(CreatorStudioProductionDtos.StepStatus.DONE,
+                updated.get(0).status());
+            assertEquals(CreatorStudioProductionDtos.StepStatus.IN_PROGRESS,
+                updated.get(1).status());
+            assertEquals(CreatorStudioCommissionDtos.Status.PAUSED,
+                commissions.find(artist, order.id()).status());
+            assertEquals(Integer.valueOf(1),
+                commissions.find(artist, order.id()).currentStagePosition());
+            assertEquals(0, commissions.filteredList(
+                artist, null, 1, 12, null, stageId, false).total());
+            steps.moveToStep(artist, order.id(), original.get(0).id());
+            assertEquals(CreatorStudioProductionDtos.StepStatus.PENDING,
+                steps.list(artist, order.id()).get(1).status());
+
+            assertEquals(HttpStatus.NOT_FOUND, assertThrows(
+                ResponseStatusException.class,
+                () -> steps.moveToStep(outsider, order.id(), original.get(0).id()))
+                .getStatusCode());
+            assertEquals(0, commissions.filteredList(
+                outsider, null, 1, 12, workflowId, null, false).total());
+
+            // An existing, empty legacy commission can explicitly import a
+            // personal workflow; only this real import sets its provenance.
+            var empty = commissions.create(artist,
+                new CreatorStudioCommissionDtos.SaveCommission(
+                    "Pedido existente", "Cliente sintético", null, null,
+                    java.time.LocalDate.of(2026,11,18), null, null, null));
+            assertNull(empty.sourceWorkflowId());
+            steps.importWorkflow(artist, empty.id(), workflowId);
+            assertEquals(workflowId, commissions.find(artist, empty.id()).sourceWorkflowId());
+            tx.setRollbackOnly();
+            return null;
+        });
+    }
+
+    @Test
     void platformStarterCanBeImportedAndEditedWithoutRewritingArtistPrivateCopy() {
         var access = mock(CreatorStudioAccessService.class);
         var platform = mock(PlatformAuthorizationService.class);
