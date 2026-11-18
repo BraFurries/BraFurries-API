@@ -279,13 +279,17 @@ class CreatorStudioMariaDbIntegrationTest {
             """.formatted(eventId, kind, noticeId);
     }
 
-    private String signature(String body) throws Exception {
-        long now = Instant.now().toEpochMilli();
-        Mac mac = Mac.getInstance("HmacSHA256");
-        mac.init(new SecretKeySpec(TEST_SECRET.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-        String encoded = Base64.getEncoder().encodeToString(
-            mac.doFinal(body.getBytes(StandardCharsets.UTF_8)));
-        return "s-algorithm=HmacSHA256;ts=" + now + ";s=" +
-            URLEncoder.encode(encoded, StandardCharsets.UTF_8);
+    private String signature(String body) {
+        try {
+            long timestamp = Instant.now().toEpochMilli();
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(TEST_SECRET.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            String encoded = Base64.getEncoder().encodeToString(
+                mac.doFinal(body.getBytes(StandardCharsets.UTF_8)));
+            return "s-algorithm=HmacSHA256;ts=" + timestamp + ";s=" +
+                URLEncoder.encode(encoded, StandardCharsets.UTF_8);
+        } catch (java.security.GeneralSecurityException e) {
+            throw new IllegalStateException("Synthetic CI HMAC unavailable", e);
+        }
     }
 }
