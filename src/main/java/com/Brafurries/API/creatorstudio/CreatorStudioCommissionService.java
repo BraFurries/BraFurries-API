@@ -46,7 +46,14 @@ public class CreatorStudioCommissionService {
                    AND s.status<>'DONE'
                  ORDER BY CASE s.status WHEN 'IN_PROGRESS' THEN 0
                    WHEN 'WAITING_APPROVAL' THEN 1 ELSE 2 END,s.position,s.id
-                 LIMIT 1) AS current_stage_definition_id
+                 LIMIT 1) AS current_stage_definition_id,
+               (SELECT s.position FROM creator_studio_commission_steps s
+                 WHERE s.owner_user_id=creator_studio_commissions.owner_user_id
+                   AND s.commission_id=creator_studio_commissions.id
+                   AND s.status<>'DONE'
+                 ORDER BY CASE s.status WHEN 'IN_PROGRESS' THEN 0
+                   WHEN 'WAITING_APPROVAL' THEN 1 ELSE 2 END,s.position,s.id
+                 LIMIT 1) AS current_stage_position
           FROM creator_studio_commissions
         """;
 
@@ -66,7 +73,8 @@ public class CreatorStudioCommissionService {
             timestamp(rs, "completed_at"),
             rs.getString("current_stage_name"),
             nullableLong(rs, "current_stage_definition_id"),
-            nullableLong(rs, "source_workflow_id")
+            nullableLong(rs, "source_workflow_id"),
+            nullableInteger(rs, "current_stage_position")
         );
 
     private final CreatorStudioAccessService access;
@@ -79,6 +87,11 @@ public class CreatorStudioCommissionService {
 
     private static Long nullableLong(ResultSet rs, String field) throws SQLException {
         long value = rs.getLong(field);
+        return rs.wasNull() ? null : value;
+    }
+
+    private static Integer nullableInteger(ResultSet rs, String field) throws SQLException {
+        int value = rs.getInt(field);
         return rs.wasNull() ? null : value;
     }
 
