@@ -57,7 +57,7 @@ class CreatorStudioRetentionDryRunServiceTest {
         assertEquals(5, result.smtpAcceptedBoth());
         assertFalse(result.deliveryProofSupported());
 
-        verify(jdbc).query(argThat(sql ->
+        verify(jdbc).query(org.mockito.ArgumentMatchers.<String>argThat(sql ->
             sql.contains("FROM creator_studio_commissions c")
             && sql.contains("c.status='COMPLETED'")
             && sql.contains("DATE_ADD(c.completed_at,INTERVAL 1 YEAR)<=UTC_TIMESTAMP(6)")
@@ -89,7 +89,6 @@ class CreatorStudioRetentionDryRunServiceTest {
     }
 
     @Test void endpointIsNonCacheableAndReturnsOnlyAggregates() {
-        var endpoint = new CreatorStudioRetentionDryRunController(service);
         var expected = new CreatorStudioRetentionDryRunService.DryRun(1, 0, 1, 0, 0, false);
         // Test the HTTP contract separately from the service's JDBC dependencies.
         var mockedService = mock(CreatorStudioRetentionDryRunService.class);
