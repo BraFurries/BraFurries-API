@@ -5,6 +5,10 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletRequest;
+import java.io.ByteArrayInputStream;
+import org.springframework.mock.web.DelegatingServletInputStream;
+import org.springframework.mock.web.MockHttpServletRequest;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -106,6 +110,26 @@ class CreatorStudioZohoCpaasWebhookControllerTest {
         ordered.verify(jdbc).update(
             contains("SET n.delivery_state=?"),eq("BOUNCED"),eq("ZOHO_CPAAS"),
             eq("evt-123"),eq(42L),eq("artist@example.invalid"));
+    }
+
+    @Test void rejectsOversizedPublicBodyBeforeReadingIt() throws Exception {
+        MockHttpServletRequest req=new MockHttpServletRequest();
+        req.setContent(new byte[32769]);
+        var denied=assertThrows(ResponseStatusException.class,
+            () -> endpoint().receive(null,req));
+        assertEquals(HttpStatus.PAYLOAD_TOO_LARGE,denied.getStatusCode());
+        verifyNoInteractions(jdbc);
+    }
+
+    @Test void refusesUnboundedChunkedBodyEvenWithoutContentLength() throws Exception {
+        HttpServletRequest req=mock(HttpServletRequest.class);
+        when(req.getContentLengthLong()).thenReturn(-1L);
+        when(req.getInputStream()).thenReturn(
+            new DelegatingServletInputStream(new ByteArrayInputStream(new byte[32769])));
+        var denied=assertThrows(ResponseStatusException.class,
+            () -> endpoint().receive(null,req));
+        assertEquals(HttpStatus.PAYLOAD_TOO_LARGE,denied.getStatusCode());
+        verifyNoInteractions(jdbc);
     }
 
     @Test void rejectsInvalidOrExpiredSignatureWithoutDatabaseAccess() throws Exception {
