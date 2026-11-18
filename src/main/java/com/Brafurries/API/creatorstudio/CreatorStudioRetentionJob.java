@@ -37,6 +37,26 @@ public class CreatorStudioRetentionJob {
              WHERE status='COMPLETED' AND completed_at IS NOT NULL
                AND completed_at<=DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 364 DAY)
                AND DATE_ADD(completed_at,INTERVAL 1 YEAR)<=UTC_TIMESTAMP(6)
+               AND NOT EXISTS (
+                   SELECT 1 FROM creator_studio_retention_holds h
+                    WHERE h.owner_user_id=creator_studio_commissions.owner_user_id
+                      AND h.commission_id=creator_studio_commissions.id
+                      AND h.active=1
+               )
+               AND EXISTS (
+                   SELECT 1 FROM creator_studio_retention_notices n
+                    WHERE n.owner_user_id=creator_studio_commissions.owner_user_id
+                      AND n.commission_id=creator_studio_commissions.id
+                      AND n.completed_at=creator_studio_commissions.completed_at
+                      AND n.notice_kind='D30' AND n.status='SENT'
+               )
+               AND EXISTS (
+                   SELECT 1 FROM creator_studio_retention_notices n
+                    WHERE n.owner_user_id=creator_studio_commissions.owner_user_id
+                      AND n.commission_id=creator_studio_commissions.id
+                      AND n.completed_at=creator_studio_commissions.completed_at
+                      AND n.notice_kind='D7' AND n.status='SENT'
+               )
              ORDER BY completed_at ASC,id ASC LIMIT 50
             """, (rs, n) -> rs.getLong("id"));
         int removed = 0;
