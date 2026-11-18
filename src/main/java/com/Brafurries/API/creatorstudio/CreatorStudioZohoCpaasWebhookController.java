@@ -2,6 +2,8 @@ package com.Brafurries.API.creatorstudio;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletRequest;
+import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -57,8 +59,30 @@ public class CreatorStudioZohoCpaasWebhookController {
 
     @PostMapping
     @Transactional
-    public ResponseEntity<Void> event(@RequestHeader(value="producer-signature",required=false)
-                                      String signature, @RequestBody byte[] rawBody) {
+    public ResponseEntity<Void> receive(
+            @RequestHeader(value="producer-signature",required=false) String signature,
+            HttpServletRequest request) {
+        // Never let Spring materialize an unbounded @RequestBody byte array
+        // for this publicly reachable endpoint. Read at most MAX+1 bytes
+        // even when Transfer-Encoding: chunked omits Content-Length.
+        if (request.getContentLengthLong() > MAX_BODY_BYTES) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE);
+        }
+        try {
+            byte[] rawBody = request.getInputStream().readNBytes(MAX_BODY_BYTES + 1);
+            if (rawBody.length > MAX_BODY_BYTES) {
+                throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE);
+            }
+            return event(signature, rawBody);
+        } catch (IOException failure) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                "Invalid webhook request body");
+        }
+    }
+
+    // Package-private for deterministic signature and state tests. In production
+    // only receive() is mapped and its transaction covers every SQL operation.
+    ResponseEntity<Void> event(String signature, byte[] rawBody) {
         verify(signature, rawBody);
         JsonNode root;
         try {
