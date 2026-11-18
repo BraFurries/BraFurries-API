@@ -41,6 +41,18 @@ class CreatorStudioZohoCpaasWebhookControllerTest {
         return json.getBytes(StandardCharsets.UTF_8);
     }
 
+    /** Stub the same lock order used by the destructive retention worker. */
+    private void existingArtistCommission() {
+        when(jdbc.query(contains("SELECT owner_user_id,commission_id"),
+                any(org.springframework.jdbc.core.RowMapper.class),
+                eq(42L), eq("artist@example.invalid")))
+            .thenReturn(java.util.List.of(
+                new CreatorStudioZohoCpaasWebhookController.NoticeScope(7, 51L)));
+        when(jdbc.queryForList(contains("SELECT id FROM creator_studio_commissions"),
+                eq(Long.class), eq(7), eq(51L)))
+            .thenReturn(java.util.List.of(51L));
+    }
+
     private static String signature(byte[] body, long timestamp) throws Exception {
         Mac mac=Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(SECRET.getBytes(StandardCharsets.UTF_8),"HmacSHA256"));
@@ -51,6 +63,7 @@ class CreatorStudioZohoCpaasWebhookControllerTest {
 
     @Test void authenticatedDeliveryCanOnlyMatchCurrentVerifiedArtistAndCompletionEpoch()
             throws Exception {
+        existingArtistCommission();
         byte[] body=payload("delivered","cs-ret-42");
         var response=endpoint().event(signature(body,System.currentTimeMillis()),body);
         assertEquals(HttpStatus.OK,response.getStatusCode());
@@ -58,10 +71,41 @@ class CreatorStudioZohoCpaasWebhookControllerTest {
             sql.contains("n.delivery_state='SERVER_ACCEPTED'")
             && sql.contains("n.delivery_evidence_at=UTC_TIMESTAMP(6)")
             && sql.contains("n.delivery_state='UNCONFIRMED'")
-            && sql.contains("n.status='SENT'")
+            && sql.contains("n.status IN ('SENDING','SENT')")
             && sql.contains("c.completed_at=n.completed_at")
             && sql.contains("n.recipient_email=?")),
             eq("ZOHO_CPAAS"),eq("evt-123"),eq(42L),eq("artist@example.invalid"));
+    }
+
+    @Test void missingArtistCommissionNeverUpdatesDeliveryEvidence() throws Exception {
+        byte[] body=payload("hardbounce","cs-ret-42");
+        when(jdbc.query(contains("SELECT owner_user_id,commission_id"),
+                any(org.springframework.jdbc.core.RowMapper.class),
+                eq(42L), eq("artist@example.invalid")))
+            .thenReturn(java.util.List.of(
+                new CreatorStudioZohoCpaasWebhookController.NoticeScope(7,51L)));
+        // Parent row was concurrently purged or never belonged to this artist.
+        assertEquals(HttpStatus.OK,
+            endpoint().event(signature(body,System.currentTimeMillis()),body).getStatusCode());
+        verify(jdbc).queryForList(
+            argThat((String sql) -> sql.contains("owner_user_id=? AND id=? FOR UPDATE")),
+            eq(Long.class),eq(7),eq(51L));
+        verify(jdbc,never()).update(anyString(),any(Object[].class));
+    }
+
+    @Test void locksParentBeforeRevokingPreviouslyConfirmedDelivery() throws Exception {
+        existingArtistCommission();
+        byte[] body=payload("hardbounce","cs-ret-42");
+        endpoint().event(signature(body,System.currentTimeMillis()),body);
+        var ordered=inOrder(jdbc);
+        ordered.verify(jdbc).query(contains("SELECT owner_user_id,commission_id"),
+            any(org.springframework.jdbc.core.RowMapper.class),
+            eq(42L),eq("artist@example.invalid"));
+        ordered.verify(jdbc).queryForList(contains("FOR UPDATE"),
+            eq(Long.class),eq(7),eq(51L));
+        ordered.verify(jdbc).update(
+            contains("SET n.delivery_state=?"),eq("BOUNCED"),eq("ZOHO_CPAAS"),
+            eq("evt-123"),eq(42L),eq("artist@example.invalid"));
     }
 
     @Test void rejectsInvalidOrExpiredSignatureWithoutDatabaseAccess() throws Exception {
@@ -114,13 +158,15 @@ class CreatorStudioZohoCpaasWebhookControllerTest {
     }
 
     @Test void signedBounceRevokesEvidenceAndNeverResendsMail() throws Exception {
+        existingArtistCommission();
         byte[] body=payload("hardbounce","cs-ret-42");
         assertEquals(HttpStatus.OK,endpoint().event(
             signature(body,System.currentTimeMillis()),body).getStatusCode());
         verify(jdbc).update(argThat(sql ->
             sql.contains("n.delivery_state=?")
             && sql.contains("n.delivery_evidence_at=NULL")
-            && sql.contains("n.delivery_state<>'COMPLAINT'")),
+            && sql.contains("n.delivery_state<>'COMPLAINT'")
+            && sql.contains("n.status IN ('SENDING','SENT','UNKNOWN')")),
             eq("BOUNCED"),eq("ZOHO_CPAAS"),eq("evt-123"),eq(42L),
             eq("artist@example.invalid"));
     }
