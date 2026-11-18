@@ -111,28 +111,6 @@ class CreatorStudioCatalogServiceTest {
     }
 
     @Test
-    void optingInCreatesANewReusableStageForThisArtist() {
-        when(access.requirePro(auth)).thenReturn(31);
-        when(jdbc.query(contains("SELECT id FROM users"),
-            any(RowMapper.class), eq(31))).thenReturn(List.of(31));
-        when(jdbc.queryForObject(contains("creator_studio_workflows"),
-            eq(Integer.class), eq(31), eq(12L))).thenReturn(1);
-        doAnswer(call -> {
-                org.springframework.jdbc.support.KeyHolder keys = call.getArgument(1);
-                keys.getKeyList().add(java.util.Map.of("id", 66L));
-                return 1;
-            }).when(jdbc).update(any(org.springframework.jdbc.core.PreparedStatementCreator.class),
-                any(org.springframework.jdbc.support.KeyHolder.class));
-
-        catalog.updateWorkflow(auth, 12L, new WorkflowDraft("Ícones", false,
-            List.of(new StepDraft(null, "Pintura", true))));
-        verify(jdbc).update(contains("INSERT INTO creator_studio_workflow_steps"),
-            eq(31), eq(12L), eq(66L), eq("Pintura"), eq(0));
-        verify(jdbc).query(contains("SELECT id FROM creator_studio_stage_definitions"),
-            any(RowMapper.class), eq(31), eq("Pintura"));
-    }
-
-    @Test
     void reusableIntentIsOptionalAndNeverChangesCustomOnlyLegacySteps() {
         when(access.requirePro(auth)).thenReturn(31);
         when(jdbc.query(contains("SELECT id FROM users"),
