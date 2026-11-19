@@ -30,7 +30,7 @@ public class TokenService {
     public TokenService(
         @Value("${jwt.base-key}") String jwtBaseKey,
         @Value("${jwt.expiration:900}") long accessExpirationSeconds,
-        @Value("${jwt.refresh-expiration:1209600}") long refreshExpirationSeconds
+        @Value("${jwt.refresh-expiration:2592000}") long refreshExpirationSeconds
     ) {
         if (jwtBaseKey == null || jwtBaseKey.isBlank()) {
             throw new IllegalStateException("JWT_BASE_KEY must be configured with a non-blank signing key");
