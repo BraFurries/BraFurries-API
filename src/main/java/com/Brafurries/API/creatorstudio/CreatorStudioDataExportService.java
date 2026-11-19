@@ -73,7 +73,7 @@ public class CreatorStudioDataExportService {
                 while (true) {
                     List<Map<String, Object>> rows = jdbc.queryForList("""
                         SELECT id,art_type_id,title,client_name,description,
-                               private_notes,requested_on,due_on,status,
+                               private_notes,requested_on,due_on,planned_on,status,
                                created_at,updated_at,completed_at
                           FROM creator_studio_commissions
                          WHERE owner_user_id=? AND id>?
@@ -88,7 +88,7 @@ public class CreatorStudioDataExportService {
                             json.writeObject(exportValue(entry.getValue()));
                         }
                         writeDataset(json, "steps", """
-                            SELECT id,stage_definition_id,name,position,status,notes,completed_at
+                            SELECT id,stage_definition_id,name,position,status,notes,completed_at,planned_on
                               FROM creator_studio_commission_steps
                              WHERE owner_user_id=? AND commission_id=?
                              ORDER BY position,id

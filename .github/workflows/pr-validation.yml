@@ -334,7 +334,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: BraFurries/BraFurries-Database
-          ref: c92bd91edf63e7f13e1a329688f9293c9d412eb1 # Database PR #73
+          ref: 10e9155a636cc9d0a2711ab5feb5dcfd948c58c9 # Database calendar migration reviewed SHA
           path: .ci/creator-studio-db
           persist-credentials: false
 
@@ -349,7 +349,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C .ci/creator-studio-db rev-parse HEAD)" = "c92bd91edf63e7f13e1a329688f9293c9d412eb1"
+          test "$(git -C .ci/creator-studio-db rev-parse HEAD)" = "10e9155a636cc9d0a2711ab5feb5dcfd948c58c9"
           db=".ci/creator-studio-db/flyway/sql"
           base="$db/baseline/B20261020_001__adopt_production_schema.sql"
           test "$(grep -c '^CREATE TABLE ' "$base")" -eq 107
@@ -366,6 +366,7 @@ jobs:
             V20261118_001__creator_studio_retention_delivery_evidence.sql
             V20261118_002__creator_studio_global_workflow_library.sql
             V20261118_003__creator_studio_commission_source_workflow.sql
+            V20261119_001__creator_studio_production_planning.sql
           )
           test -s "$base"
           for filename in "${files[@]}"; do

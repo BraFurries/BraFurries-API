@@ -439,4 +439,74 @@ class CreatorStudioMariaDbIntegrationTest {
             throw new IllegalStateException("Synthetic CI HMAC unavailable", e);
         }
     }
+
+    @Test
+    void calendarPlansRealSnapshotsAndDoesNotCrossOwnersOrChangeProgress() throws Exception {
+        var auth = mock(Authentication.class);
+        var access = mock(CreatorStudioAccessService.class);
+        when(access.requirePro(auth)).thenReturn(ARTIST_A);
+        var calendar = new CreatorStudioCalendarService(access,jdbc);
+        jdbc.update("""
+            INSERT INTO creator_studio_commissions(owner_user_id,title,client_name,requested_on,due_on,status)
+            VALUES (?, 'Calendar A','Synthetic','2026-11-01','2026-11-30','PAUSED'),
+                   (?, 'Calendar B','Synthetic','2026-11-01','2026-11-30','QUEUED'),
+                   (?, 'Simple A','Synthetic','2026-11-02',NULL,'QUEUED')
+            """,ARTIST_A,ARTIST_B,ARTIST_A);
+        long a=jdbc.queryForObject("SELECT id FROM creator_studio_commissions WHERE owner_user_id=? AND title='Calendar A'",Long.class,ARTIST_A);
+        long b=jdbc.queryForObject("SELECT id FROM creator_studio_commissions WHERE owner_user_id=? AND title='Calendar B'",Long.class,ARTIST_B);
+        long simple=jdbc.queryForObject("SELECT id FROM creator_studio_commissions WHERE owner_user_id=? AND title='Simple A'",Long.class,ARTIST_A);
+        jdbc.update("""
+            INSERT INTO creator_studio_commission_steps(owner_user_id,commission_id,name,position,status,notes)
+            VALUES (?,?,'Draft',0,'IN_PROGRESS','Keep'),(?,?,'Color',1,'PENDING',NULL),
+                   (?,?,'Other',0,'PENDING',NULL)
+            """,ARTIST_A,a,ARTIST_A,a,ARTIST_B,b);
+        long draft=jdbc.queryForObject("SELECT id FROM creator_studio_commission_steps WHERE commission_id=? AND position=0",Long.class,a);
+        long color=jdbc.queryForObject("SELECT id FROM creator_studio_commission_steps WHERE commission_id=? AND position=1",Long.class,a);
+        long other=jdbc.queryForObject("SELECT id FROM creator_studio_commission_steps WHERE commission_id=?",Long.class,b);
+        var date=java.time.LocalDate.of(2026,11,19);
+        var plan=new CreatorStudioCalendarDtos.Plan(date);
+        assertEquals(3,calendar.unplanned(auth,1,100).items().size());
+        assertTrue(calendar.unplanned(auth,1,1).hasMore());
+        transactions.executeWithoutResult(t -> calendar.plan(auth,a,draft,plan));
+        transactions.executeWithoutResult(t -> calendar.plan(auth,a,color,new CreatorStudioCalendarDtos.Plan(date.plusDays(1))));
+        transactions.executeWithoutResult(t -> calendar.plan(auth,simple,null,plan));
+        assertEquals("PAUSED",jdbc.queryForObject("SELECT status FROM creator_studio_commissions WHERE id=?",String.class,a));
+        assertEquals("IN_PROGRESS",jdbc.queryForObject("SELECT status FROM creator_studio_commission_steps WHERE id=?",String.class,draft));
+        assertEquals("Keep",jdbc.queryForObject("SELECT notes FROM creator_studio_commission_steps WHERE id=?",String.class,draft));
+        assertEquals(0,calendar.unplanned(auth,1,100).items().size());
+        var month=calendar.calendar(auth,date.withDayOfMonth(1),date.withDayOfMonth(30),1,100);
+        assertEquals(4,month.items().size());
+        assertTrue(month.items().stream().noneMatch(item->item.commissionId()==b));
+        assertEquals(1,month.items().stream().filter(item->item.kind()==CreatorStudioCalendarDtos.Kind.DELIVERY).count());
+        assertEquals(2,calendar.calendar(auth,date,date,1,100).items().size());
+        assertTrue(calendar.calendar(auth,date,date,1,1).hasMore());
+        assertEquals(1,calendar.calendar(auth,date,date,2,1).items().size());
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,()->
+            transactions.executeWithoutResult(t->calendar.plan(auth,a,other,plan))).getStatusCode());
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,()->
+            calendar.commission(auth,b)).getStatusCode());
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,()->
+            transactions.executeWithoutResult(t->calendar.plan(auth,a,null,plan))).getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,()->
+            calendar.calendar(auth,date,date.plusDays(42),1,100)).getStatusCode());
+        transactions.executeWithoutResult(t->calendar.plan(auth,a,draft,new CreatorStudioCalendarDtos.Plan(null)));
+        assertEquals(1,calendar.unplanned(auth,1,100).items().size());
+        jdbc.update("UPDATE creator_studio_commission_steps SET status='DONE' WHERE id=?",color);
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,()->
+            transactions.executeWithoutResult(t->calendar.plan(auth,a,color,plan))).getStatusCode());
+        assertEquals(date.plusDays(1),calendar.commission(auth,a).stream()
+            .filter(item->java.util.Objects.equals(item.stepId(),color)).findFirst().orElseThrow().date());
+        // Existing general planning survives adding a snapshot step.
+        jdbc.update("INSERT INTO creator_studio_commission_steps(owner_user_id,commission_id,name,position) VALUES (?,?,'New',0)",ARTIST_A,simple);
+        assertEquals(2,calendar.commission(auth,simple).size());
+        transactions.executeWithoutResult(t->calendar.plan(auth,simple,null,new CreatorStudioCalendarDtos.Plan(null)));
+        assertEquals(1,calendar.commission(auth,simple).size());
+        jdbc.update("UPDATE creator_studio_commissions SET status='COMPLETED' WHERE id=?",a);
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,()->
+            transactions.executeWithoutResult(t->calendar.plan(auth,a,draft,plan))).getStatusCode());
+        // Missing date fails deserialization instead of silently clearing.
+        assertThrows(com.fasterxml.jackson.databind.JsonMappingException.class,()->
+            new ObjectMapper().readValue("{}",CreatorStudioCalendarDtos.Plan.class));
+        assertNull(new ObjectMapper().readValue("{\"plannedOn\":null}",CreatorStudioCalendarDtos.Plan.class).plannedOn());
+    }
 }
