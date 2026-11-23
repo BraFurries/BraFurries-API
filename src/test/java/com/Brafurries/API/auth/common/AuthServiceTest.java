@@ -276,6 +276,55 @@ class AuthServiceTest {
     }
 
     @Test
+    void multiplePasswordLoginsKeepIndependentRefreshSessions() {
+        User user = new User();
+        user.setId(10);
+        user.setEmail("user@example.com");
+        user.setPasswordHash("hash");
+        user.setAuthVersion(0L);
+        when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("secret", "hash")).thenReturn(true);
+        when(apiUserRoleRepository.findRoleNamesByUserId(10)).thenReturn(List.of());
+        when(apiRolePermissionRepository.findPermissionNamesByUserId(10)).thenReturn(List.of());
+        when(tokenService.generateAccessToken("user@example.com", List.of(), List.of(), 0L))
+            .thenReturn("access");
+        when(tokenService.generateToken(64)).thenReturn("refresh-first", "refresh-second");
+        when(tokenService.refreshExpiresAt()).thenReturn(Instant.now().plusSeconds(2592000));
+        when(tokenService.accessExpiresAt()).thenReturn(Instant.now().plusSeconds(900));
+
+        var first = authService.loginCommon(new LoginRequest("user@example.com", "secret", true));
+        var second = authService.loginCommon(new LoginRequest("user@example.com", "secret", true));
+
+        assertEquals("refresh-first", first.refreshToken());
+        assertEquals("refresh-second", second.refreshToken());
+        verify(userRefreshTokenRepository, never()).deleteByUser(user);
+        verify(userRefreshTokenRepository, org.mockito.Mockito.times(2))
+            .save(org.mockito.ArgumentMatchers.any(UserRefreshToken.class));
+    }
+
+    @Test
+    void passwordLoginWithoutRememberMeDoesNotRevokeOtherSessions() {
+        User user = new User();
+        user.setId(11);
+        user.setEmail("user@example.com");
+        user.setPasswordHash("hash");
+        user.setAuthVersion(0L);
+        when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("secret", "hash")).thenReturn(true);
+        when(apiUserRoleRepository.findRoleNamesByUserId(11)).thenReturn(List.of());
+        when(apiRolePermissionRepository.findPermissionNamesByUserId(11)).thenReturn(List.of());
+        when(tokenService.generateAccessToken("user@example.com", List.of(), List.of(), 0L))
+            .thenReturn("access");
+        when(tokenService.accessExpiresAt()).thenReturn(Instant.now().plusSeconds(900));
+
+        var login = authService.loginCommon(new LoginRequest("user@example.com", "secret", false));
+
+        assertEquals(null, login.refreshToken());
+        verify(userRefreshTokenRepository, never()).deleteByUser(user);
+        verify(userRefreshTokenRepository, never()).save(org.mockito.ArgumentMatchers.any(UserRefreshToken.class));
+    }
+
+    @Test
     void loginCommonRejectsUserWithPendingEmailVerificationToken() {
         User user = new User();
         user.setId(10);

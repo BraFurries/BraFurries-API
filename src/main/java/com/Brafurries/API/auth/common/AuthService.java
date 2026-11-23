@@ -105,8 +105,8 @@ public class AuthService {
         }
         ensureAccountConfirmed(user);
 
-        userRefreshTokenRepository.deleteByUser(user);
-
+        // A new login is an independent session. Password/security changes
+        // revoke all refresh credentials explicitly in their own flows.
         List<String> roles = apiUserRoleRepository.findRoleNamesByUserId(user.getId());
         List<String> permissions = apiRolePermissionRepository.findPermissionNamesByUserId(user.getId());
         String accessToken = tokenService.generateAccessToken(user.getEmail(), roles, permissions, user.getAuthVersion());

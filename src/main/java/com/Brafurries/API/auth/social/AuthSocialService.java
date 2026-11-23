@@ -378,8 +378,8 @@ public class AuthSocialService {
             throw new BadCredentialsException("Confirme seu e-mail antes de acessar a conta");
         }
 
-        userRefreshTokenRepository.deleteByUser(user);
-
+        // Logging in via OAuth must not invalidate the user's other devices.
+        // Security-sensitive account changes revoke sessions separately.
         List<String> roles = apiUserRoleRepository.findRoleNamesByUserId(user.getId());
         List<String> permissions = apiRolePermissionRepository.findPermissionNamesByUserId(user.getId());
         String accessToken = tokenService.generateAccessToken(user.getEmail(), roles, permissions, user.getAuthVersion());
