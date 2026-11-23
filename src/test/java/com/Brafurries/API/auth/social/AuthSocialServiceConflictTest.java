@@ -130,7 +130,8 @@ class AuthSocialServiceConflictTest {
 
         assertEquals(local.getId().longValue(), result.loginResponse().user().id());
         verify(verifiedIdentities).bindProvenSubject(local, "google", "g-sub", local.getEmail());
-        verify(refreshTokens).deleteByUser(local);
+        verify(refreshTokens, never()).deleteByUser(local);
+        verify(refreshTokens).save(any(com.Brafurries.API.entity.user.UserRefreshToken.class));
         verify(onboarding, never()).create(any(), any(), any(), any());
         verify(users, never()).save(any());
     }
