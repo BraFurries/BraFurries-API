@@ -211,14 +211,19 @@ public class R2ImageStorageService {
         try {
             BufferedImage image = ImageIO.read(file.getInputStream());
             if (image == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Arquivo enviado não é uma imagem válida");
-            ByteArrayOutputStream output = new ByteArrayOutputStream();
-            if (!ImageIO.write(image, "webp", output)) {
-                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Conversor WebP não disponível");
-            }
-            return output.toByteArray();
+            return encodeWebp(image);
         } catch (IOException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Falha ao converter " + subject + " para WebP", ex);
         }
+    }
+
+    /** Shared encoder only; callers choose their own storage and access policy. */
+    public static byte[] encodeWebp(BufferedImage image) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        if (!ImageIO.write(image, "webp", output)) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Conversor WebP não disponível");
+        }
+        return output.toByteArray();
     }
 
     private byte[] validateOriginalBytes(byte[] bytes, String contentType, String subject) {
