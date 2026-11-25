@@ -13,6 +13,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
+import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -191,39 +192,84 @@ class CommerceArtworkFileServiceTest {
         verifyNoInteractions(storage);
     }
 
-    @Test
-    void selectingPreviewReplacesPreviousAndAudits() {
+    private void stubThumbnailSelection() {
         when(jdbc.queryForList(anyString(),eq(Long.class),eq(14L))).thenReturn(List.of(14L));
-        when(jdbc.queryForList(contains("WHERE artwork_id=? AND id=? FOR UPDATE"),eq(14L),eq(55L)))
-            .thenReturn(List.of(Map.of("status","ACTIVE","extension","png","mediaType","image/png","sizeBytes",1000L)));
-        doReturn(1).when(jdbc).update(contains("SET is_preview=0"),eq(14L),eq(55L));
-        doReturn(1).when(jdbc).update(contains("SET is_preview=1"),eq(14L),eq(55L));
-        doReturn(1).when(jdbc).update(contains("INSERT INTO commerce_catalog_audit"),eq(7),eq(55L),eq("PREVIEW_SELECTED"));
-        service.setPreview(auth,14L,55L,true);
-        verify(jdbc).update(contains("SET is_preview=0"),eq(14L),eq(55L));
-        verify(jdbc).update(contains("SET is_preview=1"),eq(14L),eq(55L));
-        verify(jdbc).update(contains("INSERT INTO commerce_catalog_audit"),eq(7),eq(55L),eq("PREVIEW_SELECTED"));
-        verifyNoInteractions(storage);
+        doReturn(List.of(Map.of("status","ACTIVE","extension","png","mediaType","image/png",
+            "sizeBytes",6010000L,"storageKey","original","sha256","hash")))
+            .when(jdbc).queryForList(contains("WHERE artwork_id=? AND id=? FOR UPDATE"),eq(14L),eq(55L));
+        doReturn(List.of(Map.of("id",54L,"previewKey","old")))
+            .when(jdbc).queryForList(contains("AND id<>? FOR UPDATE"),eq(14L),eq(55L));
+        when(storage.read(14L,"original","hash")).thenReturn(new byte[]{1,2,3});
+        when(storage.uploadThumbnail(eq(14L),eq(55L),any(byte[].class)))
+            .thenReturn(new CommerceArtworkFileStorage.StoredThumbnail("new","digest",100L,512,400));
     }
 
     @Test
-    void selectedPreviewUsesPrivateStorageAndRejectsUnselectedFile() {
+    void selectingLargePreviewReplacesPreviousOnlyAfterCommit() {
+        stubThumbnailSelection();
+        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.setPreview(auth,14L,55L,true);
+            verify(jdbc).update(contains("SET is_preview=0"),eq(14L),eq(55L));
+            verify(jdbc).update(contains("SET is_preview=1"),eq("new"),eq("digest"),
+                eq(100L),eq(512),eq(400),eq(14L),eq(55L));
+            verify(jdbc).update(contains("INSERT INTO commerce_catalog_audit"),eq(7),eq(55L),eq("PREVIEW_SELECTED"));
+            verify(storage,never()).deleteThumbnail(anyLong(),anyLong(),anyString());
+            org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations()
+                .forEach(hook->hook.afterCompletion(TransactionSynchronization.STATUS_COMMITTED));
+            verify(storage).deleteThumbnail(14L,54L,"old");
+            verify(storage,never()).deleteThumbnail(14L,55L,"new");
+            verify(storage,never()).deleteUnregistered(anyLong(),anyString());
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
+    void rollbackDeletesOnlyNewThumbnail() {
+        stubThumbnailSelection();
+        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.setPreview(auth,14L,55L,true);
+            org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations()
+                .forEach(hook->hook.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
+            verify(storage).deleteThumbnail(14L,55L,"new");
+            verify(storage,never()).deleteThumbnail(14L,54L,"old");
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
+    void selectedPreviewUsesOnlyDerivativeAndRejectsUnselectedFile() {
         when(jdbc.queryForList(contains("AND is_preview=1"),eq(14L),eq(55L)))
             .thenReturn(List.of());
         assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
             ()->service.preview(auth,14L,55L)).getStatusCode());
         verifyNoInteractions(storage);
         when(jdbc.queryForList(contains("AND is_preview=1"),eq(14L),eq(55L)))
-            .thenReturn(List.of(Map.of("mediaType","image/png","storageKey","key","sha256","hash")));
-        when(storage.read(14L,"key","hash")).thenReturn(new byte[]{1,2,3});
+            .thenReturn(List.of(Map.of("mediaType","image/png","previewKey","thumb","previewHash","hash")));
+        when(storage.readThumbnail(14L,55L,"thumb","hash")).thenReturn(new byte[]{1,2,3});
         var preview=service.preview(auth,14L,55L);
-        assertEquals("image/png",preview.mediaType());
+        assertEquals("image/webp",preview.mediaType());
         assertArrayEquals(new byte[]{1,2,3},preview.bytes());
+        verify(storage,never()).read(anyLong(),anyString(),anyString());
+    }
+
+    @Test
+    void legacyPreviewIsConvertedWithoutWritingDuringGet() {
+        when(jdbc.queryForList(contains("AND is_preview=1"),eq(14L),eq(55L)))
+            .thenReturn(List.of(Map.of("mediaType","image/png","storageKey","original","sha256","hash")));
+        when(storage.read(14L,"original","hash")).thenReturn(new byte[]{1});
+        when(storage.thumbnail(any(byte[].class)))
+            .thenReturn(new CommerceArtworkFileStorage.Thumbnail(new byte[]{2},1,1));
+        assertArrayEquals(new byte[]{2},service.preview(auth,14L,55L).bytes());
+        verify(storage,never()).uploadThumbnail(anyLong(),anyLong(),any(byte[].class));
     }
 
     @Test
     void archiveNeverDeletesR2ObjectOrLosesAudit() {
-        when(jdbc.queryForList(contains("SELECT status FROM commerce_artwork_files"),
+        when(jdbc.queryForList(contains("SELECT status,preview_storage_key AS previewKey FROM commerce_artwork_files"),
             eq(14L),eq(55L))).thenReturn(List.of(Map.of("status","ACTIVE")));
         service.archive(auth,14L,55L);
         verify(jdbc).update(contains("is_preview=0"),

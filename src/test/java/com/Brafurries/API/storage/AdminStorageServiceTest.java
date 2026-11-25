@@ -70,7 +70,7 @@ class AdminStorageServiceTest {
             page.objects().get(0).referenceStatus());
         assertTrue(page.objects().get(0).deletable());
         assertEquals(AdminStorageService.Scope.PRIVATE,page.bucket());
-        verify(jdbc,times(3)).queryForList(anyString(),eq(String.class),any(Object[].class));
+        verify(jdbc,times(4)).queryForList(anyString(),eq(String.class),any(Object[].class));
     }
 
     @Test void virtualDirectoriesAndZeroByteMarkersDoNotBecomeDocuments() {
@@ -140,6 +140,21 @@ class AdminStorageServiceTest {
         verify(r2,never()).deleteVerifiedOrphan(any(),anyString());
     }
 
+    @Test void referencedThumbnailIsProtectedFromOrphanDeletion() {
+        String thumbnail="commerce/artworks/12/previews/55/12345678-1234-1234-1234-123456789abc.webp";
+        when(r2.head(AdminStorageService.Scope.PRIVATE,thumbnail)).thenReturn(head(OLD,"\"abc\""));
+        when(jdbc.queryForList(anyString(),eq(String.class),any(Object[].class)))
+            .thenAnswer(invocation -> ((String)invocation.getArgument(0))
+                .contains("preview_storage_key FROM commerce_artwork_files") ? List.of(thumbnail) : List.of());
+        var file=service.inspect(auth,AdminStorageService.Scope.PRIVATE,thumbnail);
+        assertEquals(AdminStorageService.ReferenceStatus.LINKED,file.referenceStatus());
+        assertFalse(file.deletable());
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->service.deleteOrphan(auth,new AdminStorageService.DeleteRequest(
+                AdminStorageService.Scope.PRIVATE,thumbnail,"\"abc\""))).getStatusCode());
+        verify(r2,never()).deleteVerifiedOrphan(any(),anyString());
+    }
+
     @Test void aRecentlyUploadedButUnreferencedArtworkIsNotSafeToDelete() {
         when(r2.head(AdminStorageService.Scope.PRIVATE,ARTWORK))
             .thenReturn(head(Instant.now(), "\"abc\""));
@@ -169,7 +184,7 @@ class AdminStorageServiceTest {
         service.deleteOrphan(auth,new AdminStorageService.DeleteRequest(
             AdminStorageService.Scope.PRIVATE,CONTRACT,"\"abc\""));
         verify(r2).deleteVerifiedOrphan(AdminStorageService.Scope.PRIVATE,CONTRACT);
-        verify(jdbc,times(3)).queryForList(anyString(),eq(String.class),any(Object[].class));
+        verify(jdbc,times(4)).queryForList(anyString(),eq(String.class),any(Object[].class));
     }
 
     @Test void rejectsPublicDeletionAndUnboundedOrInvalidSearches() {
