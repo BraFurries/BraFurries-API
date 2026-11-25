@@ -1,6 +1,14 @@
 package com.Brafurries.API.commerce;
 
 import java.io.IOException;
+import java.io.ByteArrayInputStream;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.MemoryCacheImageInputStream;
+import com.Brafurries.API.storage.R2ImageStorageService;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -105,10 +113,14 @@ public class CommerceArtworkFileStorage {
 
     public byte[] read(long artworkId,String key,String expectedHash) {
         if(!validKey(artworkId,key)) throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        return readObject(key,expectedHash,MAX_BYTES);
+    }
+
+    private byte[] readObject(String key,String expectedHash,long maxBytes) {
         requirePrivateConfiguration();
         try(S3Client client=createClient()) {
             var head=client.headObject(HeadObjectRequest.builder().bucket(bucket).key(key).build());
-            if(head.contentLength()==null||head.contentLength()<1||head.contentLength()>MAX_BYTES) {
+            if(head.contentLength()==null||head.contentLength()<1||head.contentLength()>maxBytes) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Tamanho do arquivo privado inválido");
             }
@@ -127,9 +139,97 @@ public class CommerceArtworkFileStorage {
         }
     }
 
+    static final int THUMBNAIL_EDGE=512;
+    static final long MAX_THUMBNAIL_BYTES=1024L*1024L;
+    private static final long MAX_SOURCE_PIXELS=40_000_000L;
+    public record Thumbnail(byte[] bytes,int width,int height) {}
+    public record StoredThumbnail(String key,String sha256,long sizeBytes,int width,int height) {}
+
+    /** Decode only bounded raster images, subsample large originals and preserve alpha. */
+    Thumbnail thumbnail(byte[] original) {
+        if(original==null||original.length==0||original.length>MAX_BYTES) throw invalid("Imagem inválida");
+        try(var input=new MemoryCacheImageInputStream(new ByteArrayInputStream(original))) {
+            var readers=ImageIO.getImageReaders(input);
+            if(!readers.hasNext()) throw invalid("Imagem inválida");
+            ImageReader reader=readers.next();
+            BufferedImage source=null;
+            BufferedImage resized=null;
+            try {
+                reader.setInput(input,true,true);
+                String format=reader.getFormatName().toLowerCase(Locale.ROOT);
+                if(!Set.of("png","jpeg","jpg","webp").contains(format)) throw invalid("Formato de prévia inválido");
+                int width=reader.getWidth(0),height=reader.getHeight(0);
+                if(width<1||height<1||(long)width*height>MAX_SOURCE_PIXELS) {
+                    throw invalid("Imagem excede 40 megapixels");
+                }
+                double scale=Math.min(1.0,THUMBNAIL_EDGE/(double)Math.max(width,height));
+                int targetWidth=Math.max(1,(int)Math.round(width*scale));
+                int targetHeight=Math.max(1,(int)Math.round(height*scale));
+                int sample=Math.max(1,Math.max(width,height)/(THUMBNAIL_EDGE*2));
+                var param=reader.getDefaultReadParam();
+                // The existing WebP plugin may decode the full image internally;
+                // the pixel limit also bounds this path.
+                param.setSourceSubsampling(sample,sample,0,0);
+                source=reader.read(0,param);
+                if(source==null) throw invalid("Imagem inválida");
+                resized=new BufferedImage(targetWidth,targetHeight,BufferedImage.TYPE_INT_ARGB);
+                Graphics2D graphics=resized.createGraphics();
+                try {
+                    graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION,RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+                    graphics.drawImage(source,0,0,targetWidth,targetHeight,null);
+                } finally { graphics.dispose(); }
+                byte[] bytes=R2ImageStorageService.encodeWebp(resized);
+                if(bytes.length<1||bytes.length>MAX_THUMBNAIL_BYTES||!matchesFormat("webp",bytes)) {
+                    throw invalid("Não foi possível gerar miniatura WebP dentro do limite");
+                }
+                return new Thumbnail(bytes,targetWidth,targetHeight);
+            } finally {
+                reader.dispose();
+                if(source!=null) source.flush();
+                if(resized!=null) resized.flush();
+            }
+        } catch(IOException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Falha ao gerar miniatura WebP",ex);
+        }
+    }
+
+    public StoredThumbnail uploadThumbnail(long artworkId,long fileId,byte[] original) {
+        if(artworkId<1||fileId<1) throw invalid("Arte ou arquivo inválido");
+        Thumbnail thumb=thumbnail(original);
+        requirePrivateConfiguration();
+        String key="commerce/artworks/"+artworkId+"/previews/"+fileId+"/"+UUID.randomUUID()+".webp";
+        try(S3Client client=createClient()) {
+            client.putObject(PutObjectRequest.builder().bucket(bucket).key(key)
+                .contentType("image/webp").contentLength((long)thumb.bytes().length).build(),
+                RequestBody.fromBytes(thumb.bytes()));
+        } catch(S3Exception ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"Falha ao salvar miniatura privada",ex);
+        }
+        return new StoredThumbnail(key,hash(thumb.bytes()),thumb.bytes().length,thumb.width(),thumb.height());
+    }
+
+    public byte[] readThumbnail(long artworkId,long fileId,String key,String sha256) {
+        if(!validThumbnailKey(artworkId,fileId,key)) throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        return readObject(key,sha256,MAX_THUMBNAIL_BYTES);
+    }
+
+    public void deleteThumbnail(long artworkId,long fileId,String key) {
+        if(!validThumbnailKey(artworkId,fileId,key)) return;
+        deleteObject(key);
+    }
+
+    boolean validThumbnailKey(long artworkId,long fileId,String key) {
+        return artworkId>0&&fileId>0&&key!=null&&key.matches("commerce/artworks/"+artworkId+
+            "/previews/"+fileId+"/[0-9a-fA-F-]{36}\\.webp");
+    }
+
     /** Compensation for an upload whose DB/audit insert fails. */
     public void deleteUnregistered(long artworkId,String key) {
         if(!validKey(artworkId,key)) return;
+        deleteObject(key);
+    }
+
+    private void deleteObject(String key) {
         requirePrivateConfiguration();
         try(S3Client client=createClient()) {
             client.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(key).build());
