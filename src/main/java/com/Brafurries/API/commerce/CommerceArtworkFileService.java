@@ -26,7 +26,6 @@ public class CommerceArtworkFileService {
     private static final Logger LOG=LoggerFactory.getLogger(CommerceArtworkFileService.class);
     private static final Set<String> KINDS=Set.of(
         "SOURCE","PRINT_READY","EXPORT","REFERENCE");
-    private static final long MAX_PREVIEW_BYTES=4L*1024*1024;
     private static final Set<String> PREVIEW_TYPES=Set.of("image/png","image/jpeg","image/webp");
     private final PlatformAuthorizationService authorization;
     private final CommerceArtworkFileStorage storage;
@@ -53,7 +52,8 @@ public class CommerceArtworkFileService {
                    media_type AS mediaType,description,sha256,
                    size_bytes AS sizeBytes,status,
                    uploaded_by_user_id AS uploadedByUserId,
-                   created_at AS createdAt,archived_at AS archivedAt
+                   created_at AS createdAt,archived_at AS archivedAt,
+                   preview_generated_at AS previewGeneratedAt
               FROM commerce_artwork_files
              WHERE artwork_id=? ORDER BY id DESC LIMIT 500
             """,artworkId);
@@ -124,31 +124,84 @@ public class CommerceArtworkFileService {
         }
     }
 
+    private static final String CLEAR_PREVIEW = "is_preview=0,preview_storage_key=NULL,preview_sha256=NULL,"
+        +"preview_size_bytes=NULL,preview_width=NULL,preview_height=NULL,preview_generated_at=NULL";
+
     @Transactional
     public void setPreview(Authentication auth,long artworkId,long fileId,boolean selected) {
         int actor=authorization.require(auth,PlatformPermission.ARTWORKS_MANAGE).user().getId();
         requireArtwork(artworkId,true);
         var rows=jdbc.queryForList("""
-            SELECT status,extension,media_type AS mediaType,size_bytes AS sizeBytes
+            SELECT status,extension,media_type AS mediaType,size_bytes AS sizeBytes,
+                   storage_key AS storageKey,sha256,is_preview AS isPreview,preview_storage_key AS previewKey
               FROM commerce_artwork_files WHERE artwork_id=? AND id=? FOR UPDATE
             """,artworkId,fileId);
         if(rows.size()!=1) throw notFound();
+        var file=rows.get(0);
+        String currentKey=(String)file.get("previewKey");
         if(!selected) {
-            if(jdbc.update("UPDATE commerce_artwork_files SET is_preview=0 WHERE artwork_id=? AND id=? AND is_preview=1",
-                artworkId,fileId)>0) audit(actor,fileId,"PREVIEW_REMOVED");
+            if(jdbc.update("UPDATE commerce_artwork_files SET "+CLEAR_PREVIEW+
+                " WHERE artwork_id=? AND id=? AND is_preview=1",artworkId,fileId)>0) {
+                audit(actor,fileId,"PREVIEW_REMOVED");
+                cleanupAfter(artworkId,fileId,currentKey,TransactionSynchronization.STATUS_COMMITTED);
+            }
             return;
         }
-        var file=rows.get(0);
         if(!"ACTIVE".equals(file.get("status"))
             || !Set.of("png","jpg","jpeg","webp").contains(file.get("extension"))
             || !PREVIEW_TYPES.contains(file.get("mediaType"))
-            || ((Number)file.get("sizeBytes")).longValue()>MAX_PREVIEW_BYTES) {
-            throw invalid("Escolha uma imagem ativa PNG, JPG ou WebP de até 4 MiB");
+            || ((Number)file.get("sizeBytes")).longValue()>CommerceArtworkFileStorage.MAX_BYTES) {
+            throw invalid("Escolha uma imagem ativa PNG, JPG ou WebP de até 25 MiB");
         }
-        jdbc.update("UPDATE commerce_artwork_files SET is_preview=0 WHERE artwork_id=? AND is_preview=1 AND id<>?",
-            artworkId,fileId);
-        if(jdbc.update("UPDATE commerce_artwork_files SET is_preview=1 WHERE artwork_id=? AND id=? AND is_preview=0",
-            artworkId,fileId)>0) audit(actor,fileId,"PREVIEW_SELECTED");
+        // Repeated selection is idempotent; legacy selections without a derivative
+        // may be selected again to generate their persistent thumbnail.
+        if(currentKey!=null) return;
+        var previous=jdbc.queryForList("""
+            SELECT id,preview_storage_key AS previewKey FROM commerce_artwork_files
+             WHERE artwork_id=? AND is_preview=1 AND id<>? FOR UPDATE
+            """,artworkId,fileId);
+        byte[] original=storage.read(artworkId,(String)file.get("storageKey"),(String)file.get("sha256"));
+        var thumb=storage.uploadThumbnail(artworkId,fileId,original);
+        boolean synchronizedTx=TransactionSynchronizationManager.isSynchronizationActive();
+        try {
+            cleanupAfter(artworkId,fileId,thumb.key(),TransactionSynchronization.STATUS_ROLLED_BACK);
+            jdbc.update("UPDATE commerce_artwork_files SET "+CLEAR_PREVIEW+
+                " WHERE artwork_id=? AND is_preview=1 AND id<>?",artworkId,fileId);
+            jdbc.update("""
+                UPDATE commerce_artwork_files SET is_preview=1,preview_storage_key=?,preview_sha256=?,
+                    preview_size_bytes=?,preview_width=?,preview_height=?,preview_generated_at=CURRENT_TIMESTAMP(6)
+                 WHERE artwork_id=? AND id=?
+                """,thumb.key(),thumb.sha256(),thumb.sizeBytes(),thumb.width(),thumb.height(),artworkId,fileId);
+            audit(actor,fileId,"PREVIEW_SELECTED");
+            for(var old:previous) {
+                cleanupAfter(artworkId,((Number)old.get("id")).longValue(),(String)old.get("previewKey"),
+                    TransactionSynchronization.STATUS_COMMITTED);
+            }
+        } catch(RuntimeException ex) {
+            if(!synchronizedTx) safeDeleteThumbnail(artworkId,fileId,thumb.key());
+            throw ex;
+        }
+    }
+
+    private void cleanupAfter(long artworkId,long fileId,String key,int expectedStatus) {
+        if(key==null) return;
+        if(TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCompletion(int status) {
+                    if(status==expectedStatus) safeDeleteThumbnail(artworkId,fileId,key);
+                }
+            });
+        } else if(expectedStatus==TransactionSynchronization.STATUS_COMMITTED) {
+            safeDeleteThumbnail(artworkId,fileId,key);
+        }
+    }
+
+    private void safeDeleteThumbnail(long artworkId,long fileId,String key) {
+        try { storage.deleteThumbnail(artworkId,fileId,key); }
+        catch(RuntimeException ex) {
+            // Keep an orphan for the existing private storage reconciliation.
+            LOG.warn("Falha ao limpar miniatura da arte {}: {}",artworkId,ex.getClass().getSimpleName());
+        }
     }
 
     public record Preview(String mediaType,byte[] bytes) {}
@@ -157,18 +210,21 @@ public class CommerceArtworkFileService {
     public Preview preview(Authentication auth,long artworkId,long fileId) {
         authorization.require(auth,PlatformPermission.ARTWORKS_MANAGE);
         var rows=jdbc.queryForList("""
-            SELECT media_type AS mediaType,storage_key AS storageKey,sha256
+            SELECT media_type AS mediaType,storage_key AS storageKey,sha256,
+                   preview_storage_key AS previewKey,preview_sha256 AS previewHash
               FROM commerce_artwork_files
              WHERE artwork_id=? AND id=? AND status='ACTIVE' AND is_preview=1
-               AND size_bytes<=4194304
             """,artworkId,fileId);
         if(rows.size()!=1) throw notFound();
         var file=rows.get(0);
-        String mediaType=(String)file.get("mediaType");
-        if(!PREVIEW_TYPES.contains(mediaType)) throw notFound();
-        byte[] bytes=storage.read(artworkId,(String)file.get("storageKey"),(String)file.get("sha256"));
-        if(bytes.length>MAX_PREVIEW_BYTES) throw invalid("Imagem de prévia excede o limite");
-        return new Preview(mediaType,bytes);
+        if(!PREVIEW_TYPES.contains(file.get("mediaType"))) throw notFound();
+        String key=(String)file.get("previewKey");
+        if(key!=null) return new Preview("image/webp",
+            storage.readThumbnail(artworkId,fileId,key,(String)file.get("previewHash")));
+        // Preserve old selections without exposing originals; explicit regeneration
+        // persists a derivative. GET remains read-only.
+        byte[] original=storage.read(artworkId,(String)file.get("storageKey"),(String)file.get("sha256"));
+        return new Preview("image/webp",storage.thumbnail(original).bytes());
     }
 
     public record Downloaded(String name,byte[] bytes) {}
@@ -194,7 +250,7 @@ public class CommerceArtworkFileService {
             .user().getId();
         if(artworkId<1||fileId<1) throw notFound();
         var rows=jdbc.queryForList("""
-            SELECT status FROM commerce_artwork_files
+            SELECT status,preview_storage_key AS previewKey FROM commerce_artwork_files
              WHERE artwork_id=? AND id=? FOR UPDATE
             """,artworkId,fileId);
         if(rows.size()!=1) throw notFound();
@@ -202,13 +258,12 @@ public class CommerceArtworkFileService {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                 "Arquivo já arquivado");
         }
-        jdbc.update("""
-            UPDATE commerce_artwork_files
-               SET status='ARCHIVED',is_preview=0,archived_by_user_id=?,
-                   archived_at=CURRENT_TIMESTAMP(6)
-             WHERE artwork_id=? AND id=? AND status='ACTIVE'
-            """,actor,artworkId,fileId);
+        jdbc.update("UPDATE commerce_artwork_files SET status='ARCHIVED',"+CLEAR_PREVIEW+
+            ",archived_by_user_id=?,archived_at=CURRENT_TIMESTAMP(6)"+
+            " WHERE artwork_id=? AND id=? AND status='ACTIVE'",actor,artworkId,fileId);
         audit(actor,fileId,"ARCHIVED");
+        cleanupAfter(artworkId,fileId,(String)rows.get(0).get("previewKey"),
+            TransactionSynchronization.STATUS_COMMITTED);
     }
 
     private void requireArtwork(long id,boolean lock) {
