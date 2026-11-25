@@ -51,6 +51,8 @@ public class AdminStorageService {
         "^commerce/artworks/[1-9][0-9]*/[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}\\.(?:png|jpg|jpeg|webp|pdf|svg|psd|ai|eps|zip)$");
     // Uploads may put objects before a DB transaction commits. Do not classify
     // very recent unreferenced uploads as safe to delete.
+    private static final Pattern ARTWORK_PREVIEW=Pattern.compile(
+        "^commerce/artworks/[1-9][0-9]*/previews/[1-9][0-9]*/[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}\\.webp$");
     private static final long MIN_ORPHAN_AGE_MINUTES=10L;
 
     private final PlatformAuthorizationService authorization;
@@ -178,7 +180,8 @@ public class AdminStorageService {
         for(String columnAndTable:List.of(
             "signed_storage_key FROM commerce_artwork_contracts",
             "generated_storage_key FROM commerce_contract_preparations",
-            "storage_key FROM commerce_artwork_files")) {
+            "storage_key FROM commerce_artwork_files",
+            "preview_storage_key FROM commerce_artwork_files")) {
             String column=columnAndTable.substring(0,columnAndTable.indexOf(" FROM "));
             linked.addAll(jdbc.queryForList(
                 "SELECT "+columnAndTable+" WHERE "+column+" IN ("+placeholders+")",
@@ -195,7 +198,8 @@ public class AdminStorageService {
         for(String[] source:new String[][] {
             {"CONTRACT", "commerce_artwork_contracts", "signed_storage_key"},
             {"PREPARATION", "commerce_contract_preparations", "generated_storage_key"},
-            {"ARTWORK_FILE", "commerce_artwork_files", "storage_key"}
+            {"ARTWORK_FILE", "commerce_artwork_files", "storage_key"},
+            {"ARTWORK_PREVIEW", "commerce_artwork_files", "preview_storage_key"}
         }) {
             // All SQL identifiers above are constants from this class, never
             // supplied by a browser or a dynamic request parameter.
@@ -215,7 +219,7 @@ public class AdminStorageService {
     private Category category(Scope scope,String key) {
         if(scope==Scope.PUBLIC) return Category.PUBLIC_MEDIA;
         if(CONTRACT.matcher(key).matches()) return Category.CONTRACT_DOCUMENT;
-        if(ARTWORK.matcher(key).matches()) return Category.ARTWORK_FILE;
+        if(ARTWORK.matcher(key).matches()||ARTWORK_PREVIEW.matcher(key).matches()) return Category.ARTWORK_FILE;
         return Category.OTHER_PRIVATE;
     }
 
