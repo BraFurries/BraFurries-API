@@ -161,11 +161,70 @@ class CommerceArtworkFileServiceTest {
     }
 
     @Test
+    void previewRequiresArtworkPermissionBeforeAnyLookup() {
+        when(authorization.require(auth,PlatformPermission.ARTWORKS_MANAGE))
+            .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
+        assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
+            ()->service.preview(auth,14L,55L)).getStatusCode());
+        assertThrows(ResponseStatusException.class,()->service.setPreview(auth,14L,55L,true));
+        verifyNoInteractions(jdbc,storage);
+    }
+
+    @Test
+    void selectingPreviewRejectsFileFromAnotherArtwork() {
+        when(jdbc.queryForList(anyString(),eq(Long.class),eq(14L))).thenReturn(List.of(14L));
+        when(jdbc.queryForList(contains("WHERE artwork_id=? AND id=? FOR UPDATE"),eq(14L),eq(55L)))
+            .thenReturn(List.of());
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
+            ()->service.setPreview(auth,14L,55L,true)).getStatusCode());
+        verifyNoInteractions(storage);
+        verify(jdbc,never()).update(anyString(),any(Object[].class));
+    }
+
+    @Test
+    void selectingPreviewRejectsArchivedOrUnsupportedFile() {
+        when(jdbc.queryForList(anyString(),eq(Long.class),eq(14L))).thenReturn(List.of(14L));
+        when(jdbc.queryForList(contains("WHERE artwork_id=? AND id=? FOR UPDATE"),eq(14L),eq(55L)))
+            .thenReturn(List.of(Map.of("status","ACTIVE","extension","svg","mediaType","image/svg+xml","sizeBytes",1000L)));
+        assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
+            ()->service.setPreview(auth,14L,55L,true)).getStatusCode());
+        verifyNoInteractions(storage);
+    }
+
+    @Test
+    void selectingPreviewReplacesPreviousAndAudits() {
+        when(jdbc.queryForList(anyString(),eq(Long.class),eq(14L))).thenReturn(List.of(14L));
+        when(jdbc.queryForList(contains("WHERE artwork_id=? AND id=? FOR UPDATE"),eq(14L),eq(55L)))
+            .thenReturn(List.of(Map.of("status","ACTIVE","extension","png","mediaType","image/png","sizeBytes",1000L)));
+        when(jdbc.update(contains("SET is_preview=1"),eq(14L),eq(55L))).thenReturn(1);
+        service.setPreview(auth,14L,55L,true);
+        verify(jdbc).update(contains("SET is_preview=0"),eq(14L),eq(55L));
+        verify(jdbc).update(contains("SET is_preview=1"),eq(14L),eq(55L));
+        verify(jdbc).update(contains("INSERT INTO commerce_catalog_audit"),eq(7),eq(55L),eq("PREVIEW_SELECTED"));
+        verifyNoInteractions(storage);
+    }
+
+    @Test
+    void selectedPreviewUsesPrivateStorageAndRejectsUnselectedFile() {
+        when(jdbc.queryForList(contains("AND is_preview=1"),eq(14L),eq(55L)))
+            .thenReturn(List.of());
+        assertEquals(HttpStatus.NOT_FOUND,assertThrows(ResponseStatusException.class,
+            ()->service.preview(auth,14L,55L)).getStatusCode());
+        verifyNoInteractions(storage);
+        when(jdbc.queryForList(contains("AND is_preview=1"),eq(14L),eq(55L)))
+            .thenReturn(List.of(Map.of("mediaType","image/png","storageKey","key","sha256","hash")));
+        when(storage.read(14L,"key","hash")).thenReturn(new byte[]{1,2,3});
+        var preview=service.preview(auth,14L,55L);
+        assertEquals("image/png",preview.mediaType());
+        assertArrayEquals(new byte[]{1,2,3},preview.bytes());
+    }
+
+    @Test
     void archiveNeverDeletesR2ObjectOrLosesAudit() {
         when(jdbc.queryForList(contains("SELECT status FROM commerce_artwork_files"),
             eq(14L),eq(55L))).thenReturn(List.of(Map.of("status","ACTIVE")));
         service.archive(auth,14L,55L);
-        verify(jdbc).update(contains("UPDATE commerce_artwork_files"),
+        verify(jdbc).update(contains("is_preview=0"),
             eq(7),eq(14L),eq(55L));
         verify(jdbc).update(contains("INSERT INTO commerce_catalog_audit"),
             eq(7),eq(55L),eq("ARCHIVED"));
