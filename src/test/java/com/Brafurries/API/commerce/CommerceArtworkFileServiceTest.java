@@ -196,7 +196,9 @@ class CommerceArtworkFileServiceTest {
         when(jdbc.queryForList(anyString(),eq(Long.class),eq(14L))).thenReturn(List.of(14L));
         when(jdbc.queryForList(contains("WHERE artwork_id=? AND id=? FOR UPDATE"),eq(14L),eq(55L)))
             .thenReturn(List.of(Map.of("status","ACTIVE","extension","png","mediaType","image/png","sizeBytes",1000L)));
-        when(jdbc.update(contains("SET is_preview=1"),eq(14L),eq(55L))).thenReturn(1);
+        doReturn(1).when(jdbc).update(contains("SET is_preview=0"),eq(14L),eq(55L));
+        doReturn(1).when(jdbc).update(contains("SET is_preview=1"),eq(14L),eq(55L));
+        doReturn(1).when(jdbc).update(contains("INSERT INTO commerce_catalog_audit"),eq(7),eq(55L),eq("PREVIEW_SELECTED"));
         service.setPreview(auth,14L,55L,true);
         verify(jdbc).update(contains("SET is_preview=0"),eq(14L),eq(55L));
         verify(jdbc).update(contains("SET is_preview=1"),eq(14L),eq(55L));
