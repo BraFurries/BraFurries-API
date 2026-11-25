@@ -52,6 +52,39 @@ class CommerceArtworkFileStorageTest {
     }
 
     @Test
+    void generatesBoundedWebpWithTransparencyAndAspectRatio() throws Exception {
+        var storage=storage("private","public");
+        var source=new java.awt.image.BufferedImage(3500,4500,java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        source.setRGB(0,0,0xFFFF0000);
+        var output=new java.io.ByteArrayOutputStream();
+        assertTrue(javax.imageio.ImageIO.write(source,"png",output));
+        source.flush();
+        var thumbnail=storage.thumbnail(output.toByteArray());
+        assertEquals(398,thumbnail.width());
+        assertEquals(512,thumbnail.height());
+        assertTrue(thumbnail.bytes().length<=CommerceArtworkFileStorage.MAX_THUMBNAIL_BYTES);
+        var decoded=javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(thumbnail.bytes()));
+        assertNotNull(decoded);
+        assertEquals(398,decoded.getWidth());
+        assertEquals(512,decoded.getHeight());
+        assertEquals(0,decoded.getRGB(100,100)>>>24);
+        var second=storage.thumbnail(thumbnail.bytes());
+        assertEquals(398,second.width());
+        assertEquals(512,second.height());
+    }
+
+    @Test
+    void thumbnailKeysCannotAddressOriginalOrAnotherFile() {
+        var storage=storage("private","public");
+        String key="commerce/artworks/12/previews/55/00000000-0000-4000-8000-000000000000.webp";
+        assertTrue(storage.validThumbnailKey(12,55,key));
+        assertFalse(storage.validThumbnailKey(13,55,key));
+        assertFalse(storage.validThumbnailKey(12,56,key));
+        assertFalse(storage.validKey(12,key));
+        assertFalse(storage.validThumbnailKey(12,55,"commerce/artworks/12/00000000-0000-4000-8000-000000000000.webp"));
+    }
+
+    @Test
     void rejectsCrossArtworkStorageKeyAndPublicR2Bucket() {
         var storage=storage("private","public");
         assertFalse(storage.validKey(12L,"commerce/artworks/13/00000000-0000-4000-8000-000000000000.pdf"));
