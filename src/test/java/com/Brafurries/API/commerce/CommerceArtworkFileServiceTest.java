@@ -13,6 +13,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
+import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -268,7 +269,7 @@ class CommerceArtworkFileServiceTest {
 
     @Test
     void archiveNeverDeletesR2ObjectOrLosesAudit() {
-        when(jdbc.queryForList(contains("SELECT status FROM commerce_artwork_files"),
+        when(jdbc.queryForList(contains("SELECT status,preview_storage_key AS previewKey FROM commerce_artwork_files"),
             eq(14L),eq(55L))).thenReturn(List.of(Map.of("status","ACTIVE")));
         service.archive(auth,14L,55L);
         verify(jdbc).update(contains("is_preview=0"),
