@@ -13,6 +13,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -54,6 +55,23 @@ public class CommerceArtworkFileController {
             .header(HttpHeaders.CONTENT_DISPOSITION,ContentDisposition.attachment()
                 .filename(downloaded.name(),StandardCharsets.UTF_8).build().toString())
             .body(downloaded.bytes());
+    }
+
+    @PutMapping("/{fileId}/preview")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void setPreview(Authentication auth,@PathVariable long artworkId,@PathVariable long fileId,
+                           @RequestParam boolean selected) {
+        service.setPreview(auth,artworkId,fileId,selected);
+    }
+
+    @GetMapping("/{fileId}/preview")
+    public ResponseEntity<byte[]> preview(Authentication auth,@PathVariable long artworkId,@PathVariable long fileId) {
+        var image=service.preview(auth,artworkId,fileId);
+        return ResponseEntity.ok().contentType(MediaType.parseMediaType(image.mediaType()))
+            .cacheControl(CacheControl.noStore())
+            .header("X-Content-Type-Options","nosniff")
+            .header("Content-Security-Policy","default-src 'none'; sandbox")
+            .body(image.bytes());
     }
 
     @PostMapping("/{fileId}/archive")

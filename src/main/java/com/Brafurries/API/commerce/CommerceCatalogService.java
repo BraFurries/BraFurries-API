@@ -104,12 +104,14 @@ public class CommerceCatalogService {
         return jdbc.queryForList("""
             SELECT art.id,art.title,art.description,art.artist_user_id AS artistUserId,
                    COALESCE(p.artist_name,u.display_name,u.username,CONCAT('Usuário ',u.id)) AS artistName,
-                   art.creation_cost AS creationCost,art.status,art.created_at AS createdAt
+                   art.creation_cost AS creationCost,art.status,art.created_at AS createdAt,
+                   CASE WHEN ? THEN (SELECT f.id FROM commerce_artwork_files f
+                        WHERE f.preview_artwork_id=art.id) ELSE NULL END AS previewFileId
               FROM commerce_artworks art
               JOIN users u ON u.id=art.artist_user_id
               LEFT JOIN commerce_artist_profiles p ON p.user_id=art.artist_user_id
              ORDER BY art.id DESC LIMIT 500
-            """);
+            """,access.has(PlatformPermission.ARTWORKS_MANAGE));
     }
 
     @Transactional(readOnly = true)
