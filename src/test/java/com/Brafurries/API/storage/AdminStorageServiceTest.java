@@ -70,7 +70,7 @@ class AdminStorageServiceTest {
             page.objects().get(0).referenceStatus());
         assertTrue(page.objects().get(0).deletable());
         assertEquals(AdminStorageService.Scope.PRIVATE,page.bucket());
-        verify(jdbc,times(3)).queryForList(anyString(),eq(String.class),any(Object[].class));
+        verify(jdbc,times(4)).queryForList(anyString(),eq(String.class),any(Object[].class));
     }
 
     @Test void virtualDirectoriesAndZeroByteMarkersDoNotBecomeDocuments() {
@@ -169,7 +169,7 @@ class AdminStorageServiceTest {
         service.deleteOrphan(auth,new AdminStorageService.DeleteRequest(
             AdminStorageService.Scope.PRIVATE,CONTRACT,"\"abc\""));
         verify(r2).deleteVerifiedOrphan(AdminStorageService.Scope.PRIVATE,CONTRACT);
-        verify(jdbc,times(3)).queryForList(anyString(),eq(String.class),any(Object[].class));
+        verify(jdbc,times(4)).queryForList(anyString(),eq(String.class),any(Object[].class));
     }
 
     @Test void rejectsPublicDeletionAndUnboundedOrInvalidSearches() {
