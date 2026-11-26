@@ -107,6 +107,9 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/events/public").permitAll()
                 .requestMatchers(new RegexRequestMatcher("^/events/\\d+$", "GET")).permitAll()
                 .requestMatchers(swaggerUiMatcher(), openApiDocsMatcher(), openApiDocsYamlMatcher()).hasAnyRole("ADMIN", "DEVELOPER")
+                // Google redirects here without a bearer token. The callback only
+                // redirects to the configured UI; completion remains owner-authenticated.
+                .requestMatchers(HttpMethod.GET, "/user/me/platform-drive/oauth/callback").permitAll()
                 .requestMatchers("/user/**").authenticated()
                 .requestMatchers("/events/**").authenticated()
                 .requestMatchers("/third-party/**").hasAnyAuthority("CLIENT_PARTNER", "CLIENT_BOT", "CLIENT_SERVICE", "CLIENT_INTERNAL")
