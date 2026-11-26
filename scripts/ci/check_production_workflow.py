@@ -40,6 +40,17 @@ assert "printf '%s\\n%s\\n%s' " in production  # gateway stdin envelope
 assert "sudo -n /usr/local/sbin/update-brafurries-api-env stage" in production
 assert "sudo -n /usr/local/sbin/update-brafurries-api-env discard" in production
 
+# Smoke the exact browser origins and authenticated endpoint preflights
+# on the container and public proxy, not only Firebase preview.
+for step in ("Validate local production and preview CORS", "Validate public API and CORS"):
+    block = production.split("      - name: " + step + "\n", 1)[1].split("      - name:", 1)[0]
+    for origin in ("https://brafurries.com.br", "https://www.brafurries.com.br", "https://brafurries--cors-smoke.web.app"):
+        assert origin in block
+    assert "/events/partner" in block and "/user/me/communities" in block
+    assert "REQUEST_HEADERS=authorization" in block
+    assert '[[ "$HTTP_CODE" == 401 ]]' in block
+    assert "Access-Control-Allow-Origin: $ORIGIN" in block
+
 for action, sha in re.findall(r"uses:\s+([^\s#]+)@([^\s#]+)", workflow):
     assert re.fullmatch("[a-f0-9]{40}", sha), f"unpinned action: {action}@{sha}"
 
