@@ -26,6 +26,7 @@ public class CommerceProductionBatchCorrectionService {
     private static final String SNAPSHOT_SQL="""
         SELECT JSON_OBJECT(
           'productId',product_id,'supplierId',supplier_id,
+          'variantId',variant_id,'variantLabel',variant_label_snapshot,
           'quantity',quantity,'unitCost',unit_cost,
           'additionalCost',additional_cost,'totalCost',total_cost,
           'producedOn',produced_on,'reference',reference,
@@ -67,14 +68,23 @@ public class CommerceProductionBatchCorrectionService {
         String reason=text(correction.reason(),500,"Justificativa",true);
         if(reason.length()<3) throw invalid("A justificativa deve ter pelo menos 3 caracteres");
 
+        if(d.productId()==null||d.productId()<1) throw invalid("Produto inválido");
+        // Follow the sales/catalog lock order: products first, then the batch.
+        var oldProduct=jdbc.queryForList("SELECT product_id FROM commerce_production_batches WHERE id=?",Long.class,id);
+        if(oldProduct.isEmpty()) throw missing("Lote de produção não encontrado");
+        var productLocks=new java.util.TreeSet<Long>(List.of(oldProduct.get(0),d.productId()));
+        for(long productId:productLocks) CommerceVariantService.lockProduct(jdbc,productId,false);
         List<Map<String,Object>> found=jdbc.queryForList("""
             SELECT product_id AS productId,supplier_id AS supplierId,
+                   variant_id AS variantId,variant_label_snapshot AS variantLabel,
                    quantity,sold_quantity AS soldQuantity,unit_cost AS unitCost,additional_cost AS additionalCost,
                    produced_on AS producedOn,reference
               FROM commerce_production_batches WHERE id=? FOR UPDATE
             """,id);
         if(found.isEmpty()) throw missing("Lote de produção não encontrado");
         Map<String,Object> row=found.get(0);
+        if(number(row.get("productId"))!=oldProduct.get(0)) throw conflict("Lote alterado; atualize os dados");
+        Long oldVariant=row.get("variantId")==null?null:number(row.get("variantId"));
         if(d.productId()==null || d.productId()<1 ||
            d.supplierId()==null || d.supplierId()<1 ||
            d.quantity()==null || d.quantity()<1 || d.quantity()>10000000) {
@@ -91,6 +101,7 @@ public class CommerceProductionBatchCorrectionService {
 
         boolean changedEconomics=
             number(row.get("productId"))!=d.productId() ||
+            !java.util.Objects.equals(oldVariant,d.variantId()) ||
             number(row.get("supplierId"))!=d.supplierId() ||
             number(row.get("quantity"))!=d.quantity() ||
             ((BigDecimal)row.get("unitCost")).compareTo(unit)!=0 ||
@@ -123,15 +134,19 @@ public class CommerceProductionBatchCorrectionService {
                 throw invalid("Fornecedor inativo ou inexistente");
         }
 
+        boolean changedIdentity=number(row.get("productId"))!=d.productId()||!java.util.Objects.equals(oldVariant,d.variantId());
+        var variant=changedIdentity?CommerceVariantService.selection(jdbc,d.productId(),d.variantId()):
+            new CommerceVariantService.Selection(oldVariant,(String)row.get("variantLabel"));
+        // Existing legacy lots may keep their unclassified identity on a correction.
         String before=jdbc.queryForObject(SNAPSHOT_SQL,String.class,id);
         if(changedEconomics) {
             jdbc.update("""
                 UPDATE commerce_production_batches
                    SET product_id=?,supplier_id=?,quantity=?,unit_cost=?,
-                       additional_cost=?,total_cost=?,produced_on=?,reference=?
+                       additional_cost=?,total_cost=?,produced_on=?,reference=?,variant_id=?,variant_label_snapshot=?
                  WHERE id=?
                 """,d.productId(),d.supplierId(),d.quantity(),unit,extra,total,
-                     d.producedOn(),reference,id);
+                     d.producedOn(),reference,variant.id(),variant.label(),id);
         } else {
             jdbc.update("UPDATE commerce_production_batches SET reference=? WHERE id=?",
                         reference,id);
