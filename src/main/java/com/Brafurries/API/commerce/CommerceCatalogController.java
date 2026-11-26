@@ -112,6 +112,13 @@ public class CommerceCatalogController {
         return catalog.createProductionBatch(auth,request);
     }
 
+    @PostMapping("/production-lots")
+    @ResponseStatus(HttpStatus.CREATED)
+    public CreatedProductionLot createProductionLot(Authentication auth,
+                                       @Valid @RequestBody CreateProductionLot request) {
+        return catalog.createProductionLot(auth,request);
+    }
+
     @GetMapping("/artworks/{artworkId}/contracts")
     public List<Map<String,Object>> contracts(Authentication auth,@PathVariable long artworkId) {
         return catalog.contracts(auth,artworkId);
