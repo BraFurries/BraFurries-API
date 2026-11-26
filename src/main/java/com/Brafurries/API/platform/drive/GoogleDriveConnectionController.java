@@ -3,6 +3,7 @@ package com.Brafurries.API.platform.drive;
 import com.Brafurries.API.auth.social.SocialFrontendOriginPolicy;
 import java.net.URI;
 import java.util.Map;
+import java.util.List;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -66,6 +67,19 @@ public class GoogleDriveConnectionController {
     @PostMapping("/connection/check-root")
     public ResponseEntity<GoogleDriveConnectionService.RootCheck> checkRoot(Authentication auth) {
         return noStore(service.checkRoot(auth));
+    }
+
+    public record RegisterFolderRequest(@NotBlank @Size(max=200) String folderId) {}
+
+    @GetMapping("/folders")
+    public ResponseEntity<List<GoogleDriveConnectionService.ManagedFolder>> managedFolders(Authentication auth) {
+        return noStore(service.managedFolders(auth));
+    }
+
+    @PostMapping("/folders")
+    public ResponseEntity<GoogleDriveConnectionService.ManagedFolder> registerFolder(
+        Authentication auth, @Valid @RequestBody RegisterFolderRequest request) {
+        return noStore(service.registerFolder(auth,request.folderId()));
     }
 
     @DeleteMapping("/connection")
