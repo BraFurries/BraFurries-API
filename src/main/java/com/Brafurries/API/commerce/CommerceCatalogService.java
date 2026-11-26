@@ -293,16 +293,23 @@ public class CommerceCatalogService {
         authorization.require(auth,PlatformPermission.PRODUCTS_MANAGE);
         authorization.require(auth,PlatformPermission.SUPPLIERS_MANAGE);
         return jdbc.queryForList("""
-            SELECT batch.id,batch.product_id AS productId,product.name AS productName,
+            SELECT batch.id,batch.lot_group_id AS lotGroupId,batch.product_id AS productId,product.name AS productName,
                    batch.supplier_id AS supplierId,supplier.name AS supplierName,
                    batch.variant_id AS variantId,batch.variant_label_snapshot AS variantLabel,
                    batch.quantity,batch.sold_quantity AS soldQuantity,batch.unit_cost AS unitCost,
                    batch.additional_cost AS additionalCost,batch.total_cost AS totalCost,
                    batch.produced_on AS producedOn,batch.reference,batch.created_at AS createdAt
               FROM commerce_production_batches batch
+              JOIN (
+                  SELECT lot_group_id,IF(lot_group_id IS NULL,id,NULL) AS legacy_id,MAX(id) AS latest
+                    FROM commerce_production_batches
+                   GROUP BY lot_group_id,IF(lot_group_id IS NULL,id,NULL)
+                   ORDER BY latest DESC LIMIT 500
+              ) page ON (page.lot_group_id=batch.lot_group_id
+                      OR (batch.lot_group_id IS NULL AND page.legacy_id=batch.id))
               JOIN commerce_products product ON product.id=batch.product_id
               JOIN commerce_suppliers supplier ON supplier.id=batch.supplier_id
-             ORDER BY batch.id DESC LIMIT 500
+             ORDER BY page.latest DESC,batch.id DESC
             """);
     }
 
@@ -334,6 +341,78 @@ public class CommerceCatalogService {
             input.producedOn(),optional(input.reference(),160),actor.getId(),variant.id(),variant.label());
         audit(actor,"PRODUCTION_BATCH",id,"CREATED");
         return new Created(id);
+    }
+
+    /** All rows and their group are committed together. Sales still reference individual stock rows. */
+    @Transactional
+    public CreatedProductionLot createProductionLot(Authentication auth,CreateProductionLot input) {
+        User actor=authorization.require(auth,PlatformPermission.PRODUCTS_MANAGE).user();
+        authorization.require(auth,PlatformPermission.SUPPLIERS_MANAGE);
+        if(input==null||input.productId()==null||input.supplierId()==null||
+           input.lines()==null||input.lines().isEmpty()||input.lines().size()>100)
+            throw invalid("Informe produto, fornecedor e de 1 a 100 variações");
+        if(input.producedOn()==null||input.producedOn().getYear()<2000||
+           input.producedOn().isAfter(LocalDate.now(java.time.ZoneId.of("America/Sao_Paulo"))))
+            throw invalid("Data de produção inválida");
+        CommerceVariantService.lockProduct(jdbc,input.productId(),true);
+        requireExistsActive("commerce_suppliers",input.supplierId(),"Fornecedor");
+        BigDecimal extra=money(input.additionalCost(),"Custos adicionais");
+        String reference=optional(input.reference(),160);
+        Set<Long> seen=new java.util.HashSet<>();
+        long quantity=0;
+        BigDecimal baseTotal=BigDecimal.ZERO;
+        var lines=new java.util.ArrayList<ProductionLotLine>();
+        var selections=new java.util.ArrayList<CommerceVariantService.Selection>();
+        for(var line:input.lines()) {
+            if(line==null||line.variantId()==null||!seen.add(line.variantId())||
+                line.quantity()==null||line.quantity()<1||line.quantity()>10000000)
+                throw invalid("Informe uma quantidade válida e não repita variações");
+            var selection=CommerceVariantService.selection(jdbc,input.productId(),line.variantId());
+            BigDecimal unit=money(line.unitCost(),"Custo unitário");
+            quantity+=line.quantity();
+            baseTotal=baseTotal.add(unit.multiply(BigDecimal.valueOf(line.quantity())));
+            lines.add(new ProductionLotLine(line.variantId(),line.quantity(),unit));
+            selections.add(selection);
+        }
+        if(quantity>10000000||baseTotal.add(extra).compareTo(new BigDecimal("9999999999999999.99"))>0)
+            throw invalid("Quantidade ou valor total do lote excede o limite");
+        long group=insert("INSERT INTO commerce_production_lot_groups(product_id,created_by_user_id) VALUES (?,?)",
+            input.productId(),actor.getId());
+        List<BigDecimal> shares=allocateProductionExtra(extra,lines);
+        List<Long> ids=new java.util.ArrayList<>();
+        for(int i=0;i<lines.size();i++) {
+            var line=lines.get(i);
+            var variant=selections.get(i);
+            BigDecimal share=shares.get(i);
+            BigDecimal total=line.unitCost().multiply(BigDecimal.valueOf(line.quantity())).add(share);
+            long id=insert("""
+                INSERT INTO commerce_production_batches
+                    (product_id,supplier_id,quantity,unit_cost,additional_cost,total_cost,produced_on,
+                     reference,created_by_user_id,variant_id,variant_label_snapshot,lot_group_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                """,input.productId(),input.supplierId(),line.quantity(),line.unitCost(),share,total,
+                input.producedOn(),reference,actor.getId(),variant.id(),variant.label(),group);
+            audit(actor,"PRODUCTION_BATCH",id,"CREATED");
+            ids.add(id);
+        }
+        audit(actor,"PRODUCTION_LOT",group,"CREATED");
+        return new CreatedProductionLot(group,List.copyOf(ids));
+    }
+
+    /** Cumulative proportional allocation by units: exact cents, no negative residual. */
+    static List<BigDecimal> allocateProductionExtra(BigDecimal extra,List<ProductionLotLine> lines) {
+        long total=lines.stream().mapToLong(ProductionLotLine::quantity).sum();
+        long cumulative=0;
+        BigDecimal previous=BigDecimal.ZERO.setScale(2);
+        List<BigDecimal> shares=new java.util.ArrayList<>();
+        for(var line:lines) {
+            cumulative+=line.quantity();
+            BigDecimal target=extra.multiply(BigDecimal.valueOf(cumulative))
+                .divide(BigDecimal.valueOf(total),2,RoundingMode.HALF_UP);
+            shares.add(target.subtract(previous));
+            previous=target;
+        }
+        return List.copyOf(shares);
     }
 
     @Transactional(readOnly = true)
