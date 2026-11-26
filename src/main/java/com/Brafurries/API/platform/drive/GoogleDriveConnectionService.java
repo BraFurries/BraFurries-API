@@ -60,6 +60,7 @@ public class GoogleDriveConnectionService {
     public record Status(boolean configured, boolean connected, String accountEmail, boolean reconnectRequired) {}
     public record Start(String authorizationUrl) {}
     public record RootCheck(String status) {}
+    public record RootPickerIdentity(String clientId, String folderId, String googleSubject, String googleEmail) {}
 
     private boolean configured() {
         return enabled && cipher != null && clientId.matches("[A-Za-z0-9._-]+\\.apps\\.googleusercontent\\.com")
@@ -187,6 +188,32 @@ public class GoogleDriveConnectionService {
         return new Status(true, true, account, false);
     }
 
+    /** Browser obtains its own short-lived Google token. Never expose the stored token. */
+    @Transactional(readOnly = true)
+    public RootPickerIdentity rootPickerIdentity(Authentication auth) {
+        authorization.requireOwner(auth);
+        requireConfigured();
+        Connection existing = connection();
+        if (!matchesConfig(existing)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Conecte a conta institucional primeiro");
+        }
+        return new RootPickerIdentity(clientId, folderId, existing.subject(), existing.email());
+    }
+
+    static RootCheck classifyRoot(JsonNode root, String expectedId) {
+        if (root == null || !expectedId.equals(root.path("id").asText()))
+            return new RootCheck("UNAVAILABLE");
+        if (!"application/vnd.google-apps.folder".equals(root.path("mimeType").asText()))
+            return new RootCheck("NOT_FOLDER");
+        if (!root.path("trashed").isBoolean() || !root.path("ownedByMe").isBoolean()
+                || !root.path("capabilities").path("canShare").isBoolean())
+            return new RootCheck("UNAVAILABLE");
+        if (root.path("trashed").asBoolean()) return new RootCheck("TRASHED");
+        if (!root.path("ownedByMe").asBoolean()) return new RootCheck("NOT_OWNED");
+        if (!root.path("capabilities").path("canShare").asBoolean()) return new RootCheck("CANNOT_SHARE");
+        return new RootCheck("ACCESSIBLE");
+    }
+
     @Transactional
     public RootCheck checkRoot(Authentication auth) {
         int owner = authorization.requireOwner(auth).getId();
@@ -208,13 +235,15 @@ public class GoogleDriveConnectionService {
             }
             try {
                 JsonNode root = google.root(access, folderId);
-                boolean eligible = folderId.equals(root.path("id").asText())
-                    && "application/vnd.google-apps.folder".equals(root.path("mimeType").asText())
-                    && !root.path("trashed").asBoolean(true) && root.path("ownedByMe").asBoolean(false)
-                    && root.path("capabilities").path("canShare").asBoolean(false);
-                return new RootCheck(eligible ? "ACCESSIBLE" : "NOT_AUTHORIZED");
+                return classifyRoot(root, folderId);
             } catch (GoogleDriveOAuthClient.ProviderFailure ex) {
-                return new RootCheck(ex.status == 403 || ex.status == 404 ? "NOT_AUTHORIZED" : "UNAVAILABLE");
+                return new RootCheck(switch (ex.status) {
+                    case 401 -> "RECONNECT_REQUIRED";
+                    case 403 -> "ACCESS_DENIED";
+                    // Google intentionally does not distinguish invisible files from missing IDs.
+                    case 404 -> "NOT_AUTHORIZED";
+                    default -> "UNAVAILABLE";
+                });
             }
         } catch (GoogleDriveOAuthClient.ProviderFailure ex) {
             return new RootCheck(ex.status == 400 || ex.status == 401 ? "RECONNECT_REQUIRED" : "UNAVAILABLE");
