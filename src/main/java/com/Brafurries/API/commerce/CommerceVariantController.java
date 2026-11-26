@@ -1,6 +1,8 @@
 package com.Brafurries.API.commerce;
 
 import jakarta.validation.Valid;
+import java.time.LocalDate;
+import org.springframework.format.annotation.DateTimeFormat;
 import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
@@ -33,7 +35,9 @@ public class CommerceVariantController {
     }
 
     @GetMapping("/statistics")
-    public List<Map<String,Object>> statistics(Authentication auth,@PathVariable long productId) {
-        return variants.statistics(auth,productId);
+    public List<Map<String,Object>> statistics(Authentication auth,@PathVariable long productId,
+        @RequestParam(required=false) @DateTimeFormat(iso=DateTimeFormat.ISO.DATE) LocalDate from,
+        @RequestParam(required=false) @DateTimeFormat(iso=DateTimeFormat.ISO.DATE) LocalDate to) {
+        return variants.statistics(auth,productId,from,to);
     }
 }
