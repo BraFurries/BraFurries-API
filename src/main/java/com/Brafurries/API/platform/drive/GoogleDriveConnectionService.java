@@ -257,6 +257,17 @@ public class GoogleDriveConnectionService {
         }
     }
 
+    record FolderScope(String subject, String rootId) {}
+
+    // Internal metadata only; no credentials cross this boundary.
+    FolderScope folderScope() {
+        requireConfigured();
+        Connection existing = connection();
+        if (!matchesConfig(existing)) throw new ResponseStatusException(HttpStatus.CONFLICT,
+            "Conecte a conta institucional primeiro");
+        return new FolderScope(existing.subject(), folderId);
+    }
+
     public record ManagedFolder(String folderId, String parentFolderId, String name, Instant verifiedAt) {}
     record VerifiedFolder(String parentId, String name) {}
 
