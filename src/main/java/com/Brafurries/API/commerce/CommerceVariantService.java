@@ -129,6 +129,27 @@ public class CommerceVariantService {
         return new Selection(variantId,(String)rows.get(0).get("label"));
     }
 
+    static List<Map<String,Object>> attachChoices(JdbcTemplate jdbc,List<Map<String,Object>> products,boolean catalog) {
+        if(products.isEmpty()) return products;
+        Object[] args=products.stream().map(row->((Number)row.get("id")).longValue()).toArray();
+        String placeholders=String.join(",",Collections.nCopies(args.length,"?"));
+        String cost=catalog?",COALESCE(v.estimated_unit_cost,p.estimated_unit_cost) AS estimatedUnitCost":"";
+        var choices=jdbc.queryForList("""
+            SELECT v.id,v.product_id AS productId,v.label,v.active,
+                   COALESCE(v.suggested_price,p.suggested_price) AS suggestedPrice
+            """+cost+"""
+              FROM commerce_product_variants v JOIN commerce_products p ON p.id=v.product_id
+             WHERE v.product_id IN (
+            """+placeholders+")"+(catalog?"":" AND v.active=1")+" ORDER BY v.id",args);
+        Map<Long,List<Map<String,Object>>> grouped=new HashMap<>();
+        for(var row:choices) grouped.computeIfAbsent(((Number)row.get("productId")).longValue(),id->new ArrayList<>()).add(row);
+        return products.stream().map(row->{
+            Map<String,Object> copy=new LinkedHashMap<>(row);
+            copy.put("variants",grouped.getOrDefault(((Number)row.get("id")).longValue(),List.of()));
+            return copy;
+        }).toList();
+    }
+
     @Transactional(readOnly=true)
     public List<Map<String,Object>> list(Authentication auth,long productId) {
         authorization.require(auth,PlatformPermission.PRODUCTS_MANAGE);
