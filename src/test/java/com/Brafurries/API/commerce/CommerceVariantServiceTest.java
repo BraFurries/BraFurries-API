@@ -87,6 +87,46 @@ class CommerceVariantServiceTest {
         verifyNoInteractions(support);
     }
 
+    @Test void batchRequiresCatalogPermissionBeforeSql() {
+        when(authorization.require(auth,PlatformPermission.PRODUCTS_MANAGE))
+            .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
+        assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
+            ()->service.createBatch(auth,10,new CommerceVariantService.BatchCreate(List.of(
+                new CommerceVariantService.Create(List.of(new CommerceVariantService.Attribute("Tamanho","G")),null,null))))).getStatusCode());
+        verifyNoInteractions(jdbc,support);
+    }
+
+    @Test void batchRejectsEmptyOrOversizedRequestsBeforeSql() {
+        User user=new User();user.setId(7);
+        when(authorization.require(auth,PlatformPermission.PRODUCTS_MANAGE)).thenReturn(
+            new PlatformAuthorizationService.Actor(user,new PlatformAuthorizationService.Access(false,true,Set.of(PlatformPermission.PRODUCTS_MANAGE))));
+        var create=new CommerceVariantService.Create(List.of(new CommerceVariantService.Attribute("Tamanho","G")),null,null);
+        assertThrows(ResponseStatusException.class,()->service.createBatch(auth,10,new CommerceVariantService.BatchCreate(List.of())));
+        assertThrows(ResponseStatusException.class,()->service.createBatch(auth,10,new CommerceVariantService.BatchCreate(java.util.Collections.nCopies(101,create))));
+        verifyNoInteractions(jdbc,support);
+    }
+
+    @Test void batchCreatesOnlySelectedCombinationsUnderOneProductLock() {
+        grant();
+        doReturn(List.of(Map.of("id",21L,"name","Tamanho"))).when(jdbc).queryForList(
+            eq("SELECT id,name FROM commerce_product_attributes WHERE product_id=? ORDER BY id FOR UPDATE"),eq(10L));
+        doReturn(List.of(Map.of("id",21L,"name","Tamanho"))).when(jdbc).queryForList(
+            contains("commerce_product_attributes WHERE product_id=? AND name=?"),eq(10L),eq("Tamanho"));
+        doReturn(List.of(Map.of("id",31L,"label","G"))).when(jdbc).queryForList(
+            contains("commerce_product_attribute_values"),eq(10L),eq(21L),eq("G"));
+        doReturn(List.of(Map.of("id",32L,"label","M"))).when(jdbc).queryForList(
+            contains("commerce_product_attribute_values"),eq(10L),eq(21L),eq("M"));
+        when(support.insert(contains("INSERT INTO commerce_product_variants"),eq(10L),anyString(),eq("Tamanho: G"),isNull(),isNull(),eq(7))).thenReturn(101L);
+        when(support.insert(contains("INSERT INTO commerce_product_variants"),eq(10L),anyString(),eq("Tamanho: M"),isNull(),isNull(),eq(7))).thenReturn(102L);
+        var result=service.createBatch(auth,10,new CommerceVariantService.BatchCreate(List.of(
+            new CommerceVariantService.Create(List.of(new CommerceVariantService.Attribute("Tamanho","G")),null,null),
+            new CommerceVariantService.Create(List.of(new CommerceVariantService.Attribute("Tamanho","M")),null,null))));
+        assertEquals(List.of(101L,102L),result.ids());
+        verify(jdbc,times(1)).queryForList("SELECT id FROM commerce_products WHERE id=? AND active=1 FOR UPDATE",Long.class,10L);
+        verify(jdbc).update(contains("INSERT INTO commerce_product_variant_values"),eq(10L),eq(101L),eq(21L),eq(31L));
+        verify(jdbc).update(contains("INSERT INTO commerce_product_variant_values"),eq(10L),eq(102L),eq(21L),eq(32L));
+    }
+
     @Test void financePermissionIsRequiredBeforeReadingStatistics() {
         when(authorization.require(auth,PlatformPermission.FINANCE_VIEW)).thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
         assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,()->service.statistics(auth,10,null,null)).getStatusCode());
