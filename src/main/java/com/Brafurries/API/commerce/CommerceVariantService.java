@@ -33,6 +33,8 @@ public class CommerceVariantService {
     public record Attribute(@NotBlank @Size(max=60) String name,@NotBlank @Size(max=60) String value) {}
     public record Create(@Valid @NotEmpty @Size(max=8) List<Attribute> attributes,
                          BigDecimal suggestedPrice,BigDecimal estimatedUnitCost) {}
+    public record BatchCreate(@NotEmpty @Size(max=100) List<@NotNull @Valid Create> variants) {}
+    public record BatchCreated(List<Long> ids) {}
     public record Update(@NotNull Boolean active,BigDecimal suggestedPrice,BigDecimal estimatedUnitCost) {}
     public record Selection(Long id,String label) {}
 
@@ -40,8 +42,24 @@ public class CommerceVariantService {
     public CommerceCatalogDtos.Created create(Authentication auth,long productId,Create input) {
         int actor=authorization.require(auth,PlatformPermission.PRODUCTS_MANAGE).user().getId();
         lockProduct(jdbc,productId,true);
+        return new CommerceCatalogDtos.Created(createLocked(actor,productId,input));
+    }
+
+    /** The entire selected set succeeds or rolls back; no partial combinations. */
+    @Transactional
+    public BatchCreated createBatch(Authentication auth,long productId,BatchCreate input) {
+        int actor=authorization.require(auth,PlatformPermission.PRODUCTS_MANAGE).user().getId();
+        if(input==null||input.variants()==null||input.variants().isEmpty()||input.variants().size()>100)
+            throw invalid("Selecione de 1 a 100 combinações");
+        lockProduct(jdbc,productId,true);
+        List<Long> ids=new ArrayList<>();
+        for(Create variant:input.variants()) ids.add(createLocked(actor,productId,variant));
+        return new BatchCreated(List.copyOf(ids));
+    }
+
+    private long createLocked(int actor,long productId,Create input) {
         if(input==null||input.attributes()==null||input.attributes().isEmpty()||input.attributes().size()>8)
-            throw invalid("Informe de 1 a 8 atributos da variação");
+            throw invalid("Informe de 1 a 8 características da variação");
         BigDecimal price=input.suggestedPrice()==null?null:money(input.suggestedPrice(),"Preço sugerido");
         BigDecimal cost=input.estimatedUnitCost()==null?null:money(input.estimatedUnitCost(),"Custo estimado");
         var configured=jdbc.queryForList("SELECT id,name FROM commerce_product_attributes WHERE product_id=? ORDER BY id FOR UPDATE",productId);
@@ -49,19 +67,19 @@ public class CommerceVariantService {
         TreeMap<Long,Long> ids=new TreeMap<>();
         TreeMap<Long,String> labels=new TreeMap<>();
         for(Attribute pair:input.attributes()) {
-            if(pair==null) throw invalid("Atributo inválido");
-            String name=text(pair.name(),60,"Atributo",true);
-            String value=text(pair.value(),60,"Valor",true);
+            if(pair==null) throw invalid("Característica inválida");
+            String name=text(pair.name(),60,"Característica",true);
+            String value=text(pair.value(),60,"Opção",true);
             var attributes=jdbc.queryForList("SELECT id,name FROM commerce_product_attributes WHERE product_id=? AND name=? FOR UPDATE",productId,name);
             long attributeId;
             if(attributes.isEmpty()) {
-                if(!configured.isEmpty()) throw invalid("Use os atributos já definidos para este produto");
+                if(!configured.isEmpty()) throw invalid("Use as características já definidas para este produto");
                 attributeId=support.insert("INSERT INTO commerce_product_attributes(product_id,name) VALUES (?,?)",productId,name);
             } else {
                 attributeId=((Number)attributes.get(0).get("id")).longValue();
                 name=(String)attributes.get(0).get("name");
             }
-            if(!seen.add(attributeId)) throw invalid("Cada atributo deve aparecer apenas uma vez");
+            if(!seen.add(attributeId)) throw invalid("Cada característica deve aparecer apenas uma vez");
             var values=jdbc.queryForList("SELECT id,label FROM commerce_product_attribute_values WHERE product_id=? AND attribute_id=? AND label=? FOR UPDATE",
                 productId,attributeId,value);
             long valueId;
@@ -74,7 +92,7 @@ public class CommerceVariantService {
             ids.put(attributeId,valueId);
             labels.put(attributeId,name+": "+value);
         }
-        if(!configured.isEmpty()&&seen.size()!=configured.size()) throw invalid("Preencha todos os atributos do produto");
+        if(!configured.isEmpty()&&seen.size()!=configured.size()) throw invalid("Preencha todas as características do produto");
         String label=text(String.join(" · ",labels.values()),255,"Descrição da variação",true);
         List<String> canonical=new ArrayList<>();
         ids.forEach((a,v)->{canonical.add(a.toString());canonical.add(v.toString());});
@@ -89,7 +107,7 @@ public class CommerceVariantService {
             INSERT INTO commerce_product_variant_values(product_id,variant_id,attribute_id,value_id) VALUES (?,?,?,?)
             """,productId,id,attribute,value));
         audit(actor,id,"CREATED");
-        return new CommerceCatalogDtos.Created(id);
+        return id;
     }
 
     @Transactional
