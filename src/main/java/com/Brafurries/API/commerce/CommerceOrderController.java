@@ -30,6 +30,11 @@ public class CommerceOrderController {
         return orders.productChoices(auth);
     }
 
+    @GetMapping("/product-choices/{productId}/variants")
+    public List<Map<String,Object>> variantChoices(Authentication auth,@PathVariable long productId) {
+        return orders.variantChoices(auth,productId);
+    }
+
     @GetMapping
     public List<Map<String,Object>> list(Authentication auth) {
         return orders.list(auth);

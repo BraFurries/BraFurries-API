@@ -69,8 +69,14 @@ public final class CommerceCatalogDtos {
         @NotNull @DecimalMin("0.0") BigDecimal unitCost,
         @NotNull @DecimalMin("0.0") BigDecimal additionalCost,
         @NotNull LocalDate producedOn,
-        @Size(max = 160) String reference
-    ) {}
+        @Size(max = 160) String reference,
+        @Min(1) Long variantId
+    ) {
+        public CreateProductionBatch(Long productId,Long supplierId,Integer quantity,BigDecimal unitCost,
+            BigDecimal additionalCost,LocalDate producedOn,String reference) {
+            this(productId,supplierId,quantity,unitCost,additionalCost,producedOn,reference,null);
+        }
+    }
 
     public record Created(long id) {}
 }

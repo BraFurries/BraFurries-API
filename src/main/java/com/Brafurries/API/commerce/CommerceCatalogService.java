@@ -192,18 +192,20 @@ public class CommerceCatalogService {
     @Transactional(readOnly = true)
     public List<Map<String,Object>> products(Authentication auth) {
         authorization.require(auth, PlatformPermission.PRODUCTS_MANAGE);
-        return jdbc.queryForList("""
+        var products=jdbc.queryForList("""
             SELECT product.id,product.sku,product.name,product.description,
                    product.estimated_unit_cost AS estimatedUnitCost,
                    product.suggested_price AS suggestedPrice,
                    product.preferred_supplier_id AS preferredSupplierId,
                    supplier.name AS preferredSupplierName,
-                   product.active,product.created_at AS createdAt
+                   product.active,product.created_at AS createdAt,
+                   EXISTS(SELECT 1 FROM commerce_product_variants v WHERE v.product_id=product.id) AS variantRequired
               FROM commerce_products product
               LEFT JOIN commerce_suppliers supplier
                 ON supplier.id=product.preferred_supplier_id
              ORDER BY product.id DESC LIMIT 500
             """);
+        return CommerceVariantService.attachChoices(jdbc,products,true);
     }
 
     @Transactional
@@ -293,7 +295,8 @@ public class CommerceCatalogService {
         return jdbc.queryForList("""
             SELECT batch.id,batch.product_id AS productId,product.name AS productName,
                    batch.supplier_id AS supplierId,supplier.name AS supplierName,
-                   batch.quantity,batch.unit_cost AS unitCost,
+                   batch.variant_id AS variantId,batch.variant_label_snapshot AS variantLabel,
+                   batch.quantity,batch.sold_quantity AS soldQuantity,batch.unit_cost AS unitCost,
                    batch.additional_cost AS additionalCost,batch.total_cost AS totalCost,
                    batch.produced_on AS producedOn,batch.reference,batch.created_at AS createdAt
               FROM commerce_production_batches batch
@@ -307,7 +310,8 @@ public class CommerceCatalogService {
     public Created createProductionBatch(Authentication auth, CreateProductionBatch input) {
         User actor = authorization.require(auth,PlatformPermission.PRODUCTS_MANAGE).user();
         authorization.require(auth,PlatformPermission.SUPPLIERS_MANAGE);
-        requireExistsActive("commerce_products",input.productId(),"Produto");
+        CommerceVariantService.lockProduct(jdbc,input.productId(),true);
+        var variant=CommerceVariantService.selection(jdbc,input.productId(),input.variantId());
         requireExistsActive("commerce_suppliers",input.supplierId(),"Fornecedor");
         if (input.quantity()==null || input.quantity()<=0 || input.quantity()>10000000) {
             throw invalid("A quantidade do lote deve ser positiva e não exceder 10 milhões");
@@ -324,10 +328,10 @@ public class CommerceCatalogService {
         long id=insert("""
             INSERT INTO commerce_production_batches
                 (product_id,supplier_id,quantity,unit_cost,additional_cost,total_cost,
-                 produced_on,reference,created_by_user_id)
-            VALUES (?,?,?,?,?,?,?,?,?)
+                 produced_on,reference,created_by_user_id,variant_id,variant_label_snapshot)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
             """,input.productId(),input.supplierId(),input.quantity(),unit,extra,total,
-            input.producedOn(),optional(input.reference(),160),actor.getId());
+            input.producedOn(),optional(input.reference(),160),actor.getId(),variant.id(),variant.label());
         audit(actor,"PRODUCTION_BATCH",id,"CREATED");
         return new Created(id);
     }

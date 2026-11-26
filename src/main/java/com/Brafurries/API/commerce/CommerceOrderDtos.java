@@ -20,8 +20,13 @@ public final class CommerceOrderDtos {
         @NotBlank @Size(max=180) String label,
         @Size(max=64) String size,
         @NotNull @Min(1) Integer quantity,
-        @NotNull @DecimalMin("0") BigDecimal unitPrice
-    ) {}
+        @NotNull @DecimalMin("0") BigDecimal unitPrice,
+        @Min(1) Long variantId
+    ) {
+        public Line(Long productId,String label,String size,Integer quantity,BigDecimal unitPrice) {
+            this(productId,label,size,quantity,unitPrice,null);
+        }
+    }
 
     public record Create(
         @NotBlank String requestKey,

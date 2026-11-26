@@ -130,10 +130,51 @@ class CommerceOrderServiceTest {
         assertEquals(25L,orders.create(auth,data).id());
         verify(jdbc).update(contains("INSERT INTO commerce_order_items"),
             eq(25L),isNull(),eq("Camiseta"),eq("GG"),eq(2),
-            eq(new BigDecimal("55.00")),eq(new BigDecimal("110.00")));
+            eq(new BigDecimal("55.00")),eq(new BigDecimal("110.00")),isNull(),isNull());
         verify(support).audit(7,"ORDER",25L,"CREATED");
         verify(jdbc,never()).update(contains("commerce_sales"),any(Object[].class));
         verify(jdbc,never()).update(contains("commerce_royalty_accruals"),any(Object[].class));
+    }
+
+    private void catalogProduct() {
+        doReturn(List.of(30L)).when(jdbc).queryForList(eq("SELECT id FROM commerce_products WHERE id=? AND active=1 FOR UPDATE"),
+            eq(Long.class),eq(30L));
+        when(jdbc.queryForObject(eq("SELECT name FROM commerce_products WHERE id=? FOR UPDATE"),
+            eq(String.class),eq(30L))).thenReturn("Camiseta");
+        when(jdbc.queryForList(contains("FROM commerce_orders WHERE request_key"),eq(KEY))).thenReturn(List.of());
+    }
+
+    @Test
+    void catalogOrderRequiresVariantWhenProductHasDefinedCombinations() {
+        catalogProduct();
+        doReturn(List.of(77L)).when(jdbc).queryForList(contains("FROM commerce_product_variants WHERE product_id=? LIMIT 1"),
+            eq(Long.class),eq(30L));
+        var data=new Create(KEY,"Comprador","DIRECT",null,LocalDate.of(2026,11,3),null,null,
+            List.of(new Line(30L,"Camiseta",null,1,new BigDecimal("55.00"))));
+        assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,()->orders.create(auth,data)).getStatusCode());
+        verifyNoInteractions(support);
+    }
+
+    @Test
+    void catalogOrderRejectsInventedFreeTextEvenWithoutVariant() {
+        catalogProduct();
+        var data=new Create(KEY,"Comprador","DIRECT",null,LocalDate.of(2026,11,3),null,null,
+            List.of(new Line(30L,"Camiseta","XXXXG",1,new BigDecimal("55.00"))));
+        assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,()->orders.create(auth,data)).getStatusCode());
+        verifyNoInteractions(support);
+    }
+
+    @Test
+    void orderPersistsCanonicalProductAndVariantSnapshots() {
+        catalogProduct();
+        when(jdbc.queryForList(contains("FROM commerce_product_variants WHERE product_id=? AND id=? AND active=1"),
+            eq(30L),eq(77L))).thenReturn(List.of(Map.of("label","Tamanho: M · Cor: Preta")));
+        when(support.insert(contains("INSERT INTO commerce_orders"),any(Object[].class))).thenReturn(25L);
+        var data=new Create(KEY,"Comprador","DIRECT",null,LocalDate.of(2026,11,3),null,null,
+            List.of(new Line(30L,"Descrição manipulada",null,2,new BigDecimal("55.00"),77L)));
+        assertEquals(25L,orders.create(auth,data).id());
+        verify(jdbc).update(contains("INSERT INTO commerce_order_items"),eq(25L),eq(30L),eq("Camiseta"),
+            isNull(),eq(2),eq(new BigDecimal("55.00")),eq(new BigDecimal("110.00")),eq(77L),eq("Tamanho: M · Cor: Preta"));
     }
 
     @Test
@@ -277,7 +318,7 @@ class CommerceOrderServiceTest {
         verify(jdbc).update(contains("DELETE FROM commerce_order_items"),eq(25L));
         verify(jdbc).update(contains("INSERT INTO commerce_order_items"),
             eq(25L),isNull(),eq("Camiseta"),eq("GG"),eq(2),
-            eq(new BigDecimal("50.00")),eq(new BigDecimal("100.00")));
+            eq(new BigDecimal("50.00")),eq(new BigDecimal("100.00")),isNull(),isNull());
         verify(support).audit(7,"ORDER",25L,"UPDATED");
         verify(jdbc,never()).update(contains("commerce_sales"),any(Object[].class));
         verify(jdbc,never()).update(contains("commerce_royalty_accruals"),any(Object[].class));
