@@ -11,6 +11,8 @@ import java.util.Base64;
 import java.util.HashSet;
 import java.util.Set;
 import java.time.LocalDateTime;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -255,7 +257,7 @@ public class GoogleDriveConnectionService {
         }
     }
 
-    public record ManagedFolder(String folderId, String parentFolderId, String name, LocalDateTime verifiedAt) {}
+    public record ManagedFolder(String folderId, String parentFolderId, String name, Instant verifiedAt) {}
     record VerifiedFolder(String parentId, String name) {}
 
     @Transactional(readOnly = true)
@@ -271,7 +273,7 @@ public class GoogleDriveConnectionService {
             WHERE google_subject=? AND root_folder_id=?
             ORDER BY folder_name,folder_id
             """, (rs,i) -> new ManagedFolder(rs.getString(1),rs.getString(2),rs.getString(3),
-                rs.getObject(4,LocalDateTime.class)), existing.subject(),folderId);
+                rs.getObject(4,LocalDateTime.class).toInstant(ZoneOffset.UTC)), existing.subject(),folderId);
     }
 
     static boolean validFolderId(String id) {
@@ -357,7 +359,7 @@ public class GoogleDriveConnectionService {
             FROM platform_google_drive_managed_folders
             WHERE google_subject=? AND root_folder_id=? AND folder_id=?
             """,(rs,i)->new ManagedFolder(rs.getString(1),rs.getString(2),rs.getString(3),
-                rs.getObject(4,LocalDateTime.class)),existing.subject(),folderId,target);
+                rs.getObject(4,LocalDateTime.class).toInstant(ZoneOffset.UTC)),existing.subject(),folderId,target);
     }
 
     // Local removal only. Google grant revocation is explicit in the Google account.
