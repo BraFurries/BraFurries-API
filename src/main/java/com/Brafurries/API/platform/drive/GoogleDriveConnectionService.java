@@ -92,11 +92,13 @@ public class GoogleDriveConnectionService {
         jdbc.queryForObject("SELECT id FROM users WHERE id=? FOR UPDATE", Integer.class, owner);
     }
 
-    private Connection connection() {
+    private Connection connection() { return connection(false); }
+
+    private Connection connection(boolean lock) {
         List<Connection> rows = jdbc.query("""
             SELECT google_subject, google_email, oauth_client_id, refresh_token_ciphertext
             FROM platform_google_drive_connection WHERE id=1
-            """, (rs, i) -> new Connection(rs.getString(1), rs.getString(2),
+            """+(lock?" FOR UPDATE":""), (rs, i) -> new Connection(rs.getString(1), rs.getString(2),
                 rs.getString(3), rs.getBytes(4)));
         return rows.isEmpty() ? null : rows.getFirst();
     }
@@ -255,6 +257,19 @@ public class GoogleDriveConnectionService {
         } catch (IllegalStateException ex) {
             return new RootCheck("RECONNECT_REQUIRED");
         }
+    }
+
+    record FolderScope(String subject, String rootId) {}
+
+    // Internal metadata only; no credentials cross this boundary.
+    FolderScope folderScope() { return folderScope(false); }
+
+    FolderScope folderScope(boolean lock) {
+        requireConfigured();
+        Connection existing = connection(lock);
+        if (!matchesConfig(existing)) throw new ResponseStatusException(HttpStatus.CONFLICT,
+            "Conecte a conta institucional primeiro");
+        return new FolderScope(existing.subject(), folderId);
     }
 
     public record ManagedFolder(String folderId, String parentFolderId, String name, Instant verifiedAt) {}
