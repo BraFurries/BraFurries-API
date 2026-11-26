@@ -25,7 +25,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class CommerceProductionBatchCorrectionService {
     private static final String SNAPSHOT_SQL="""
         SELECT JSON_OBJECT(
-          'productId',product_id,'supplierId',supplier_id,
+          'productId',product_id,'supplierId',supplier_id,'lotGroupId',lot_group_id,
           'variantId',variant_id,'variantLabel',variant_label_snapshot,
           'quantity',quantity,'unitCost',unit_cost,
           'additionalCost',additional_cost,'totalCost',total_cost,
@@ -75,7 +75,7 @@ public class CommerceProductionBatchCorrectionService {
         var productLocks=new java.util.TreeSet<Long>(List.of(oldProduct.get(0),d.productId()));
         for(long productId:productLocks) CommerceVariantService.lockProduct(jdbc,productId,false);
         List<Map<String,Object>> found=jdbc.queryForList("""
-            SELECT product_id AS productId,supplier_id AS supplierId,
+            SELECT product_id AS productId,supplier_id AS supplierId,lot_group_id AS lotGroupId,
                    variant_id AS variantId,variant_label_snapshot AS variantLabel,
                    quantity,sold_quantity AS soldQuantity,unit_cost AS unitCost,additional_cost AS additionalCost,
                    produced_on AS producedOn,reference
@@ -98,6 +98,17 @@ public class CommerceProductionBatchCorrectionService {
         if(total.compareTo(new BigDecimal("9999999999999999.99"))>0)
             throw invalid("Total excede o limite monetário");
         String reference=text(d.reference(),160,"Referência",false);
+
+        // Shared supplier/date/reference and variant identity are fixed for grouped rows.
+        // Correcting one inventory row must not make its logical lot inconsistent.
+        if(row.get("lotGroupId")!=null && (
+            number(row.get("productId"))!=d.productId() ||
+            number(row.get("supplierId"))!=d.supplierId() ||
+            !java.util.Objects.equals(oldVariant,d.variantId()) ||
+            !date(row.get("producedOn")).equals(d.producedOn()) ||
+            !java.util.Objects.equals(row.get("reference"),reference))) {
+            throw conflict("Produto, variação, fornecedor, data e referência são fixos neste lote agrupado");
+        }
 
         boolean changedEconomics=
             number(row.get("productId"))!=d.productId() ||

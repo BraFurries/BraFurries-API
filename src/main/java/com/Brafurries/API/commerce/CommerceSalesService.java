@@ -404,7 +404,7 @@ public class CommerceSalesService {
         authorization.require(auth,PlatformPermission.SALES_MANAGE);
         // No supplier contacts or production costs are exposed to sales staff.
         return jdbc.queryForList("""
-            SELECT batch.id AS batchId,
+            SELECT batch.id AS batchId,batch.lot_group_id AS lotGroupId,
                    batch.product_id AS productId,product.name AS productName,
                    product.sku,COALESCE(v.suggested_price,product.suggested_price) AS suggestedPrice,
                    batch.variant_id AS variantId,batch.variant_label_snapshot AS variantLabel,
