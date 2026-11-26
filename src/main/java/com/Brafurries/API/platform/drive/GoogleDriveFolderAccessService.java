@@ -101,10 +101,10 @@ public class GoogleDriveFolderAccessService {
             desired.size()>Permission.values().length || expected.stream().anyMatch(java.util.Objects::isNull) || desired.stream().anyMatch(java.util.Objects::isNull))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Concessão inválida");
         jdbc.queryForObject("SELECT id FROM users WHERE id=? FOR UPDATE",Integer.class,owner);
-        var scope=connection.folderScope();
+        var scope=connection.folderScope(true);
         requireFolder(scope,folder,true);
         var current=java.util.Set.copyOf(jdbc.queryForList("SELECT permission_code FROM "+table(principal)+
-            " WHERE "+FOLDER_KEY+" AND "+column(principal)+"=?",String.class,
+            " WHERE "+FOLDER_KEY+" AND "+column(principal)+"=? FOR UPDATE",String.class,
             scope.subject(),scope.rootId(),folder,id).stream().map(Permission::valueOf).toList());
         var next=java.util.Set.copyOf(desired);
         if (!current.equals(java.util.Set.copyOf(expected)))
@@ -122,7 +122,7 @@ public class GoogleDriveFolderAccessService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Concessão inválida");
         // Serialize against connection changes and other owner writes.
         jdbc.queryForObject("SELECT id FROM users WHERE id=? FOR UPDATE",Integer.class,owner);
-        var scope=connection.folderScope();
+        var scope=connection.folderScope(true);
         requireFolder(scope,folder,true);
         if (principal==Principal.ROLE) {
             if (jdbc.queryForList("SELECT id FROM community_team_roles WHERE id=? AND community_id=?"+
@@ -137,7 +137,7 @@ public class GoogleDriveFolderAccessService {
             throw new ResponseStatusException(HttpStatus.CONFLICT,"Pessoa não aprovada ou sem vínculo ativo com a BraFurries");
         }
         String predicate=FOLDER_KEY+" AND "+column(principal)+"=? AND permission_code=?";
-        boolean exists=!jdbc.queryForList("SELECT permission_code FROM "+table(principal)+" WHERE "+predicate,
+        boolean exists=!jdbc.queryForList("SELECT permission_code FROM "+table(principal)+" WHERE "+predicate+" FOR UPDATE",
             String.class,scope.subject(),scope.rootId(),folder,id,permission.name()).isEmpty();
         if (grant==exists) return;
         if (grant) {
