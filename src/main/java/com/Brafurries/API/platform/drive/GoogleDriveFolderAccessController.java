@@ -24,6 +24,17 @@ public class GoogleDriveFolderAccessController {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(service.effective(auth,folderId));
     }
 
+    public record ReplaceRequest(List<GoogleDriveFolderAccessService.Permission> expected,
+                                 List<GoogleDriveFolderAccessService.Permission> desired) {}
+
+    @PutMapping("/{principal}/{id}")
+    public ResponseEntity<Void> replace(Authentication auth,@PathVariable String folderId,
+        @PathVariable GoogleDriveFolderAccessService.Principal principal,@PathVariable int id,
+        @RequestBody ReplaceRequest request) {
+        service.replace(auth,folderId,principal,id,request.expected(),request.desired());
+        return ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build();
+    }
+
     @PutMapping("/{principal}/{id}/{permission}")
     public ResponseEntity<Void> grant(Authentication auth,@PathVariable String folderId,
         @PathVariable GoogleDriveFolderAccessService.Principal principal,@PathVariable int id,
