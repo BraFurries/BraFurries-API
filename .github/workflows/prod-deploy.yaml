@@ -179,18 +179,36 @@ jobs:
       - name: Validate local API endpoint
         run: curl -fsS --max-time 20 http://127.0.0.1:18080/meta/locales >/dev/null
 
-      - name: Validate local Firebase preview CORS
+      - name: Validate local production and preview CORS
         run: |
           set -euo pipefail
-          ORIGIN="https://brafurries--cors-smoke.web.app"
+          BASE="http://127.0.0.1:18080"
           HEADERS="$(mktemp)"
           trap 'rm -f "$HEADERS"' EXIT
-          curl -fsS --max-time 20 -D "$HEADERS" -o /dev/null -X OPTIONS \
-            http://127.0.0.1:18080/auth/login \
-            -H "Origin: $ORIGIN" \
-            -H "Access-Control-Request-Method: POST" \
-            -H "Access-Control-Request-Headers: content-type"
-          grep -Fqi "Access-Control-Allow-Origin: $ORIGIN" "$HEADERS"
+          for ORIGIN in "https://brafurries.com.br" "https://www.brafurries.com.br" "https://brafurries--cors-smoke.web.app"; do
+            echo "Checking CORS for $ORIGIN"
+            for ENDPOINT in /auth/login /events/partner /user/me/communities; do
+              METHOD=GET
+              REQUEST_HEADERS=authorization
+              if [[ "$ENDPOINT" == /auth/login ]]; then
+                METHOD=POST
+                REQUEST_HEADERS=content-type
+              fi
+              HTTP_CODE="$(curl -sS --connect-timeout 10 --max-time 20 -D "$HEADERS" -o /dev/null -w '%{http_code}' -X OPTIONS \
+                "$BASE$ENDPOINT" -H "Origin: $ORIGIN" -H "Access-Control-Request-Method: $METHOD" \
+                -H "Access-Control-Request-Headers: $REQUEST_HEADERS")"
+              [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]] || { echo "Preflight $ENDPOINT returned $HTTP_CODE" >&2; exit 1; }
+              tr -d '\r' < "$HEADERS" | grep -Fxi "Access-Control-Allow-Origin: $ORIGIN" >/dev/null || {
+                echo "Missing or mismatched CORS origin for $ENDPOINT" >&2; exit 1;
+              }
+            done
+            # Actual unauthenticated reads must still provide CORS on 401,
+            # so expired sessions can be handled correctly by the browser.
+            HTTP_CODE="$(curl -sS --connect-timeout 10 --max-time 20 -D "$HEADERS" -o /dev/null -w '%{http_code}' \
+              "$BASE/user/me/communities" -H "Origin: $ORIGIN")"
+            [[ "$HTTP_CODE" == 401 ]] || { echo "Expected 401 for protected read, got $HTTP_CODE" >&2; exit 1; }
+            tr -d '\r' < "$HEADERS" | grep -Fxi "Access-Control-Allow-Origin: $ORIGIN" >/dev/null
+          done
 
       - name: Record final wrapper status
         run: sudo -n /usr/local/sbin/deploy-brafurries-api status
@@ -198,17 +216,33 @@ jobs:
       - name: Validate public API and CORS
         run: |
           set -euo pipefail
-          ORIGIN="https://brafurries--cors-smoke.web.app"
+          BASE="https://api.brafurries.com.br"
           HEADERS="$(mktemp)"
           trap 'rm -f "$HEADERS"' EXIT
-          HTTP_CODE="$(curl -sS --connect-timeout 10 --max-time 20 \
-            -D "$HEADERS" -o /dev/null -w '%{http_code}' -X OPTIONS \
-            https://api.brafurries.com.br/auth/login \
-            -H "Origin: $ORIGIN" \
-            -H "Access-Control-Request-Method: POST" \
-            -H "Access-Control-Request-Headers: content-type")"
-          [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]
-          grep -Fqi "Access-Control-Allow-Origin: $ORIGIN" "$HEADERS"
+          for ORIGIN in "https://brafurries.com.br" "https://www.brafurries.com.br" "https://brafurries--cors-smoke.web.app"; do
+            echo "Checking CORS for $ORIGIN"
+            for ENDPOINT in /auth/login /events/partner /user/me/communities; do
+              METHOD=GET
+              REQUEST_HEADERS=authorization
+              if [[ "$ENDPOINT" == /auth/login ]]; then
+                METHOD=POST
+                REQUEST_HEADERS=content-type
+              fi
+              HTTP_CODE="$(curl -sS --connect-timeout 10 --max-time 20 -D "$HEADERS" -o /dev/null -w '%{http_code}' -X OPTIONS \
+                "$BASE$ENDPOINT" -H "Origin: $ORIGIN" -H "Access-Control-Request-Method: $METHOD" \
+                -H "Access-Control-Request-Headers: $REQUEST_HEADERS")"
+              [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]] || { echo "Preflight $ENDPOINT returned $HTTP_CODE" >&2; exit 1; }
+              tr -d '\r' < "$HEADERS" | grep -Fxi "Access-Control-Allow-Origin: $ORIGIN" >/dev/null || {
+                echo "Missing or mismatched CORS origin for $ENDPOINT" >&2; exit 1;
+              }
+            done
+            # Actual unauthenticated reads must still provide CORS on 401,
+            # so expired sessions can be handled correctly by the browser.
+            HTTP_CODE="$(curl -sS --connect-timeout 10 --max-time 20 -D "$HEADERS" -o /dev/null -w '%{http_code}' \
+              "$BASE/user/me/communities" -H "Origin: $ORIGIN")"
+            [[ "$HTTP_CODE" == 401 ]] || { echo "Expected 401 for protected read, got $HTTP_CODE" >&2; exit 1; }
+            tr -d '\r' < "$HEADERS" | grep -Fxi "Access-Control-Allow-Origin: $ORIGIN" >/dev/null
+          done
 
       - name: Discard staged environment after failure or cancellation
         if: ${{ failure() || cancelled() }}
