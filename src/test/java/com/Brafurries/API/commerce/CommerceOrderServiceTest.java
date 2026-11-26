@@ -51,6 +51,41 @@ class CommerceOrderServiceTest {
     }
 
     @Test
+    void openOrderCannotBecomeReadyWithoutProductionRequest() {
+        doReturn(List.of(Map.of("id",25L,"status","OPEN"))).when(jdbc)
+            .queryForList(contains("FROM commerce_orders WHERE id="),eq(25L));
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->orders.transition(auth,25L,new Transition("READY",null,null))).getStatusCode());
+        verifyNoInteractions(support);
+        verify(jdbc,never()).update(contains("UPDATE commerce_orders"),any(Object[].class));
+    }
+
+    @Test
+    void productionRequestAndReadinessAreSeparateAuditedTransitions() {
+        doReturn(List.of(Map.of("id",25L,"status","OPEN")),List.of(Map.of("id",25L,"status","IN_PRODUCTION")))
+            .when(jdbc).queryForList(contains("FROM commerce_orders WHERE id="),eq(25L));
+        orders.transition(auth,25L,new Transition("IN_PRODUCTION",null,null));
+        orders.transition(auth,25L,new Transition("READY",null,null));
+        verify(jdbc).update(contains("production_requested_at=CURRENT_TIMESTAMP"),eq(7),eq(25L));
+        verify(jdbc).update(contains("status='READY'"),eq(7),eq(25L));
+        verify(support).audit(7,"ORDER",25L,"IN_PRODUCTION");
+        verify(support).audit(7,"ORDER",25L,"READY");
+    }
+
+    @Test
+    void orderListIncludesSnapshotItemsInOneBulkReadWithoutCrossOrderMixing() {
+        doReturn(List.of(Map.of("id",25L),Map.of("id",26L))).when(jdbc)
+            .queryForList(contains("FROM commerce_orders o ORDER BY"));
+        var item=Map.<String,Object>of("orderId",25L,"id",81L,"label","Camiseta","variantLabel","Tamanho: G","quantity",2);
+        doReturn(List.of(item)).when(jdbc)
+            .queryForList(contains("FROM commerce_order_items WHERE order_id IN"),eq(25L),eq(26L));
+        var result=orders.list(auth);
+        assertEquals(List.of(item),result.get(0).get("items"));
+        assertEquals(List.of(),result.get(1).get("items"));
+        verify(jdbc,times(1)).queryForList(contains("FROM commerce_order_items WHERE order_id IN"),eq(25L),eq(26L));
+    }
+
+    @Test
     void cancellationRequiresReceiptReversalFirst() {
         when(jdbc.queryForList(contains("FROM commerce_orders WHERE id="),eq(25L)))
             .thenReturn(List.of(Map.of("id",25L,"status","OPEN",
