@@ -89,7 +89,7 @@ class CommerceVariantServiceTest {
 
     @Test void financePermissionIsRequiredBeforeReadingStatistics() {
         when(authorization.require(auth,PlatformPermission.FINANCE_VIEW)).thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
-        assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,()->service.statistics(auth,10)).getStatusCode());
+        assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,()->service.statistics(auth,10,null,null)).getStatusCode());
         verifyNoInteractions(jdbc,support);
     }
 }
