@@ -23,6 +23,7 @@ class GoogleDriveFolderAccessServiceTest {
     private User user(int id) { User u=new User();u.setId(id);return u; }
     private void scope() {
         when(connection.folderScope()).thenReturn(new GoogleDriveConnectionService.FolderScope("subject","root_folder"));
+        when(connection.folderScope(true)).thenReturn(new GoogleDriveConnectionService.FolderScope("subject","root_folder"));
         when(jdbc.queryForList(contains("SELECT folder_id FROM platform_google_drive_managed_folders"),
             eq(String.class),eq("subject"),eq("root_folder"),eq("child_folder"))).thenReturn(List.of("child_folder"));
         when(authorization.officialCommunityId()).thenReturn(42);
@@ -76,7 +77,7 @@ class GoogleDriveFolderAccessServiceTest {
             eq("subject"),eq("root_folder"),eq("child_folder"),eq(5),eq("EXTERNAL_EDIT"),eq(7));
         verify(jdbc,times(1)).update(contains("INSERT INTO platform_google_drive_folder_access_audit"),
             eq("subject"),eq("root_folder"),eq("child_folder"),eq(7),eq("ROLE"),eq(5),eq("EXTERNAL_EDIT"),eq("GRANT"));
-        verify(connection,times(2)).folderScope();
+        verify(connection,times(2)).folderScope(true);
         verifyNoMoreInteractions(connection);
     }
 
