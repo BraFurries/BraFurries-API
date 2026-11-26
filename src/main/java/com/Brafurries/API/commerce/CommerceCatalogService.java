@@ -192,7 +192,7 @@ public class CommerceCatalogService {
     @Transactional(readOnly = true)
     public List<Map<String,Object>> products(Authentication auth) {
         authorization.require(auth, PlatformPermission.PRODUCTS_MANAGE);
-        return jdbc.queryForList("""
+        var products=jdbc.queryForList("""
             SELECT product.id,product.sku,product.name,product.description,
                    product.estimated_unit_cost AS estimatedUnitCost,
                    product.suggested_price AS suggestedPrice,
@@ -205,6 +205,7 @@ public class CommerceCatalogService {
                 ON supplier.id=product.preferred_supplier_id
              ORDER BY product.id DESC LIMIT 500
             """);
+        return CommerceVariantService.attachChoices(jdbc,products,true);
     }
 
     @Transactional
