@@ -117,6 +117,28 @@ class CommerceCatalogServiceTest {
     }
 
     @Test
+    void mixedLotAllocatesSharedCostsExactlyAcrossQuantities() {
+        var lines=List.of(
+            new ProductionLotLine(1L,1,BigDecimal.ZERO),
+            new ProductionLotLine(2L,1,BigDecimal.ZERO),
+            new ProductionLotLine(3L,1,BigDecimal.ZERO));
+        var shares=CommerceCatalogService.allocateProductionExtra(new BigDecimal("10.00"),lines);
+        assertEquals(List.of(new BigDecimal("3.33"),new BigDecimal("3.34"),new BigDecimal("3.33")),shares);
+        assertEquals(new BigDecimal("10.00"),shares.stream().reduce(BigDecimal.ZERO,BigDecimal::add));
+    }
+
+    @Test
+    void mixedLotRequiresBothPermissionsBeforeAccessingStock() {
+        when(authorization.require(auth,PlatformPermission.SUPPLIERS_MANAGE))
+            .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
+        assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
+            ()->catalog.createProductionLot(auth,new CreateProductionLot(2L,3L,
+                LocalDate.of(2026,11,3),null,BigDecimal.ZERO,
+                List.of(new ProductionLotLine(7L,2,new BigDecimal("3.00")))))).getStatusCode());
+        verifyNoInteractions(jdbc);
+    }
+
+    @Test
     void batchRequiresBothProductAndSupplierAuthorization() {
         when(authorization.require(auth,PlatformPermission.SUPPLIERS_MANAGE))
             .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
