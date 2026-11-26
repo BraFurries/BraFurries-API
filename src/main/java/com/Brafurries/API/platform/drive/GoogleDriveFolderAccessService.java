@@ -90,6 +90,31 @@ public class GoogleDriveFolderAccessService {
             .stream().map(Permission::valueOf).toList();
     }
 
+    // Atomic replacement for one principal, using optimistic comparison of the
+    // previously displayed selection. No partial writes on invalid input.
+    @Transactional
+    public void replace(Authentication auth,String folder,Principal principal,int id,
+            List<Permission> expected,List<Permission> desired) {
+        int owner=authorization.requireOwner(auth).getId();
+        if (principal==null || id<=0 || (principal==Principal.PERSON && id==owner) ||
+            expected==null || desired==null || expected.size()>Permission.values().length ||
+            desired.size()>Permission.values().length || expected.contains(null) || desired.contains(null))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Concessão inválida");
+        jdbc.queryForObject("SELECT id FROM users WHERE id=? FOR UPDATE",Integer.class,owner);
+        var scope=connection.folderScope();
+        requireFolder(scope,folder,true);
+        var current=java.util.Set.copyOf(jdbc.queryForList("SELECT permission_code FROM "+table(principal)+
+            " WHERE "+FOLDER_KEY+" AND "+column(principal)+"=?",String.class,
+            scope.subject(),scope.rootId(),folder,id).stream().map(Permission::valueOf).toList());
+        var next=java.util.Set.copyOf(desired);
+        if (!current.equals(java.util.Set.copyOf(expected)))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"Permissões alteradas. Recarregue a configuração");
+        for (Permission permission:current) if (!next.contains(permission))
+            change(auth,folder,principal,id,permission,false);
+        for (Permission permission:next) if (!current.contains(permission))
+            change(auth,folder,principal,id,permission,true);
+    }
+
     @Transactional
     public void change(Authentication auth,String folder,Principal principal,int id,Permission permission,boolean grant) {
         int owner=authorization.requireOwner(auth).getId();
