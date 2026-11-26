@@ -46,7 +46,7 @@ public class CommerceSalesService {
     }
 
     private record Batch(long id,long productId,int quantity,int soldQuantity,
-                         BigDecimal totalCost,LocalDate producedOn) {}
+                         BigDecimal totalCost,LocalDate producedOn,Long variantId,String variantLabel) {}
     private record Rights(
         long artworkId,int artistId,Long contractId,String method,
         BigDecimal rate,BigDecimal fixedUnit,BigDecimal allocation,
@@ -227,12 +227,13 @@ public class CommerceSalesService {
         for (SaleLine item:lines.values()) {
             long productId=batchProducts.get(item.batchId());
             List<Batch> matched=jdbc.query("""
-                SELECT id,product_id,quantity,sold_quantity,total_cost,produced_on
+                SELECT id,product_id,quantity,sold_quantity,total_cost,produced_on,variant_id,variant_label_snapshot
                   FROM commerce_production_batches WHERE id=? FOR UPDATE
                 """,(rs,index)->new Batch(
                     rs.getLong("id"),rs.getLong("product_id"),rs.getInt("quantity"),
                     rs.getInt("sold_quantity"),rs.getBigDecimal("total_cost"),
-                    rs.getObject("produced_on",LocalDate.class)
+                    rs.getObject("produced_on",LocalDate.class),
+                    rs.getObject("variant_id",Long.class),rs.getString("variant_label_snapshot")
                 ),item.batchId());
             if (matched.isEmpty() || matched.get(0).productId()!=productId) {
                 throw conflict("Lote de produção alterado durante a operação");
@@ -297,10 +298,10 @@ public class CommerceSalesService {
             long itemId=support.insert("""
                 INSERT INTO commerce_sale_items
                     (sale_id,product_id,production_batch_id,quantity,
-                     unit_price_snapshot,line_gross_amount,line_production_cost_snapshot)
-                VALUES (?,?,?,?,?,?,?)
+                     unit_price_snapshot,line_gross_amount,line_production_cost_snapshot,variant_id,variant_label_snapshot)
+                VALUES (?,?,?,?,?,?,?,?,?)
                 """,saleId,line.batch().productId(),line.batch().id(),
-                line.quantity(),line.price(),line.lineGross(),line.lineCost());
+                line.quantity(),line.price(),line.lineGross(),line.lineCost(),line.batch().variantId(),line.batch().variantLabel());
             for (Rights right:line.rights()) {
                 if ("NONE".equals(right.method())) continue;
                 BigDecimal amount=calculateRoyalty(line,right);
@@ -405,10 +406,13 @@ public class CommerceSalesService {
         return jdbc.queryForList("""
             SELECT batch.id AS batchId,
                    batch.product_id AS productId,product.name AS productName,
-                   product.sku,product.suggested_price AS suggestedPrice,
+                   product.sku,COALESCE(v.suggested_price,product.suggested_price) AS suggestedPrice,
+                   batch.variant_id AS variantId,batch.variant_label_snapshot AS variantLabel,
+                   EXISTS(SELECT 1 FROM commerce_product_variants x WHERE x.product_id=product.id) AS variantRequired,
                    batch.quantity-batch.sold_quantity AS availableUnits
               FROM commerce_production_batches batch
               JOIN commerce_products product ON product.id=batch.product_id
+              LEFT JOIN commerce_product_variants v ON v.product_id=batch.product_id AND v.id=batch.variant_id
              WHERE product.active=1 AND batch.sold_quantity<batch.quantity
              ORDER BY product.name,batch.id LIMIT 500
             """);
@@ -447,6 +451,7 @@ public class CommerceSalesService {
         return jdbc.queryForList("""
             SELECT i.id,i.product_id AS productId,p.name AS productName,
                    i.production_batch_id AS batchId,i.quantity,
+                   i.variant_id AS variantId,i.variant_label_snapshot AS variantLabel,
                    i.unit_price_snapshot AS unitPrice,i.line_gross_amount AS lineGross
               FROM commerce_sale_items i
               JOIN commerce_products p ON p.id=i.product_id
