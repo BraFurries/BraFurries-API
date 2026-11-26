@@ -26,11 +26,11 @@ public class GoogleDrivePilotController {
     public GoogleDrivePilotController(
         PlatformAuthorizationService authorization,
         UserSocialIdentityRepository identities,
-        @Value("${app.drive.pilot.enabled:false}") boolean enabled,
-        @Value("${app.drive.pilot.client-id:}") String clientId,
-        @Value("${app.drive.pilot.api-key:}") String apiKey,
-        @Value("${app.drive.pilot.project-number:}") String projectNumber,
-        @Value("${app.drive.pilot.folder-id:}") String folderId
+        @Value("${GOOGLE_DRIVE_ENABLED:false}") boolean enabled,
+        @Value("${GOOGLE_DRIVE_CLIENT_ID:}") String clientId,
+        @Value("${GOOGLE_DRIVE_PICKER_API_KEY:}") String apiKey,
+        @Value("${GOOGLE_DRIVE_PROJECT_NUMBER:}") String projectNumber,
+        @Value("${GOOGLE_DRIVE_ROOT_FOLDER_ID:}") String folderId
     ) {
         this.authorization=authorization;
         this.identities=identities;
