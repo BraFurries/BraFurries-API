@@ -116,8 +116,9 @@ class CommerceVariantServiceTest {
             contains("commerce_product_attribute_values"),eq(10L),eq(21L),eq("G"));
         doReturn(List.of(Map.of("id",32L,"label","M"))).when(jdbc).queryForList(
             contains("commerce_product_attribute_values"),eq(10L),eq(21L),eq("M"));
-        when(support.insert(contains("INSERT INTO commerce_product_variants"),eq(10L),anyString(),eq("Tamanho: G"),isNull(),isNull(),eq(7))).thenReturn(101L);
-        when(support.insert(contains("INSERT INTO commerce_product_variants"),eq(10L),anyString(),eq("Tamanho: M"),isNull(),isNull(),eq(7))).thenReturn(102L);
+        doReturn(List.of()).when(jdbc).queryForList(contains("combination_sha256=?"),eq(Long.class),eq(10L),anyString());
+        doReturn(101L).when(support).insert(contains("INSERT INTO commerce_product_variants"),eq(10L),anyString(),eq("Tamanho: G"),isNull(),isNull(),eq(7));
+        doReturn(102L).when(support).insert(contains("INSERT INTO commerce_product_variants"),eq(10L),anyString(),eq("Tamanho: M"),isNull(),isNull(),eq(7));
         var result=service.createBatch(auth,10,new CommerceVariantService.BatchCreate(List.of(
             new CommerceVariantService.Create(List.of(new CommerceVariantService.Attribute("Tamanho","G")),null,null),
             new CommerceVariantService.Create(List.of(new CommerceVariantService.Attribute("Tamanho","M")),null,null))));
