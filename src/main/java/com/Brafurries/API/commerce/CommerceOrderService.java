@@ -45,8 +45,9 @@ public class CommerceOrderService {
         require(auth);
         // Only sellable product name and suggested price; never supplier costs.
         return jdbc.queryForList("""
-            SELECT id,name,suggested_price AS suggestedPrice
-              FROM commerce_products WHERE active=1 ORDER BY name,id LIMIT 500
+            SELECT p.id,p.name,p.suggested_price AS suggestedPrice,
+                   EXISTS(SELECT 1 FROM commerce_product_variants v WHERE v.product_id=p.id) AS variantRequired
+              FROM commerce_products p WHERE p.active=1 ORDER BY p.name,p.id LIMIT 500
             """);
     }
 
@@ -72,7 +73,8 @@ public class CommerceOrderService {
         requireOrder(orderId,false);
         return jdbc.queryForList("""
             SELECT id,product_id AS productId,item_label AS label,
-                   size_label AS size,quantity,unit_price_snapshot AS unitPrice,
+                   size_label AS size,variant_id AS variantId,variant_label_snapshot AS variantLabel,
+                   quantity,unit_price_snapshot AS unitPrice,
                    line_amount AS lineAmount
               FROM commerce_order_items
              WHERE order_id=? ORDER BY id
@@ -94,7 +96,7 @@ public class CommerceOrderService {
     }
 
     private record ValidatedLine(Long productId,String label,String size,int quantity,
-                                 BigDecimal unitPrice,BigDecimal lineTotal) {}
+                                 BigDecimal unitPrice,BigDecimal lineTotal,Long variantId) {}
 
     @Transactional
     public Created create(Authentication auth,Create input) {
@@ -130,25 +132,22 @@ public class CommerceOrderService {
             BigDecimal amount=money(unit.multiply(BigDecimal.valueOf(line.quantity())),
                 "Total do item");
             total=money(total.add(amount),"Total da encomenda");
-            lines.add(new ValidatedLine(product,label,size,line.quantity(),unit,amount));
+            lines.add(new ValidatedLine(product,label,size,line.quantity(),unit,amount,line.variantId()));
             signature.add(product==null?null:product.toString());
             signature.add(label);signature.add(size);
             signature.add(Integer.toString(line.quantity()));
             signature.add(unit.toPlainString());
+            // Preserve pre-variant UUID fingerprints when no variant was supplied.
+            if(line.variantId()!=null) { signature.add("VARIANT"); signature.add(line.variantId().toString()); }
         }
         String hash=fingerprint(signature);
         var existing=findByRequestKey(key,false);
         if(!existing.isEmpty()) return replay(existing.get(0),hash);
 
-        // An idempotent retry still works when a catalog item is retired.
-        // Validate active catalog products only before the FIRST insertion.
-        for(ValidatedLine line:lines) {
-            if(line.productId()!=null && jdbc.queryForList(
-                "SELECT id FROM commerce_products WHERE id=? AND active=1",
-                Long.class,line.productId()).size()!=1) {
-                throw invalid("Produto do catálogo inválido");
-            }
-        }
+        // Idempotent retries are checked before requiring current catalog availability.
+        Map<Long,String> productNames=lockProducts(lines);
+        List<CommerceVariantService.Selection> selections=new ArrayList<>();
+        for(ValidatedLine line:lines) selections.add(validateSelection(line));
         long id;
         try {
             id=support.insert("""
@@ -165,17 +164,8 @@ public class CommerceOrderService {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                 "Referência da encomenda já registrada ou dados inválidos",ex);
         }
-        // Never swallow item or audit insert errors as an idempotent replay.
-        // Such errors MUST roll back the whole order.
-        for(ValidatedLine line:lines) {
-            jdbc.update("""
-                INSERT INTO commerce_order_items
-                    (order_id,product_id,item_label,size_label,quantity,
-                     unit_price_snapshot,line_amount)
-                VALUES (?,?,?,?,?,?,?)
-                """,id,line.productId(),line.label(),line.size(),line.quantity(),
-                line.unitPrice(),line.lineTotal());
-        }
+        // Never swallow item or audit failures as idempotent replays.
+        for(int i=0;i<lines.size();i++) insertLine(id,lines.get(i),selections.get(i),productNames);
         support.audit(actor,"ORDER",id,"CREATED");
         return new Created(id);
     }
@@ -210,17 +200,16 @@ public class CommerceOrderService {
             String label=text(line.label(),180,"Produto da encomenda",true);
             String size=text(line.size(),64,"Tamanho",false);
             Long product=line.productId();
-            if(product!=null && (product<1 || jdbc.queryForList(
-                 "SELECT id FROM commerce_products WHERE id=? AND active=1",
-                 Long.class,product).size()!=1)) {
-                throw invalid("Produto inativo ou inexistente");
-            }
+            if(product!=null&&product<1) throw invalid("Produto inativo ou inexistente");
             BigDecimal unit=money(line.unitPrice(),"Preço unitário");
             BigDecimal amount=money(unit.multiply(BigDecimal.valueOf(line.quantity())),
                                     "Valor total do item");
             total=money(total.add(amount),"Total da encomenda");
-            lines.add(new ValidatedLine(product,label,size,line.quantity(),unit,amount));
+            lines.add(new ValidatedLine(product,label,size,line.quantity(),unit,amount,line.variantId()));
         }
+        Map<Long,String> productNames=lockProducts(lines);
+        List<CommerceVariantService.Selection> selections=new ArrayList<>();
+        for(ValidatedLine line:lines) selections.add(validateSelection(line));
         try {
             jdbc.update("""
                 UPDATE commerce_orders
@@ -229,20 +218,51 @@ public class CommerceOrderService {
                  WHERE id=? AND status='OPEN'
                 """,buyer,channel,reference,ordered,due,total,notes,actor,orderId);
             jdbc.update("DELETE FROM commerce_order_items WHERE order_id=?",orderId);
-            for(ValidatedLine line:lines) {
-                jdbc.update("""
-                    INSERT INTO commerce_order_items
-                      (order_id,product_id,item_label,size_label,quantity,
-                       unit_price_snapshot,line_amount)
-                    VALUES (?,?,?,?,?,?,?)
-                    """,orderId,line.productId(),line.label(),line.size(),line.quantity(),
-                        line.unitPrice(),line.lineTotal());
-            }
+            for(int i=0;i<lines.size();i++) insertLine(orderId,lines.get(i),selections.get(i),productNames);
         } catch(DataIntegrityViolationException ex) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                 "Referência de encomenda duplicada ou produto em uso inválido",ex);
         }
         support.audit(actor,"ORDER",orderId,"UPDATED");
+    }
+
+    private Map<Long,String> lockProducts(List<ValidatedLine> lines) {
+        Map<Long,String> names=new java.util.TreeMap<>();
+        var ids=new java.util.TreeSet<Long>();
+        for(var line:lines) if(line.productId()!=null) ids.add(line.productId());
+        for(long id:ids) {
+            CommerceVariantService.lockProduct(jdbc,id,true);
+            String name=jdbc.queryForObject("SELECT name FROM commerce_products WHERE id=? FOR UPDATE",String.class,id);
+            names.put(id,name);
+        }
+        return names;
+    }
+
+    private CommerceVariantService.Selection validateSelection(ValidatedLine line) {
+        if(line.productId()!=null&&line.size()!=null)
+            throw invalid("Produtos cadastrados não aceitam variação em texto livre");
+        return CommerceVariantService.selection(jdbc,line.productId(),line.variantId());
+    }
+
+    private void insertLine(long orderId,ValidatedLine line,CommerceVariantService.Selection variant,Map<Long,String> productNames) {
+        String label=line.productId()==null?line.label():productNames.get(line.productId());
+        jdbc.update("""
+            INSERT INTO commerce_order_items
+                (order_id,product_id,item_label,size_label,quantity,unit_price_snapshot,line_amount,
+                 variant_id,variant_label_snapshot)
+            VALUES (?,?,?,?,?,?,?,?,?)
+            """,orderId,line.productId(),label,line.size(),line.quantity(),line.unitPrice(),line.lineTotal(),
+            variant.id(),variant.label());
+    }
+
+    @Transactional(readOnly=true)
+    public List<Map<String,Object>> variantChoices(Authentication auth,long productId) {
+        require(auth);
+        return jdbc.queryForList("""
+            SELECT v.id,v.label,COALESCE(v.suggested_price,p.suggested_price) AS suggestedPrice
+              FROM commerce_product_variants v JOIN commerce_products p ON p.id=v.product_id
+             WHERE v.product_id=? AND v.active=1 AND p.active=1 ORDER BY v.id
+            """,productId);
     }
 
     @Transactional
