@@ -8,6 +8,9 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
+import jakarta.validation.constraints.NotNull;
 import java.util.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
@@ -30,7 +33,7 @@ public class CommerceVariantService {
     public record Attribute(@NotBlank @Size(max=60) String name,@NotBlank @Size(max=60) String value) {}
     public record Create(@Valid @NotEmpty @Size(max=8) List<Attribute> attributes,
                          BigDecimal suggestedPrice,BigDecimal estimatedUnitCost) {}
-    public record Update(boolean active,BigDecimal suggestedPrice,BigDecimal estimatedUnitCost) {}
+    public record Update(@NotNull Boolean active,BigDecimal suggestedPrice,BigDecimal estimatedUnitCost) {}
     public record Selection(Long id,String label) {}
 
     @Transactional
@@ -92,7 +95,7 @@ public class CommerceVariantService {
     @Transactional
     public void update(Authentication auth,long productId,long variantId,Update input) {
         int actor=authorization.require(auth,PlatformPermission.PRODUCTS_MANAGE).user().getId();
-        if(input==null) throw invalid("Dados da variação obrigatórios");
+        if(input==null||input.active()==null) throw invalid("Dados da variação obrigatórios");
         lockProduct(jdbc,productId,false);
         if(jdbc.queryForList("SELECT id FROM commerce_product_variants WHERE product_id=? AND id=? FOR UPDATE",Long.class,productId,variantId).isEmpty())
             throw missing("Variação não encontrada");
@@ -181,12 +184,18 @@ public class CommerceVariantService {
 
     /** Finance view only: orders and confirmed sales are separate populations. */
     @Transactional(readOnly=true)
-    public List<Map<String,Object>> statistics(Authentication auth,long productId) {
+    public List<Map<String,Object>> statistics(Authentication auth,long productId,LocalDate from,LocalDate to) {
         authorization.require(auth,PlatformPermission.FINANCE_VIEW);
+        LocalDate end=to==null?today():to;
+        LocalDate start=from==null?end.minusDays(29):from;
+        if(start.getYear()<2000||end.isAfter(today())||start.isAfter(end))
+            throw invalid("Período inválido");
+        long days=ChronoUnit.DAYS.between(start,end)+1;
         return jdbc.queryForList("""
             SELECT v.id AS variantId,v.label,v.active,
                 COALESCE(o.units,0) AS orderedUnits,COALESCE(s.units,0) AS soldUnits,
                 COALESCE(b.available,0) AS availableUnits,
+                ROUND(COALESCE(s.units,0)/?,2) AS soldPerDay,
                 COALESCE(s.gross,0) AS grossAmount,COALESCE(s.cost,0) AS productionCost
               FROM (
                 SELECT id,label,active FROM commerce_product_variants WHERE product_id=?
@@ -195,19 +204,19 @@ public class CommerceVariantService {
               LEFT JOIN (
                 SELECT i.variant_id,SUM(i.quantity) units FROM commerce_order_items i
                  JOIN commerce_orders o ON o.id=i.order_id
-                 WHERE i.product_id=? AND o.status<>'CANCELLED' GROUP BY i.variant_id
+                 WHERE i.product_id=? AND o.status<>'CANCELLED' AND o.ordered_on BETWEEN ? AND ? GROUP BY i.variant_id
               ) o ON o.variant_id <=> v.id
               LEFT JOIN (
                 SELECT i.variant_id,SUM(i.quantity) units,SUM(i.line_gross_amount) gross,
                        SUM(i.line_production_cost_snapshot) cost
                   FROM commerce_sale_items i JOIN commerce_sales s ON s.id=i.sale_id
-                 WHERE i.product_id=? AND s.status='CONFIRMED' GROUP BY i.variant_id
+                 WHERE i.product_id=? AND s.status='CONFIRMED' AND s.sold_on BETWEEN ? AND ? GROUP BY i.variant_id
               ) s ON s.variant_id <=> v.id
               LEFT JOIN (
                 SELECT variant_id,SUM(quantity-sold_quantity) available
                   FROM commerce_production_batches WHERE product_id=? GROUP BY variant_id
               ) b ON b.variant_id <=> v.id
              ORDER BY soldUnits DESC,v.id
-            """,productId,productId,productId,productId);
+            """,days,productId,productId,start,end,productId,start,end,productId);
     }
 }
