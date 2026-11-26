@@ -44,11 +44,12 @@ public class CommerceOrderService {
     public List<Map<String,Object>> productChoices(Authentication auth) {
         require(auth);
         // Only sellable product name and suggested price; never supplier costs.
-        return jdbc.queryForList("""
+        var products=jdbc.queryForList("""
             SELECT p.id,p.name,p.suggested_price AS suggestedPrice,
                    EXISTS(SELECT 1 FROM commerce_product_variants v WHERE v.product_id=p.id) AS variantRequired
               FROM commerce_products p WHERE p.active=1 ORDER BY p.name,p.id LIMIT 500
             """);
+        return CommerceVariantService.attachChoices(jdbc,products,false);
     }
 
     @Transactional(readOnly=true)
@@ -119,6 +120,8 @@ public class CommerceOrderService {
         signature.add(reference);
         signature.add(due==null?null:due.toString());
         signature.add(notes);
+        boolean hasVariants=input.items().stream().anyMatch(line->line!=null&&line.variantId()!=null);
+        if(hasVariants) signature.add("VARIANTS_V1");
         for(Line line:input.items()) {
             if(line==null||line.quantity()==null||line.quantity()<1||line.quantity()>100000)
                 throw invalid("Quantidade inválida");
@@ -138,7 +141,7 @@ public class CommerceOrderService {
             signature.add(Integer.toString(line.quantity()));
             signature.add(unit.toPlainString());
             // Preserve pre-variant UUID fingerprints when no variant was supplied.
-            if(line.variantId()!=null) { signature.add("VARIANT"); signature.add(line.variantId().toString()); }
+            if(hasVariants) signature.add(line.variantId()==null?null:line.variantId().toString());
         }
         String hash=fingerprint(signature);
         var existing=findByRequestKey(key,false);
