@@ -98,7 +98,7 @@ public class GoogleDriveFolderAccessService {
         int owner=authorization.requireOwner(auth).getId();
         if (principal==null || id<=0 || (principal==Principal.PERSON && id==owner) ||
             expected==null || desired==null || expected.size()>Permission.values().length ||
-            desired.size()>Permission.values().length || expected.contains(null) || desired.contains(null))
+            desired.size()>Permission.values().length || expected.stream().anyMatch(java.util.Objects::isNull) || desired.stream().anyMatch(java.util.Objects::isNull))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Concessão inválida");
         jdbc.queryForObject("SELECT id FROM users WHERE id=? FOR UPDATE",Integer.class,owner);
         var scope=connection.folderScope();
