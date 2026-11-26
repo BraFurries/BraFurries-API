@@ -128,6 +128,21 @@ class CommerceCatalogServiceTest {
     }
 
     @Test
+    void mixedLotRejectsDuplicateVariantsBeforeCreatingAnyRows() {
+        doReturn(List.of(2L)).when(jdbc).queryForList(
+            eq("SELECT id FROM commerce_products WHERE id=? AND active=1 FOR UPDATE"),eq(Long.class),eq(2L));
+        when(jdbc.queryForObject("SELECT COUNT(*) FROM commerce_suppliers WHERE id=? AND active=1",Integer.class,3L)).thenReturn(1);
+        doReturn(List.of(Map.of("label","Tamanho: G"))).when(jdbc).queryForList(
+            eq("SELECT label FROM commerce_product_variants WHERE product_id=? AND id=? AND active=1 FOR UPDATE"),eq(2L),eq(7L));
+        var line=new ProductionLotLine(7L,2,new BigDecimal("3.00"));
+        var input=new CreateProductionLot(2L,3L,LocalDate.of(2026,11,3),null,BigDecimal.ZERO,List.of(line,line));
+        assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
+            ()->catalog.createProductionLot(auth,input)).getStatusCode());
+        verify(jdbc,never()).update(any(org.springframework.jdbc.core.PreparedStatementCreator.class),
+            any(org.springframework.jdbc.support.KeyHolder.class));
+    }
+
+    @Test
     void mixedLotRequiresBothPermissionsBeforeAccessingStock() {
         when(authorization.require(auth,PlatformPermission.SUPPLIERS_MANAGE))
             .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
