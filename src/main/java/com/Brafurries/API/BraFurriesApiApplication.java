@@ -16,7 +16,11 @@ public class BraFurriesApiApplication {
 
 	public static void main(String[] args) {
 		loadDotenvIntoSystemProperties();
-		SpringApplication.run(BraFurriesApiApplication.class, args);
+		var startup = StartupDiagnostics.create();
+		var application = new SpringApplication(BraFurriesApiApplication.class);
+		application.setApplicationStartup(startup);
+		application.run(args);
+		StartupDiagnostics.report(startup);
 	}
 
 	private static void loadDotenvIntoSystemProperties() {
