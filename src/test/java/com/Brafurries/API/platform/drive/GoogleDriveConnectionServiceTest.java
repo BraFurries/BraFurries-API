@@ -119,4 +119,66 @@ class GoogleDriveConnectionServiceTest {
         verify(google).token(argThat(form->"fixture-verifier".equals(form.get("code_verifier"))
             && "https://api.example.invalid/user/me/platform-drive/oauth/callback".equals(form.get("redirect_uri"))));
     }
+
+    @Test void rootPickerDoesNotExposeCredentialsToNonOwner() {
+        when(authz.requireOwner(auth)).thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
+        assertEquals(HttpStatus.FORBIDDEN,
+            assertThrows(ResponseStatusException.class,()->service(true).rootPickerIdentity(auth)).getStatusCode());
+        verifyNoInteractions(jdbc,google);
+    }
+
+    @Test void rootPickerRequiresMatchingConnection() {
+        when(jdbc.query(contains("SELECT google_subject"),
+            ArgumentMatchers.<RowMapper<GoogleDriveConnectionService.Connection>>any())).thenReturn(List.of());
+        assertEquals(HttpStatus.CONFLICT,
+            assertThrows(ResponseStatusException.class,()->service(true).rootPickerIdentity(auth)).getStatusCode());
+        verifyNoInteractions(google);
+    }
+
+    @Test void rootPickerReturnsStoredInstitutionalSubjectWithoutRefreshingToken() {
+        connected();
+        var identity=service(true).rootPickerIdentity(auth);
+        assertEquals("123",identity.googleSubject());
+        assertEquals("institution@example.invalid",identity.googleEmail());
+        assertEquals("fixture_folder",identity.folderId());
+        verifyNoInteractions(google);
+    }
+
+    private void connected() {
+        when(jdbc.query(contains("SELECT google_subject"),
+            ArgumentMatchers.<RowMapper<GoogleDriveConnectionService.Connection>>any())).thenReturn(List.of(
+            new GoogleDriveConnectionService.Connection("123","institution@example.invalid",
+                "pilot.apps.googleusercontent.com",cipher.encrypt("fixture-refresh","drive:institutional-refresh:v1"))));
+    }
+
+    @Test void rootMetadataDistinguishesOwnershipAndShareCapability() throws Exception {
+        var root=(com.fasterxml.jackson.databind.node.ObjectNode)json.readTree("""
+            {"id":"fixture_folder","mimeType":"application/vnd.google-apps.folder",
+             "trashed":false,"ownedByMe":true,"capabilities":{"canShare":true}}
+            """);
+        assertEquals("ACCESSIBLE",GoogleDriveConnectionService.classifyRoot(root,"fixture_folder").status());
+        root.put("ownedByMe",false);
+        assertEquals("NOT_OWNED",GoogleDriveConnectionService.classifyRoot(root,"fixture_folder").status());
+        root.put("ownedByMe",true);
+        ((com.fasterxml.jackson.databind.node.ObjectNode)root.get("capabilities")).put("canShare",false);
+        assertEquals("CANNOT_SHARE",GoogleDriveConnectionService.classifyRoot(root,"fixture_folder").status());
+        root.put("trashed",true);
+        assertEquals("TRASHED",GoogleDriveConnectionService.classifyRoot(root,"fixture_folder").status());
+        root.put("mimeType","text/plain");
+        assertEquals("NOT_FOLDER",GoogleDriveConnectionService.classifyRoot(root,"fixture_folder").status());
+        assertEquals("UNAVAILABLE",GoogleDriveConnectionService.classifyRoot(root,"other_folder").status());
+    }
+
+    @Test void rootCheckUsesFreshServerTokenAndDistinguishesProviderErrors() throws Exception {
+        connected();
+        when(google.token(anyMap())).thenReturn(json.readTree("{\"access_token\":\"fixture-access\"}"));
+        when(google.root("fixture-access","fixture_folder"))
+            .thenThrow(new GoogleDriveOAuthClient.ProviderFailure(404))
+            .thenThrow(new GoogleDriveOAuthClient.ProviderFailure(403))
+            .thenThrow(new GoogleDriveOAuthClient.ProviderFailure(401));
+        assertEquals("NOT_AUTHORIZED",service(true).checkRoot(auth).status());
+        assertEquals("ACCESS_DENIED",service(true).checkRoot(auth).status());
+        assertEquals("RECONNECT_REQUIRED",service(true).checkRoot(auth).status());
+        verify(google,times(3)).token(argThat(form->"refresh_token".equals(form.get("grant_type"))));
+    }
 }
