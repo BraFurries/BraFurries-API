@@ -79,4 +79,15 @@ class GoogleDriveFolderAccessServiceTest {
         verify(connection,times(2)).folderScope();
         verifyNoMoreInteractions(connection);
     }
+
+    @Test void staleReplacementDoesNotOverwriteConcurrentGrant() {
+        scope();
+        when(authorization.requireOwner(auth)).thenReturn(user(7));
+        when(jdbc.queryForList(contains("SELECT permission_code FROM platform_google_drive_role_grants"),
+            eq(String.class),eq("subject"),eq("root_folder"),eq("child_folder"),eq(5)))
+            .thenReturn(List.of("VIEW","DOWNLOAD"));
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->service.replace(auth,"child_folder",ROLE,5,List.of(VIEW),List.of(VIEW,UPLOAD))).getStatusCode());
+        verify(jdbc,never()).update(anyString(),any(Object[].class));
+    }
 }
