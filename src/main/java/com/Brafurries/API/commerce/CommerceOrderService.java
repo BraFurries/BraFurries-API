@@ -55,17 +55,33 @@ public class CommerceOrderService {
     @Transactional(readOnly=true)
     public List<Map<String,Object>> list(Authentication auth) {
         require(auth);
-        return jdbc.queryForList("""
+        var orders=jdbc.queryForList("""
             SELECT o.id,o.buyer_label AS buyerLabel,o.channel,
                    o.external_reference AS externalReference,
                    o.ordered_on AS orderedOn,o.expected_delivery_on AS expectedDeliveryOn,
                    o.status,o.total_amount AS totalAmount,o.notes,
-                   o.created_at AS createdAt,o.ready_at AS readyAt,
+                   o.created_at AS createdAt,o.production_requested_at AS productionRequestedAt,o.ready_at AS readyAt,
                    o.delivered_on AS deliveredOn,o.cancellation_reason AS cancellationReason,
                    (SELECT COALESCE(SUM(p.amount),0)
                       FROM commerce_order_payment_events p WHERE p.order_id=o.id) AS paidAmount
               FROM commerce_orders o ORDER BY o.id DESC LIMIT 500
             """);
+        if(orders.isEmpty()) return orders;
+        Object[] ids=orders.stream().map(o->((Number)o.get("id")).longValue()).toArray();
+        String placeholders=String.join(",",java.util.Collections.nCopies(ids.length,"?"));
+        var items=jdbc.queryForList("""
+            SELECT order_id AS orderId,id,product_id AS productId,item_label AS label,
+                   size_label AS size,variant_id AS variantId,variant_label_snapshot AS variantLabel,
+                   quantity,unit_price_snapshot AS unitPrice,line_amount AS lineAmount
+              FROM commerce_order_items WHERE order_id IN (
+            """+placeholders+") ORDER BY order_id,id",ids);
+        Map<Long,List<Map<String,Object>>> grouped=new java.util.HashMap<>();
+        for(var item:items) grouped.computeIfAbsent(((Number)item.get("orderId")).longValue(),key->new java.util.ArrayList<>()).add(item);
+        return orders.stream().map(order->{
+            Map<String,Object> copy=new java.util.LinkedHashMap<>(order);
+            copy.put("items",grouped.getOrDefault(((Number)order.get("id")).longValue(),List.of()));
+            return copy;
+        }).toList();
     }
 
     @Transactional(readOnly=true)
@@ -305,7 +321,12 @@ public class CommerceOrderService {
         Map<String,Object> order=requireOrder(orderId,true);
         String current=(String)order.get("status");
         String next=input.status();
-        if("READY".equals(next)&&"OPEN".equals(current)) {
+        if("IN_PRODUCTION".equals(next)&&"OPEN".equals(current)) {
+            jdbc.update("""
+                UPDATE commerce_orders SET status='IN_PRODUCTION',production_requested_at=CURRENT_TIMESTAMP(6),
+                    updated_by_user_id=? WHERE id=?
+                """,actor,orderId);
+        } else if("READY".equals(next)&&"IN_PRODUCTION".equals(current)) {
             jdbc.update("""
                 UPDATE commerce_orders SET status='READY',ready_at=CURRENT_TIMESTAMP(6),
                     updated_by_user_id=? WHERE id=?
@@ -320,7 +341,7 @@ public class CommerceOrderService {
                 UPDATE commerce_orders SET status='DELIVERED',delivered_on=?,
                     updated_by_user_id=? WHERE id=?
                 """,delivery,actor,orderId);
-        } else if("CANCELLED".equals(next)&&Set.of("OPEN","READY").contains(current)) {
+        } else if("CANCELLED".equals(next)&&Set.of("OPEN","IN_PRODUCTION","READY").contains(current)) {
             String reason=text(input.reason(),500,"Justificativa de cancelamento",true);
             if(paidAmount(orderId).signum()>0) {
                 throw conflict("Estorne os recebimentos da encomenda antes do cancelamento");
