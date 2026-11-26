@@ -52,7 +52,14 @@ class CommerceProductionBatchCorrectionServiceTest {
                 new BigDecimal("5.00"),LocalDate.of(2026,11,2),reference),
             "Correção de digitação");
     }
+    void lockBatchProduct() {
+        doReturn(List.of(2L)).when(jdbc).queryForList(eq("SELECT product_id FROM commerce_production_batches WHERE id=?"),
+            eq(Long.class),eq(5L));
+        doReturn(List.of(2L)).when(jdbc).queryForList(eq("SELECT id FROM commerce_products WHERE id=? FOR UPDATE"),
+            eq(Long.class),eq(2L));
+    }
     void setupBatch() {
+        lockBatchProduct();
         when(jdbc.queryForList(contains("FROM commerce_production_batches WHERE id=? FOR UPDATE"),
             eq(5L))).thenReturn(List.of(row()));
     }
@@ -78,7 +85,7 @@ class CommerceProductionBatchCorrectionServiceTest {
     }
 
     @Test void nonzeroSoldCounterBlocksEconomicCorrectionEvenIfSaleItemsAreMissing() {
-        grant();
+        grant();lockBatchProduct();
         Map<String,Object> batch=new java.util.HashMap<>(row());
         batch.put("soldQuantity",1);
         when(jdbc.queryForList(contains("FROM commerce_production_batches WHERE id=? FOR UPDATE"),
@@ -118,7 +125,18 @@ class CommerceProductionBatchCorrectionServiceTest {
         verify(jdbc).update(contains("UPDATE commerce_production_batches"),
             eq(2L),eq(3L),eq(12),eq(new BigDecimal("20.00")),
             eq(new BigDecimal("5.00")),eq(new BigDecimal("245.00")),
-            eq(LocalDate.of(2026,11,2)),eq("L-2"),eq(5L));
+            eq(LocalDate.of(2026,11,2)),eq("L-2"),isNull(),isNull(),eq(5L));
+    }
+
+    @Test void cannotChangeVariantAfterAnySaleEvenWhenStockWasRestored() {
+        grant();setupBatch();
+        when(jdbc.queryForList(contains("FROM commerce_sale_items"),eq(Long.class),eq(5L))).thenReturn(List.of(100L));
+        var correction=new CommerceProductionBatchCorrectionService.Correction(
+            new CreateProductionBatch(2L,3L,10,new BigDecimal("20.00"),new BigDecimal("5.00"),
+                LocalDate.of(2026,11,2),"L-1",77L),"Classificação de tamanho");
+        assertEquals(HttpStatus.CONFLICT,assertThrows(ResponseStatusException.class,
+            ()->service.correct(auth,5L,correction)).getStatusCode());
+        verify(jdbc,never()).update(contains("UPDATE commerce_production_batches"),any(Object[].class));
     }
 
     @Test void noOpDoesNotWriteAnAuditEntry() {
