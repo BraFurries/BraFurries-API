@@ -27,6 +27,13 @@ public class CommerceVariantController {
         return variants.create(auth,productId,input);
     }
 
+    @PostMapping("/batch")
+    @ResponseStatus(HttpStatus.CREATED)
+    public CommerceVariantService.BatchCreated createBatch(Authentication auth,@PathVariable long productId,
+        @Valid @RequestBody CommerceVariantService.BatchCreate input) {
+        return variants.createBatch(auth,productId,input);
+    }
+
     @PutMapping("/{variantId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void update(Authentication auth,@PathVariable long productId,@PathVariable long variantId,
