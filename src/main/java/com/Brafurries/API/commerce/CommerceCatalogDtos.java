@@ -78,5 +78,21 @@ public final class CommerceCatalogDtos {
         }
     }
 
+    public record ProductionLotLine(
+        @NotNull @Min(1) Long variantId,
+        @NotNull @Min(1) @Max(10000000) Integer quantity,
+        @NotNull @DecimalMin("0.0") BigDecimal unitCost
+    ) {}
+    public record CreateProductionLot(
+        @NotNull @Min(1) Long productId,
+        @NotNull @Min(1) Long supplierId,
+        @NotNull LocalDate producedOn,
+        @Size(max=160) String reference,
+        @NotNull @DecimalMin("0.0") BigDecimal additionalCost,
+        @jakarta.validation.constraints.NotEmpty @Size(max=100)
+        java.util.List<@NotNull @jakarta.validation.Valid ProductionLotLine> lines
+    ) {}
+    public record CreatedProductionLot(long lotGroupId,java.util.List<Long> batchIds) {}
+
     public record Created(long id) {}
 }
