@@ -241,6 +241,22 @@ class GoogleDriveOAuthClient {
             .method("PATCH",HttpRequest.BodyPublishers.ofString(metadata.toString())));
     }
 
+    JsonNode revisionFile(String token,String id) {
+        if(!GoogleDriveConnectionService.validFolderId(id))throw new IllegalArgumentException("Invalid resource");
+        return send(HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files/"+id+
+            "?fields=id,name,mimeType,parents,trashed,ownedByMe,shared,version,size,sha256Checksum,headRevisionId,capabilities(canDownload,canEdit,canModifyContent)"))
+            .header("Authorization","Bearer "+token).GET());
+    }
+
+    JsonNode revisions(String token,String id,String pageToken) {
+        if(!GoogleDriveConnectionService.validFolderId(id))throw new IllegalArgumentException("Invalid resource");
+        var params=new java.util.HashMap<String,String>();
+        params.put("pageSize","100");params.put("fields","nextPageToken,revisions(id,modifiedTime,size,mimeType,keepForever)");
+        if(pageToken!=null&&!pageToken.isBlank())params.put("pageToken",pageToken);
+        return send(HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files/"+id+"/revisions?"+form(params)))
+            .header("Authorization","Bearer "+token).GET());
+    }
+
     private JsonNode send(HttpRequest.Builder builder) {
         try {
             var response = http.send(builder.timeout(Duration.ofSeconds(10)).build(),
