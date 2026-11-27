@@ -308,7 +308,9 @@ public class GoogleDriveConnectionService {
             SELECT DISTINCT staging_folder_id FROM platform_google_drive_upload_sessions WHERE google_subject=?
             UNION SELECT provider_file_id FROM platform_google_drive_upload_sessions
                 WHERE google_subject=? AND status<>'PUBLISHED'
-            """,String.class,scope.subject(),scope.subject()));
+            UNION SELECT provider_folder_id FROM platform_google_drive_folder_operations
+                WHERE google_subject=? AND status<>'CREATED'
+            """,String.class,scope.subject(),scope.subject(),scope.subject()));
         if (validFolderId(configuredStaging.trim())) hidden.add(configuredStaging.trim());
         return Set.copyOf(hidden);
     }
