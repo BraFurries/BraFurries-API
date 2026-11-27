@@ -49,6 +49,29 @@ class GoogleDriveOAuthClient {
             .header("Authorization", "Bearer " + token).GET());
     }
 
+    static String searchQuery(String term) {
+        String escaped=term.replace("\\","\\\\").replace("'","\\'");
+        return "trashed = false and 'me' in owners and mimeType != 'application/vnd.google-apps.shortcut' and (name contains '"+escaped+"' or fullText contains '"+escaped+"')";
+    }
+
+    JsonNode searchNames(String token,String term,String pageToken) {
+        var params=new java.util.HashMap<String,String>();
+        params.put("q",searchQuery(term));
+        params.put("corpora","user");params.put("spaces","drive");params.put("pageSize","10");
+        params.put("orderBy","name");
+        params.put("fields","nextPageToken,incompleteSearch,files(id,name,mimeType,parents,trashed,ownedByMe,size,modifiedTime,version)");
+        if(pageToken!=null)params.put("pageToken",pageToken);
+        return send(HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files?"+form(params)))
+            .header("Authorization","Bearer "+token).GET());
+    }
+
+    JsonNode searchMetadata(String token,String id) {
+        if(!GoogleDriveConnectionService.validFolderId(id))throw new IllegalArgumentException("Invalid resource");
+        return send(HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files/"+id+
+            "?fields=id,name,mimeType,parents,trashed,ownedByMe,size,modifiedTime,version"))
+            .header("Authorization","Bearer "+token).GET());
+    }
+
     JsonNode children(String token,String parent,String pageToken) {
         if (!GoogleDriveConnectionService.validFolderId(parent)) throw new IllegalArgumentException("Invalid parent");
         var params=new java.util.HashMap<String,String>();
