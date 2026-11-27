@@ -27,7 +27,9 @@ public class GoogleDriveBrowserService {
     public record Page(List<Entry> entries,String nextPageToken,boolean canDownload) {}
 
     public List<Mount> mounts(Authentication auth) {
-        return acl.browsePolicy(auth).visible().entrySet().stream()
+        var policy=acl.browsePolicy(auth);
+        var hidden=connection.hiddenUploadResources(policy.scope());
+        return policy.visible().entrySet().stream().filter(e->!hidden.contains(e.getKey()))
             .map(e->new Mount(e.getKey(),e.getValue())).toList();
     }
 
@@ -55,12 +57,14 @@ public class GoogleDriveBrowserService {
             requireAnchor(after,anchor);
             for (String id:path)
                 if (after.registered().contains(id) && !after.canView(id)) throw inaccessible();
+            var hidden=connection.hiddenUploadResources(after.scope());
+            if (path.stream().anyMatch(hidden::contains)) throw inaccessible();
             List<Entry> entries=new ArrayList<>();
             for (JsonNode file:response.path("files")) {
                 String id=file.path("id").asText("");
                 String type=file.path("mimeType").asText("");
                 if (!GoogleDriveConnectionService.validFolderId(id) || id.equals(folder) ||
-                    id.equals(after.scope().rootId()) || type.isBlank() || SHORTCUT.equals(type) ||
+                    id.equals(after.scope().rootId()) || hidden.contains(id) || type.isBlank() || SHORTCUT.equals(type) ||
                     !file.path("name").isTextual() || !isOwnedLive(file) ||
                     !folder.equals(singleParent(file))) continue;
                 if (after.registered().contains(id) && !after.canView(id)) continue;
@@ -82,12 +86,13 @@ public class GoogleDriveBrowserService {
     // An independently managed folder is a new boundary, not an inherited grant.
     List<String> verifyPath(String access,GoogleDriveFolderAccessService.BrowsePolicy policy,
             String anchor,String folder) {
+        var hidden=connection.hiddenUploadResources(policy.scope());
         var visited=new HashSet<String>();
         var belowAnchor=new ArrayList<String>();
         String current=folder;
         boolean found=false;
         for (int depth=0;depth<32;depth++) {
-            if (!visited.add(current)) break;
+            if (hidden.contains(current) || !visited.add(current)) break;
             if (!found && policy.registered().contains(current) && !policy.canView(current)) throw inaccessible();
             JsonNode node=google.root(access,current);
             if (node==null || !current.equals(node.path("id").asText()) ||
