@@ -90,6 +90,58 @@ public class GoogleDriveFolderAccessService {
             .stream().map(Permission::valueOf).toList();
     }
 
+    private java.util.Map<String,List<Permission>> effectiveByFolder(
+            PlatformAuthorizationService.Actor actor,GoogleDriveConnectionService.FolderScope scope) {
+        var result=new java.util.HashMap<String,List<Permission>>();
+        jdbc.query("""
+            SELECT DISTINCT p.folder_id,p.permission_code
+            FROM platform_google_drive_person_grants p
+            JOIN platform_authorized_users approved ON approved.user_id=p.user_id
+            JOIN platform_google_drive_role_grants g ON g.google_subject=p.google_subject
+                AND g.root_folder_id=p.root_folder_id AND g.folder_id=p.folder_id
+                AND g.permission_code=p.permission_code
+            JOIN community_team_roles role ON role.id=g.role_id AND role.community_id=? AND role.active=1
+            JOIN community_team_role_assignments a ON a.role_id=role.id
+                AND a.community_id=role.community_id AND a.user_id=p.user_id
+            JOIN user_community_status m ON m.community_id=role.community_id AND m.user_id=p.user_id
+            WHERE p.google_subject=? AND p.root_folder_id=? AND p.user_id=?
+                AND m.is_present=1 AND COALESCE(m.banned,0)=0
+                AND (m.approval_required=0 OR m.approved=1)
+            ORDER BY p.folder_id,p.permission_code
+            """,rs->{
+            result.computeIfAbsent(rs.getString(1),ignored->new java.util.ArrayList<>())
+                .add(Permission.valueOf(rs.getString(2)));
+        },authorization.officialCommunityId(),scope.subject(),scope.rootId(),actor.user().getId());
+        return result;
+    }
+
+    record BrowsePolicy(GoogleDriveConnectionService.FolderScope scope,
+                        java.util.Set<String> registered,
+                        java.util.Map<String,String> visible) {
+        boolean canView(String folder) { return visible.containsKey(folder); }
+    }
+
+    @Transactional(readOnly=true)
+    public BrowsePolicy browsePolicy(Authentication auth) {
+        var actor=authorization.resolve(auth);
+        if (!actor.access().enabled()) throw new ResponseStatusException(HttpStatus.FORBIDDEN,"Acesso indisponível");
+        var scope=connection.folderScope();
+        var permissions=actor.access().owner()?java.util.Map.<String,List<Permission>>of():effectiveByFolder(actor,scope);
+        var registered=new java.util.HashSet<String>();
+        var visible=new java.util.LinkedHashMap<String,String>();
+        jdbc.query("""
+            SELECT folder_id,folder_name FROM platform_google_drive_managed_folders
+            WHERE google_subject=? AND root_folder_id=? ORDER BY folder_name,folder_id
+            """,rs->{
+            String id=rs.getString(1);
+            registered.add(id);
+            if (actor.access().owner() || permissions.getOrDefault(id,List.of()).contains(Permission.VIEW))
+                visible.put(id,rs.getString(2));
+        },scope.subject(),scope.rootId());
+        return new BrowsePolicy(scope,java.util.Set.copyOf(registered),
+            java.util.Collections.unmodifiableMap(visible));
+    }
+
     // Atomic replacement for one principal, using optimistic comparison of the
     // previously displayed selection. No partial writes on invalid input.
     @Transactional
