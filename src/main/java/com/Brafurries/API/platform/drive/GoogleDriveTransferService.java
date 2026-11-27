@@ -82,7 +82,7 @@ public class GoogleDriveTransferService {
                     !destination.equals(singleParent(copy))||!isOwnedLive(copy)||!copy.path("shared").isBoolean()||copy.path("shared").asBoolean())throw conflict();
                 if(!meta.equals(verify(google.transferMetadata(token,file),file,parent,action)))throw conflict();
             }
-            var after=paths(auth,actor,r.scope(),token,sourceAnchor,parent,file,destinationAnchor,destination,action,false);
+            var after=paths(auth,actor,r.scope(),token,sourceAnchor,parent,file,destinationAnchor,destination,action,true);
             if(!current.equals(after))throw conflict();
             checkFolderMove(acl.browsePolicy(auth),after,sourceAnchor,destinationAnchor,file,meta,action);
             local(auth,actor,r.scope(),sourceAnchor,parent,file,destinationAnchor,destination,after,action,true);
