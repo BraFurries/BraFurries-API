@@ -108,4 +108,12 @@ class GoogleDriveUploadPublicationServiceTest {
         verify(ledger,never()).claimPublication(r);
         verify(google,never()).moveUploadedFile(anyString(),anyString(),anyString(),anyString());
     }
+
+    @Test void replacementSessionCannotBePublishedAsOrdinaryFile() {
+        setup();
+        when(ledger.isReplacement(r.id())).thenReturn(true);
+        assertThrows(ResponseStatusException.class,()->service.publish(auth,r.id()));
+        verifyNoInteractions(google,connection,acl);
+        verify(ledger,never()).claimPublication(any());
+    }
 }
