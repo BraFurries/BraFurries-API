@@ -51,10 +51,9 @@ class GoogleDriveReplacementServiceTest {
         when(ledger.intent(r)).thenReturn(intent);
         when(connection.browserAccessToken(scope)).thenReturn("access");
         var original=target("12","rev_1",oldHash,"10");
-        var pinned=target("13","rev_1",oldHash,"10");
         var applied=target("14","rev_2",newHash,"3");
         when(revisions.inspect(auth,scope,"access",r.anchor(),r.destination(),intent.target(),true))
-            .thenReturn(original,original,pinned,pinned,pinned,applied,applied);
+            .thenReturn(original,original,original,original,original,applied,applied);
         when(google.uploadFolderMetadata("access","root")).thenReturn(folder("my_drive",null));
         when(google.uploadFolderMetadata("access","root_folder")).thenReturn(folder("root_folder","my_drive"));
         when(google.uploadFolderMetadata("access",r.staging())).thenReturn(folder(r.staging(),"my_drive"));
@@ -67,19 +66,16 @@ class GoogleDriveReplacementServiceTest {
         staged.putArray("parents").add(r.staging());staged.putObject("appProperties").put("brafurriesUploadSession",session);
         when(google.uploadedFile("access",r.providerId())).thenReturn(staged);
         when(google.revisionFile("access",r.providerId())).thenReturn(staged);
-        var pin=json.createObjectNode().put("id","rev_1").put("keepForever",true);
-        when(google.revision("access",intent.target(),"rev_1")).thenReturn(json.createObjectNode().put("id","rev_1").put("keepForever",false),pin,pin,pin);
-        when(google.preserveRevision("access",intent.target(),"rev_1")).thenReturn(pin);
         when(google.beginReplacementUpdate("access",intent.target(),r.mime(),3)).thenReturn(uri);
         when(google.openMedia("access",r.providerId(),3)).thenReturn(new GoogleDriveOAuthClient.MediaStream(
             mock(HttpURLConnection.class),new ByteArrayInputStream(bytes)));
     }
-    @Test void preservesOriginalAndVerifiesNewHeadBeforeCompleting(){
+    @Test void usesGoogleRetentionAndVerifiesNewHeadBeforeCompleting(){
         setup(new byte[]{1,2,3});
         assertEquals("rev_2",service.apply(auth,session).revisionId());
         var order=inOrder(ledger,google);
         order.verify(ledger).claim(r,intent,newHash,"1");
-        order.verify(google).preserveRevision("access",intent.target(),"rev_1");
+        verify(google,never()).preserveRevision(anyString(),anyString(),anyString());
         order.verify(google).beginReplacementUpdate("access",intent.target(),r.mime(),3);
         order.verify(google).replacementChunk(eq(uri),eq(intent.target()),eq(r.mime()),eq(0L),eq(3L),org.mockito.AdditionalMatchers.aryEq(new byte[]{1,2,3}));
         order.verify(ledger).complete(r,"rev_2");
@@ -107,9 +103,8 @@ class GoogleDriveReplacementServiceTest {
     @Test void permissionRevokedBeforeFinalBlockDoesNotOverwrite(){
         setup(new byte[]{1,2,3});
         var original=target("12","rev_1",oldHash,"10");
-        var pinned=target("13","rev_1",oldHash,"10");
         when(revisions.inspect(auth,scope,"access",r.anchor(),r.destination(),intent.target(),true))
-            .thenReturn(original,original,pinned,pinned)
+            .thenReturn(original,original,original,original)
             .thenThrow(new ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN));
         assertThrows(ResponseStatusException.class,()->service.apply(auth,session));
         verify(google,never()).replacementChunk(any(),anyString(),anyString(),anyLong(),anyLong(),any());
