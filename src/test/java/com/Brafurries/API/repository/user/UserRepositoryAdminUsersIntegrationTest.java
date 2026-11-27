@@ -3,6 +3,7 @@ package com.Brafurries.API.repository.user;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.Brafurries.API.UserQueryStartupProfiling;
 import com.Brafurries.API.entity.community.Community;
 import com.Brafurries.API.entity.user.User;
 import com.Brafurries.API.entity.user.UserCommunityStatus;
@@ -17,15 +18,19 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.ApplicationContext;
+import org.springframework.data.jpa.repository.support.JpaRepositoryFactoryBean;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.ContextConfiguration;
 import org.testcontainers.containers.MariaDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers
 @DataJpaTest
+@ContextConfiguration(initializers = UserQueryStartupProfiling.class)
 @TestPropertySource(properties = "spring.jpa.hibernate.ddl-auto=create-drop")
 class UserRepositoryAdminUsersIntegrationTest {
 
@@ -38,6 +43,13 @@ class UserRepositoryAdminUsersIntegrationTest {
     @Autowired UserDiscordRepository discord;
     @Autowired CommunityRepository communities;
     @Autowired EntityManager entityManager;
+    @Autowired ApplicationContext context;
+
+    @Test
+    void actualBootRegisteredRepositoryUsesTargetedFactoryOnly() {
+        assertTrue(context.getBean("&userRepository") instanceof UserQueryStartupProfiling.ProfiledFactoryBean);
+        assertEquals(JpaRepositoryFactoryBean.class, context.getBean("&eventRepository").getClass());
+    }
 
     @Test
     void filtersRoleAndStatusBeforePaginationUsingMariaDb() {
