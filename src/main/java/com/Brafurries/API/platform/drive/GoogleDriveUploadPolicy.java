@@ -34,7 +34,11 @@ final class GoogleDriveUploadPolicy {
                 c=='/' || c==92 || (c>=0xd800 && c<=0xdfff));
     }
 
-    static URI sessionUri(String value) {
+    static URI sessionUri(String value) {return sessionUri(value,null);}
+
+    static URI sessionUri(String value,String target) {
+        if(target!=null&&!GoogleDriveConnectionService.validFolderId(target))throw invalidProvider();
+        String expectedPath="/upload/drive/v3/files"+(target==null?"":"/"+target);
         // Never forward unexpected hosts, redirects or fragments to the browser.
         // Exception messages intentionally omit the capability URL.
         if (value==null || value.length()>8192) throw invalidProvider();
@@ -43,7 +47,7 @@ final class GoogleDriveUploadPolicy {
         catch (IllegalArgumentException ex) {throw invalidProvider();}
         if (!"https".equals(uri.getScheme()) || !"www.googleapis.com".equals(uri.getHost()) ||
             uri.getPort()!=-1 || uri.getUserInfo()!=null || uri.getFragment()!=null ||
-            !"/upload/drive/v3/files".equals(uri.getRawPath()) || uri.getRawQuery()==null)
+            !expectedPath.equals(uri.getRawPath()) || uri.getRawQuery()==null)
             throw invalidProvider();
         var query=new HashMap<String,String>();
         for (String pair:uri.getRawQuery().split("&",-1)) {
