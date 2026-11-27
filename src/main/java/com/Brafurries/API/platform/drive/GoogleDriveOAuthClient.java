@@ -329,7 +329,7 @@ class GoogleDriveOAuthClient {
         var metadata=json.createObjectNode().put("id",result).put("name",name);
         metadata.putArray("parents").add(parent);
         metadata.putObject("appProperties").put("brafurriesTransferOperation",operationId);
-        return send(HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files/"+source+"/copy?fields=id"))
+        return send(HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files/"+source+"/copy?fields=id&ignoreDefaultVisibility=true"))
             .header("Authorization","Bearer "+token).header("Content-Type","application/json")
             .POST(HttpRequest.BodyPublishers.ofString(metadata.toString())));
     }
