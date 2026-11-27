@@ -48,6 +48,8 @@ public class GoogleDriveBrowserService {
                 response.path("incompleteSearch").asBoolean(false))
                 throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Consulta incompleta ao Google");
             // Re-read permissions after network I/O; do not return stale local grants.
+            // Detect moves during the listing before returning metadata.
+            if (!path.equals(verifyPath(access,before,anchor,folder))) throw inaccessible();
             var after=acl.browsePolicy(auth);
             if (!before.scope().equals(after.scope())) throw inaccessible();
             requireAnchor(after,anchor);
