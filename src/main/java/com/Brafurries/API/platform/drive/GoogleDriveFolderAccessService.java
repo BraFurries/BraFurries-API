@@ -102,7 +102,11 @@ public class GoogleDriveFolderAccessService {
     record BrowsePolicy(GoogleDriveConnectionService.FolderScope scope,
                         java.util.Set<String> registered,
                         java.util.Map<String,String> visible,
-                        java.util.Map<String,List<Permission>> rights) {
+                        java.util.Map<String,List<Permission>> rights,boolean owner) {
+        BrowsePolicy(GoogleDriveConnectionService.FolderScope scope,java.util.Set<String> registered,
+                     java.util.Map<String,String> visible,java.util.Map<String,List<Permission>> rights) {
+            this(scope,registered,visible,rights,false);
+        }
         boolean canView(String folder) { return visible.containsKey(folder); }
         boolean permits(String folder,Permission permission) {
             return rights.getOrDefault(folder,List.of()).contains(permission);
@@ -133,7 +137,7 @@ public class GoogleDriveFolderAccessService {
                 visible.put(id,rs.getString(2));
         },scope.subject(),scope.rootId());
         return new BrowsePolicy(scope,java.util.Set.copyOf(registered),
-            java.util.Collections.unmodifiableMap(visible),java.util.Map.copyOf(rights));
+            java.util.Collections.unmodifiableMap(visible),java.util.Map.copyOf(rights),actor.access().owner());
     }
 
     // Atomic replacement for one principal, using optimistic comparison of the
