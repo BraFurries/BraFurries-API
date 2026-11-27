@@ -17,6 +17,12 @@ public class GoogleDriveBrowserService {
     private final GoogleDriveFolderAccessService acl;
     private final GoogleDriveConnectionService connection;
     private final GoogleDriveOAuthClient google;
+    @org.springframework.beans.factory.annotation.Value("${GOOGLE_DRIVE_STREAM_DOWNLOAD_ENABLED:false}")
+    private boolean streamEnabled;
+    @org.springframework.beans.factory.annotation.Value("${GOOGLE_DRIVE_STREAM_DOWNLOAD_MAX_BYTES:5368709120}")
+    private long streamMaxBytes=5368709120L;
+    @org.springframework.beans.factory.annotation.Value("${GOOGLE_DRIVE_CREATE_FOLDER_ENABLED:false}")
+    private boolean createFolderEnabled;
 
     public GoogleDriveBrowserService(GoogleDriveFolderAccessService acl,
             GoogleDriveConnectionService connection,GoogleDriveOAuthClient google) {
@@ -24,8 +30,8 @@ public class GoogleDriveBrowserService {
     }
     public record Mount(String id,String name) {}
     public record Entry(String id,String name,String mimeType,boolean folder,String size,String modifiedTime) {}
-    public record Page(List<Entry> entries,String nextPageToken,boolean canDownload,boolean canUpload,boolean canCreateFolder) {
-        public Page(List<Entry> entries,String nextPageToken,boolean canDownload){this(entries,nextPageToken,canDownload,false,false);}
+    public record Page(List<Entry> entries,String nextPageToken,boolean canDownload,boolean canUpload,boolean canCreateFolder,boolean canStreamDownload,long streamMaxBytes) {
+        public Page(List<Entry> entries,String nextPageToken,boolean canDownload){this(entries,nextPageToken,canDownload,false,false,false,0);}
     }
 
     public List<Mount> mounts(Authentication auth) {
@@ -79,7 +85,9 @@ public class GoogleDriveBrowserService {
             return new Page(List.copyOf(entries),next.isBlank()?null:next,
                 operationAllowed(after,path,GoogleDriveFolderAccessService.Permission.DOWNLOAD),
                 operationAllowed(after,path,GoogleDriveFolderAccessService.Permission.UPLOAD),
-                operationAllowed(after,path,GoogleDriveFolderAccessService.Permission.CREATE_FOLDER));
+                createFolderEnabled&&operationAllowed(after,path,GoogleDriveFolderAccessService.Permission.CREATE_FOLDER),
+                streamEnabled&&streamMaxBytes>0&&operationAllowed(after,path,GoogleDriveFolderAccessService.Permission.DOWNLOAD),
+                streamEnabled&&streamMaxBytes>0?streamMaxBytes:0);
         } catch (GoogleDriveOAuthClient.ProviderFailure ex) {
             if (ex.status==403 || ex.status==404) throw inaccessible();
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Não foi possível consultar o Google");
