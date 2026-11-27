@@ -311,7 +311,7 @@ public class GoogleDriveConnectionService {
             UNION SELECT provider_folder_id FROM platform_google_drive_folder_operations
                 WHERE google_subject=? AND status<>'CREATED'
             UNION SELECT result_file_id FROM platform_google_drive_transfer_operations
-                WHERE google_subject=? AND operation='COPY' AND status IN ('PENDING','RECONCILE_REQUIRED')
+                WHERE google_subject=? AND status IN ('PENDING','RECONCILE_REQUIRED')
             """,String.class,scope.subject(),scope.subject(),scope.subject(),scope.subject()));
         if (validFolderId(configuredStaging.trim())) hidden.add(configuredStaging.trim());
         return Set.copyOf(hidden);
