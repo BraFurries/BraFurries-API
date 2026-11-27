@@ -5,6 +5,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.web.server.ResponseStatusException;
 
 /** Short, committed DB transactions. Never hold a database lock during upload I/O. */
@@ -18,7 +19,7 @@ public class GoogleDriveUploadLedger {
                        String anchor,String destination,String staging,String providerId,
                        String name,String mime,long size) {}
 
-    @Transactional
+    @Transactional(propagation=Propagation.REQUIRES_NEW)
     public void reserve(Reservation r) {
         // Per-user serialization, independent of selected Community. Include unresolved
         // expired/canceled operations: a provider capability may still be alive.
@@ -49,7 +50,7 @@ public class GoogleDriveUploadLedger {
         audit(r,"RESERVED");
     }
 
-    @Transactional
+    @Transactional(propagation=Propagation.REQUIRES_NEW)
     public boolean markOpen(Reservation r) {
         int changed=jdbc.update("""
             UPDATE platform_google_drive_upload_sessions SET status='OPEN',updated_at=UTC_TIMESTAMP(6)
@@ -59,7 +60,7 @@ public class GoogleDriveUploadLedger {
         return changed==1;
     }
 
-    @Transactional
+    @Transactional(propagation=Propagation.REQUIRES_NEW)
     public void requireCleanup(Reservation r) {
         // Even an ambiguous provider timeout is reconciled by the reserved file ID.
         // Never forget the row merely because the capability URL was not returned.
