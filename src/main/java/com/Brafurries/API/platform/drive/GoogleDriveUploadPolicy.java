@@ -108,6 +108,23 @@ final class GoogleDriveUploadPolicy {
             throw invalidProvider();
     }
 
+    static void requirePublishedFile(JsonNode file,GoogleDriveUploadLedger.Reservation r) {
+        // Publication pilot permits private destinations only. Same identity and
+        // bytes as staged file; the sole allowed parent change is the destination.
+        requireStagedFile(file,r.providerId(),r.id(),r.destination(),r.name(),r.mime(),r.size());
+    }
+
+    static boolean identifiableStagedFile(JsonNode file,GoogleDriveUploadLedger.Reservation r) {
+        // Cleanup may receive wrong size/MIME; identity and isolation matter,
+        // not successful upload validation. Never touch a moved or shared file.
+        return file!=null && r.providerId().equals(file.path("id").asText()) &&
+            file.path("ownedByMe").isBoolean() && file.path("ownedByMe").asBoolean() &&
+            file.path("trashed").isBoolean() && falseBoolean(file,"shared") &&
+            r.staging().equals(GoogleDriveBrowserService.singleParent(file)) &&
+            r.id().equals(file.path("appProperties").path("brafurriesUploadSession").asText()) &&
+            validMime(file.path("mimeType").asText(""));
+    }
+
     private static boolean folder(JsonNode node,String expectedId) {
         return expectedId.equals(node.path("id").asText()) && FOLDER.equals(node.path("mimeType").asText()) &&
             GoogleDriveBrowserService.isOwnedLive(node);
