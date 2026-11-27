@@ -10,6 +10,11 @@ import org.springframework.web.bind.annotation.*;
 public class GoogleDriveSearchController {
     private final GoogleDriveSearchService service;
     public GoogleDriveSearchController(GoogleDriveSearchService service){this.service=service;}
+    public record Capability(boolean enabled){}
+    @GetMapping("/capability")
+    public ResponseEntity<Capability> capability(Authentication auth){
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(new Capability(service.available(auth)));
+    }
     @GetMapping
     public ResponseEntity<GoogleDriveSearchService.Page> search(Authentication auth,@RequestParam String q,
             @RequestParam(required=false) String cursor){
