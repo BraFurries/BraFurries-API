@@ -25,7 +25,9 @@ public class GoogleDriveStreamingDownloadController {
     }
     // Exact unauthenticated transport endpoint: one-use, 60s bearer in POST body only.
     @PostMapping(value="/redeem",consumes=MediaType.APPLICATION_FORM_URLENCODED_VALUE)
-    public void redeem(@RequestParam("ticket") String ticket,HttpServletResponse response) throws IOException {
+    public void redeem(@RequestParam("ticket") String ticket,jakarta.servlet.http.HttpServletRequest request,HttpServletResponse response) throws IOException {
+        if(request.getQueryString()!=null||request.getParameterValues("ticket").length!=1)
+            throw GoogleDriveBrowserService.inaccessible();
         response.setHeader("Cache-Control","no-store");
         service.download(ticket,response);
     }
