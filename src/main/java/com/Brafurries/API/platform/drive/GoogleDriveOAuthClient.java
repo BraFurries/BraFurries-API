@@ -61,6 +61,56 @@ class GoogleDriveOAuthClient {
             .header("Authorization","Bearer "+token).GET());
     }
 
+    JsonNode fileMetadata(String token,String id) {
+        if (!GoogleDriveConnectionService.validFolderId(id)) throw new IllegalArgumentException("Invalid id");
+        return send(HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files/"+id+
+            "?fields=id,name,mimeType,parents,trashed,ownedByMe,size,version,capabilities(canDownload)"))
+            .header("Authorization","Bearer "+token).GET());
+    }
+
+    byte[] content(String token,String id,String exportMime,int limit) {
+        if (!GoogleDriveConnectionService.validFolderId(id)) throw new IllegalArgumentException("Invalid id");
+        String url="https://www.googleapis.com/drive/v3/files/"+id+
+            (exportMime==null?"?alt=media":"/export?"+form(Map.of("mimeType",exportMime)));
+        var request=HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(30))
+            .header("Authorization","Bearer "+token).GET().build();
+        var future=http.sendAsync(request,info->new BoundedBody(info.statusCode()==200?limit:8192));
+        try {
+            var response=future.get(30,java.util.concurrent.TimeUnit.SECONDS);
+            if (response.statusCode()!=200) throw new ProviderFailure(response.statusCode());
+            return response.body();
+        } catch (InterruptedException ex) {
+            future.cancel(true);Thread.currentThread().interrupt();throw new ProviderFailure(0);
+        } catch (java.util.concurrent.TimeoutException ex) {
+            future.cancel(true);throw new ProviderFailure(0);
+        } catch (java.util.concurrent.ExecutionException ex) {
+            for (Throwable cause=ex;cause!=null;cause=cause.getCause())
+                if (cause instanceof SizeLimit) throw new ProviderFailure(413);
+            throw new ProviderFailure(0);
+        }
+    }
+
+    private static final class SizeLimit extends RuntimeException {}
+    // Reject before buffering an oversized response, including chunked bodies.
+    static final class BoundedBody implements HttpResponse.BodySubscriber<byte[]> {
+        private final HttpResponse.BodySubscriber<byte[]> delegate=HttpResponse.BodySubscribers.ofByteArray();
+        private final int limit;
+        private long received;
+        private java.util.concurrent.Flow.Subscription subscription;
+        BoundedBody(int limit) {this.limit=limit;}
+        public java.util.concurrent.CompletionStage<byte[]> getBody(){return delegate.getBody();}
+        public void onSubscribe(java.util.concurrent.Flow.Subscription s){subscription=s;delegate.onSubscribe(s);}
+        public void onNext(java.util.List<java.nio.ByteBuffer> buffers){
+            for (var buffer:buffers) received+=buffer.remaining();
+            if (received>limit) {
+                subscription.cancel();delegate.onError(new SizeLimit());return;
+            }
+            delegate.onNext(buffers);
+        }
+        public void onError(Throwable error){delegate.onError(error);}
+        public void onComplete(){delegate.onComplete();}
+    }
+
     private JsonNode send(HttpRequest.Builder builder) {
         try {
             var response = http.send(builder.timeout(Duration.ofSeconds(10)).build(),
