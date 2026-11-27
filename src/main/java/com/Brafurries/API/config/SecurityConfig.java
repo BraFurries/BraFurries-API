@@ -110,6 +110,8 @@ public class SecurityConfig {
                 // Google redirects here without a bearer token. The callback only
                 // redirects to the configured UI; completion remains owner-authenticated.
                 .requestMatchers(HttpMethod.GET, "/user/me/platform-drive/oauth/callback").permitAll()
+                // Native download uses a one-time capability in the form body.
+                .requestMatchers(HttpMethod.POST, "/user/me/platform-drive/downloads/redeem").permitAll()
                 .requestMatchers("/user/**").authenticated()
                 .requestMatchers("/events/**").authenticated()
                 .requestMatchers("/third-party/**").hasAnyAuthority("CLIENT_PARTNER", "CLIENT_BOT", "CLIENT_SERVICE", "CLIENT_INTERNAL")
