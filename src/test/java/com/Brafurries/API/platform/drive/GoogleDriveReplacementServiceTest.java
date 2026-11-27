@@ -103,4 +103,24 @@ class GoogleDriveReplacementServiceTest {
         assertThrows(ResponseStatusException.class,()->GoogleDriveUploadPolicy.sessionUri(uri.toString(),"other_file"));
         assertThrows(ResponseStatusException.class,()->GoogleDriveUploadPolicy.sessionUri(uri.toString()));
     }
+
+    @Test void permissionRevokedBeforeFinalBlockDoesNotOverwrite(){
+        setup(new byte[]{1,2,3});
+        var original=target("12","rev_1",oldHash,"10");
+        var pinned=target("13","rev_1",oldHash,"10");
+        when(revisions.inspect(auth,scope,"access",r.anchor(),r.destination(),intent.target(),true))
+            .thenReturn(original,original,pinned,pinned)
+            .thenThrow(new ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN));
+        assertThrows(ResponseStatusException.class,()->service.apply(auth,session));
+        verify(google,never()).replacementChunk(any(),anyString(),anyString(),anyLong(),anyLong(),any());
+        verify(ledger).uncertain(r);
+    }
+    @Test void ambiguousFinalResponseDoesNotRetryOrMarkApplied(){
+        setup(new byte[]{1,2,3});
+        doThrow(new GoogleDriveOAuthClient.ProviderFailure(0)).when(google)
+            .replacementChunk(any(),anyString(),anyString(),anyLong(),anyLong(),any());
+        assertThrows(ResponseStatusException.class,()->service.apply(auth,session));
+        verify(google,times(1)).replacementChunk(any(),anyString(),anyString(),anyLong(),anyLong(),any());
+        verify(ledger).uncertain(r);verify(ledger,never()).complete(any(),anyString());
+    }
 }
