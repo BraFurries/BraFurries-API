@@ -315,6 +315,25 @@ class GoogleDriveOAuthClient {
         catch(java.io.IOException ex){throw new ProviderFailure(0);}
     }
 
+    JsonNode transferMetadata(String token,String id) {
+        if(!GoogleDriveConnectionService.validFolderId(id))throw new IllegalArgumentException("Invalid resource");
+        return send(HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files/"+id+
+            "?fields=id,name,mimeType,parents,trashed,ownedByMe,shared,version,size,sha256Checksum,capabilities(canCopy,canMoveItemWithinDrive)"))
+            .header("Authorization","Bearer "+token).GET());
+    }
+
+    JsonNode copyFile(String token,String source,String result,String parent,String name,String operationId) {
+        if(!GoogleDriveConnectionService.validFolderId(source)||!GoogleDriveConnectionService.validFolderId(result)||
+            !GoogleDriveConnectionService.validFolderId(parent)||!GoogleDriveUploadPolicy.validName(name)||
+            !GoogleDriveUploadPolicy.validSessionId(operationId))throw new IllegalArgumentException("Invalid copy");
+        var metadata=json.createObjectNode().put("id",result).put("name",name);
+        metadata.putArray("parents").add(parent);
+        metadata.putObject("appProperties").put("brafurriesTransferOperation",operationId);
+        return send(HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files/"+source+"/copy?fields=id"))
+            .header("Authorization","Bearer "+token).header("Content-Type","application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(metadata.toString())));
+    }
+
     private JsonNode send(HttpRequest.Builder builder) {
         try {
             var response = http.send(builder.timeout(Duration.ofSeconds(10)).build(),
