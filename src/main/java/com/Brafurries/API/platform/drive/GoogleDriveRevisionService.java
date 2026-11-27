@@ -47,7 +47,8 @@ public class GoogleDriveRevisionService {
                 String id=r.path("id").asText("");
                 if(!validRevisionId(id)||!r.path("modifiedTime").isTextual()||
                    !r.path("size").isTextual()||!r.path("size").asText().matches("[0-9]{1,20}")||
-                   !r.path("keepForever").isBoolean())throw unavailable();
+                   (r.has("keepForever")&&!r.path("keepForever").isBoolean()))throw unavailable();
+                try{java.time.Instant.parse(r.path("modifiedTime").asText());}catch(java.time.format.DateTimeParseException ex){throw unavailable();}
                 revisions.add(new Revision(id,r.path("modifiedTime").asText(),r.path("size").asText(),
                     r.path("keepForever").asBoolean(),id.equals(target.snapshot().head())));
             }
@@ -84,6 +85,7 @@ public class GoogleDriveRevisionService {
         if(!expected.equals(before.scope()))throw inaccessible();
         requireLocal(before,anchor,parent,file,List.of(),replace);
         var path=browser.verifyPath(token,before,anchor,parent);
+        if(path.isEmpty())throw inaccessible();
         requireLocal(before,anchor,parent,file,path,replace);
         var snapshot=verify(google.revisionFile(token,file),file,parent,replace);
         if(!path.equals(browser.verifyPath(token,before,anchor,parent)))throw inaccessible();
