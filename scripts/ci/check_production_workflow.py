@@ -42,7 +42,7 @@ assert "FROM eclipse-temurin:21-jre-jammy AS ci-extract" in dockerfile
 assert "java -Djarmode=tools -jar app.jar extract --layers --destination layers" in dockerfile
 assert "FROM runtime-base AS ci-runtime" in dockerfile
 layers = ("dependencies", "spring-boot-loader", "snapshot-dependencies", "application")
-copies = [f"COPY --from=ci-extract /extract/layers/{layer}/ ${APP_HOME}/" for layer in layers]
+copies = [f"COPY --from=ci-extract /extract/layers/{layer}/ ${{APP_HOME}}/" for layer in layers]
 assert all(copy in dockerfile for copy in copies)
 assert [dockerfile.index(copy) for copy in copies] == sorted(dockerfile.index(copy) for copy in copies)
 assert "FROM runtime-base AS runtime\nCOPY --from=build /workspace/app.jar" in dockerfile
