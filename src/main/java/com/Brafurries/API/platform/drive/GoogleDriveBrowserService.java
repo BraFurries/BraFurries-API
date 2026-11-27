@@ -27,14 +27,20 @@ public class GoogleDriveBrowserService {
     private boolean renameEnabled;
     @org.springframework.beans.factory.annotation.Value("${GOOGLE_DRIVE_REVISION_HISTORY_ENABLED:false}")
     private boolean historyEnabled;
+    @org.springframework.beans.factory.annotation.Value("${GOOGLE_DRIVE_REPLACEMENT_COMMIT_ENABLED:false}")
+    private boolean replacementEnabled;
+    @org.springframework.beans.factory.annotation.Value("${GOOGLE_DRIVE_UPLOAD_PILOT_ENABLED:false}")
+    private boolean uploadPilotEnabled;
+    @org.springframework.beans.factory.annotation.Value("${GOOGLE_DRIVE_UPLOAD_CLEANUP_ENABLED:false}")
+    private boolean cleanupEnabled;
 
     public GoogleDriveBrowserService(GoogleDriveFolderAccessService acl,
             GoogleDriveConnectionService connection,GoogleDriveOAuthClient google) {
         this.acl=acl;this.connection=connection;this.google=google;
     }
     public record Mount(String id,String name) {}
-    public record Entry(String id,String name,String mimeType,boolean folder,String size,String modifiedTime,String version,boolean canRename,boolean canViewHistory) {
-        public Entry(String id,String name,String mimeType,boolean folder,String size,String modifiedTime){this(id,name,mimeType,folder,size,modifiedTime,null,false,false);}
+    public record Entry(String id,String name,String mimeType,boolean folder,String size,String modifiedTime,String version,boolean canRename,boolean canViewHistory,boolean canReplace) {
+        public Entry(String id,String name,String mimeType,boolean folder,String size,String modifiedTime){this(id,name,mimeType,folder,size,modifiedTime,null,false,false,false);}
     }
     public record Page(List<Entry> entries,String nextPageToken,boolean canDownload,boolean canUpload,boolean canCreateFolder,boolean canStreamDownload,long streamMaxBytes) {
         public Page(List<Entry> entries,String nextPageToken,boolean canDownload){this(entries,nextPageToken,canDownload,false,false,false,0);}
@@ -88,7 +94,10 @@ public class GoogleDriveBrowserService {
                     file.path("version").isTextual()?file.path("version").asText():null,
                     renameEnabled&&!after.registered().contains(id)&&GoogleDriveRenameService.validVersion(file.path("version").asText(""))&&
                         operationAllowed(after,path,GoogleDriveFolderAccessService.Permission.RENAME),
-                    historyEnabled&&GoogleDriveUploadPolicy.validMime(type)&&!after.registered().contains(id)));
+                    historyEnabled&&GoogleDriveUploadPolicy.validMime(type)&&!after.registered().contains(id),
+                    replacementEnabled&&uploadPilotEnabled&&cleanupEnabled&&after.owner()&&GoogleDriveUploadPolicy.validMime(type)&&
+                        !after.registered().contains(id)&&GoogleDriveRenameService.validVersion(file.path("version").asText(""))&&
+                        operationAllowed(after,path,GoogleDriveFolderAccessService.Permission.REPLACE)));
             }
             String next=response.path("nextPageToken").asText("");
             if (next.length()>2048) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Paginação indisponível");
