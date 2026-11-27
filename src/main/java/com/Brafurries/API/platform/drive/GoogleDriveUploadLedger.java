@@ -134,6 +134,23 @@ public class GoogleDriveUploadLedger {
             """,r.id(),r.actor())==1) audit(r,"CANCELED");
     }
 
+    // Recover process crashes without attempting another provider mutation.
+    @Transactional(propagation=Propagation.REQUIRES_NEW)
+    public void flagStalePublications() {
+        var stale=jdbc.query(SELECT_SESSION+"""
+            WHERE status='PUBLISHING' AND updated_at<=UTC_TIMESTAMP(6)-INTERVAL 1 HOUR
+            ORDER BY updated_at,id LIMIT 10 FOR UPDATE
+            """,GoogleDriveUploadLedger::map);
+        for (var session:stale) {
+            var r=session.reservation();
+            if(jdbc.update("""
+                UPDATE platform_google_drive_upload_sessions SET status='RECONCILE_REQUIRED',
+                    updated_at=UTC_TIMESTAMP(6),next_reconcile_at=NULL
+                WHERE id=? AND status='PUBLISHING'
+                """,r.id())==1) audit(r,"RECONCILE_REQUIRED");
+        }
+    }
+
     @Transactional(readOnly=true,propagation=Propagation.REQUIRES_NEW)
     public List<Session> due() {
         return jdbc.query(SELECT_SESSION+"""
