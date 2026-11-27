@@ -79,7 +79,7 @@ public class GoogleDriveRevisionService {
         }catch(GoogleDriveOAuthClient.ProviderFailure ex){throw provider(ex);}
     }
 
-    private Target inspect(Authentication auth,GoogleDriveConnectionService.FolderScope expected,String token,
+    Target inspect(Authentication auth,GoogleDriveConnectionService.FolderScope expected,String token,
             String anchor,String parent,String file,boolean replace){
         var before=acl.browsePolicy(auth);
         if(!expected.equals(before.scope()))throw inaccessible();
