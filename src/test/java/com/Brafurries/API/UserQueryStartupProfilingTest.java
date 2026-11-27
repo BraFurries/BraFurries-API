@@ -22,10 +22,14 @@ class UserQueryStartupProfilingTest {
         beans.registerBeanDefinition("userRepository", user);
         beans.registerBeanDefinition("eventRepository", other);
 
+        beans.getMergedBeanDefinition("userRepository");
         UserQueryStartupProfiling.install(beans);
 
-        assertSame(user, beans.getBeanDefinition("userRepository"));
+        assertNotSame(user, beans.getBeanDefinition("userRepository"));
+        user = (RootBeanDefinition) beans.getBeanDefinition("userRepository");
         assertEquals(UserQueryStartupProfiling.ProfiledFactoryBean.class.getName(), user.getBeanClassName());
+        assertEquals(UserQueryStartupProfiling.ProfiledFactoryBean.class.getName(),
+            beans.getMergedBeanDefinition("userRepository").getBeanClassName());
         assertEquals(JpaRepositoryFactoryBean.class.getName(), other.getBeanClassName());
         assertTrue(user.isLazyInit());
         assertEquals('!', user.getPropertyValues().get("escapeCharacter"));
