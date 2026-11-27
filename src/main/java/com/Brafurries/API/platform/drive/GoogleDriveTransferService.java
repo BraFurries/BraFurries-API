@@ -46,7 +46,7 @@ public class GoogleDriveTransferService {
         Operation reserved=null;boolean attempted=false;
         try{
             String token=connection.browserAccessToken(policy.scope());
-            var paths=paths(auth,actor,policy.scope(),token,sourceAnchor,parent,file,destinationAnchor,destination,action);
+            var paths=paths(auth,actor,policy.scope(),token,sourceAnchor,parent,file,destinationAnchor,destination,action,false);
             var previous=ledger.find(operationId);
             if(previous!=null){
                 if(previous.actor()!=actor||!previous.scope().equals(policy.scope())||!previous.sourceAnchor().equals(sourceAnchor)||
@@ -55,7 +55,7 @@ public class GoogleDriveTransferService {
                     throw inaccessible();
                 if(!"COMPLETED".equals(previous.status()))throw conflict();
                 var result=verify(google.transferMetadata(token,previous.result()),previous.result(),destination,null);
-                paths(auth,actor,policy.scope(),token,sourceAnchor,parent,file,destinationAnchor,destination,action);
+                paths(auth,actor,policy.scope(),token,sourceAnchor,parent,file,destinationAnchor,destination,action,false);
                 return new Result(previous.result(),result.name());
             }
             var meta=verify(google.transferMetadata(token,file),file,parent,action);
@@ -65,10 +65,10 @@ public class GoogleDriveTransferService {
             var r=new Operation(operationId,actor,policy.scope(),sourceAnchor,parent,file,destinationAnchor,destination,resultId,version,action,"PENDING");
             try{ledger.reserve(r);}catch(DuplicateKeyException ex){throw conflict();}
             reserved=r;
-            var current=paths(auth,actor,r.scope(),token,sourceAnchor,parent,file,destinationAnchor,destination,action);
+            var current=paths(auth,actor,r.scope(),token,sourceAnchor,parent,file,destinationAnchor,destination,action,true);
             if(!paths.equals(current)||!meta.equals(verify(google.transferMetadata(token,file),file,parent,action)))throw conflict();
             checkFolderMove(acl.browsePolicy(auth),current,sourceAnchor,destinationAnchor,file,meta,action);
-            local(auth,actor,r.scope(),sourceAnchor,parent,file,destinationAnchor,destination,current,action);
+            local(auth,actor,r.scope(),sourceAnchor,parent,file,destinationAnchor,destination,current,action,true);
             attempted=true;
             JsonNode response=action==Action.MOVE?google.moveUploadedFile(token,file,parent,destination):
                 google.copyFile(token,file,resultId,destination,meta.name(),operationId);
@@ -82,10 +82,10 @@ public class GoogleDriveTransferService {
                     !destination.equals(singleParent(copy))||!isOwnedLive(copy)||!copy.path("shared").isBoolean()||copy.path("shared").asBoolean())throw conflict();
                 if(!meta.equals(verify(google.transferMetadata(token,file),file,parent,action)))throw conflict();
             }
-            var after=paths(auth,actor,r.scope(),token,sourceAnchor,parent,file,destinationAnchor,destination,action);
+            var after=paths(auth,actor,r.scope(),token,sourceAnchor,parent,file,destinationAnchor,destination,action,false);
             if(!current.equals(after))throw conflict();
             checkFolderMove(acl.browsePolicy(auth),after,sourceAnchor,destinationAnchor,file,meta,action);
-            local(auth,actor,r.scope(),sourceAnchor,parent,file,destinationAnchor,destination,after,action);
+            local(auth,actor,r.scope(),sourceAnchor,parent,file,destinationAnchor,destination,after,action,true);
             ledger.transition(r,"COMPLETED");
             return new Result(resultId,result.name());
         }catch(GoogleDriveOAuthClient.ProviderFailure ex){
@@ -98,24 +98,24 @@ public class GoogleDriveTransferService {
     }
 
     private Paths paths(Authentication auth,int actor,GoogleDriveConnectionService.FolderScope scope,String token,String sourceAnchor,
-            String parent,String file,String destinationAnchor,String destination,Action action){
+            String parent,String file,String destinationAnchor,String destination,Action action,boolean claimed){
         var p=acl.browsePolicy(auth);
         if(!scope.equals(p.scope()))throw inaccessible();
         requireAnchor(p,sourceAnchor);requireAnchor(p,destinationAnchor);
         var result=new Paths(browser.verifyPath(token,p,sourceAnchor,parent),browser.verifyPath(token,p,destinationAnchor,destination));
         requirePrivateFolder(google.uploadFolderMetadata(token,destination),destination);
-        local(auth,actor,scope,sourceAnchor,parent,file,destinationAnchor,destination,result,action);
+        local(auth,actor,scope,sourceAnchor,parent,file,destinationAnchor,destination,result,action,claimed);
         return result;
     }
     private void local(Authentication auth,int actor,GoogleDriveConnectionService.FolderScope scope,String sourceAnchor,
-            String parent,String file,String destinationAnchor,String destination,Paths paths,Action action){
+            String parent,String file,String destinationAnchor,String destination,Paths paths,Action action,boolean claimed){
         if(authorization.currentUser(auth).getId()!=actor)throw inaccessible();
         var p=acl.browsePolicy(auth);
         if(!scope.equals(p.scope())||p.registered().contains(file)||scope.rootId().equals(file)||
             scope.rootId().equals(parent)||scope.rootId().equals(destination))throw inaccessible();
         requireAnchor(p,sourceAnchor);requireAnchor(p,destinationAnchor);
         var hidden=connection.hiddenUploadResources(scope);
-        if(hidden.contains(file)||paths.source().isEmpty()||paths.destination().isEmpty())throw inaccessible();
+        if((hidden.contains(file)&&!(claimed&&action==Action.MOVE))||paths.source().isEmpty()||paths.destination().isEmpty())throw inaccessible();
         for(var path:List.of(paths.source(),paths.destination()))for(String id:path)
             if(hidden.contains(id)||(p.registered().contains(id)&&!p.canView(id)))throw inaccessible();
         if(!operationAllowed(p,paths.source(),action==Action.MOVE?MOVE:DOWNLOAD)||!operationAllowed(p,paths.destination(),UPLOAD))
