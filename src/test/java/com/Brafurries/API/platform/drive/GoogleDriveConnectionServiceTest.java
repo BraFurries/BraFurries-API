@@ -181,4 +181,59 @@ class GoogleDriveConnectionServiceTest {
         assertEquals("RECONNECT_REQUIRED",service(true).checkRoot(auth).status());
         verify(google,times(3)).token(argThat(form->"refresh_token".equals(form.get("grant_type"))));
     }
+
+    private com.fasterxml.jackson.databind.JsonNode folder(String id, String parent) {
+        var node=json.createObjectNode();
+        node.put("id",id).put("name","Folder").put("mimeType","application/vnd.google-apps.folder")
+            .put("trashed",false).put("ownedByMe",true);
+        node.putObject("capabilities").put("canShare",true);
+        if (parent!=null) node.putArray("parents").add(parent);
+        return node;
+    }
+
+    @Test void folderRegistryRejectsNonOwnerBeforeReadingDatabaseOrGoogle() {
+        when(authz.requireOwner(auth)).thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN));
+        assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
+            ()->service(true).managedFolders(auth)).getStatusCode());
+        assertEquals(HttpStatus.FORBIDDEN,assertThrows(ResponseStatusException.class,
+            ()->service(true).registerFolder(auth,"target_folder")).getStatusCode());
+        verifyNoInteractions(jdbc,google);
+    }
+
+    @Test void rootCannotBeRegisteredForManagedSharing() {
+        assertEquals(HttpStatus.BAD_REQUEST,assertThrows(ResponseStatusException.class,
+            ()->service(true).registerFolder(auth,"fixture_folder")).getStatusCode());
+        verifyNoInteractions(jdbc,google);
+    }
+
+    @Test void verifiesAllAncestorsBeforeAcceptingNestedFolder() {
+        when(google.root("access","target_folder")).thenReturn(folder("target_folder","parent_folder"));
+        when(google.root("access","parent_folder")).thenReturn(folder("parent_folder","fixture_folder"));
+        when(google.root("access","fixture_folder")).thenReturn(folder("fixture_folder",null));
+        var verified=service(true).verifyFolder("access","target_folder");
+        assertEquals("parent_folder",verified.parentId());
+        assertEquals("Folder",verified.name());
+        verify(google).root("access","fixture_folder");
+    }
+
+    @Test void outsideRootAndCyclesFailClosed() {
+        when(google.root("access","target_folder")).thenReturn(folder("target_folder","other_folder"));
+        when(google.root("access","other_folder")).thenReturn(folder("other_folder",null));
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY,assertThrows(ResponseStatusException.class,
+            ()->service(true).verifyFolder("access","target_folder")).getStatusCode());
+        when(google.root("access","other_folder")).thenReturn(folder("other_folder","target_folder"));
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY,assertThrows(ResponseStatusException.class,
+            ()->service(true).verifyFolder("access","target_folder")).getStatusCode());
+    }
+
+    @Test void deniedGoogleMetadataNeverRegistersFolder() throws Exception {
+        connected();
+        when(google.token(anyMap())).thenReturn(json.readTree("{\"access_token\":\"fixture-access\"}"));
+        when(google.root("fixture-access","target_folder"))
+            .thenThrow(new GoogleDriveOAuthClient.ProviderFailure(404));
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY,assertThrows(ResponseStatusException.class,
+            ()->service(true).registerFolder(auth,"target_folder")).getStatusCode());
+        verify(jdbc,never()).update(contains("INSERT INTO platform_google_drive_managed_folders"),
+            any(),any(),any(),any(),any(),any(),any());
+    }
 }
