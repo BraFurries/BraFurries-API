@@ -3,8 +3,10 @@ package com.Brafurries.API.repository;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
-import com.Brafurries.API.entity.user.User;
+import com.Brafurries.API.repository.event.EventRepository;
 import com.Brafurries.API.repository.user.UserRepository;
+import com.Brafurries.API.repository.event.EventListingRepositoryImpl;
+import org.springframework.data.repository.core.support.RepositoryComposition.RepositoryFragments;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 import java.lang.management.ManagementFactory;
@@ -18,12 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.support.JpaRepositoryFactory;
-import org.springframework.data.repository.NoRepositoryBean;
-import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.config.BootstrapMode;
 import org.springframework.data.repository.query.QueryLookupStrategy;
 import org.springframework.data.repository.query.ValueExpressionDelegate;
@@ -51,24 +48,26 @@ class RepositoryQueryStartupDiagnosticsTest {
     @Autowired EntityManagerFactory entityManagerFactory;
 
     @Test
-    void profilesUserRepository() {
-        profile(UserRepository.class, "searchAdminUsers");
+    void profilesUsersThenEvents() {
+        profileCombined(true);
     }
 
     @Test
-    void profilesUserRepositoryAfterControl() {
-        profile(ControlRepository.class, "findControlPage");
-        profile(UserRepository.class, "searchAdminUsers");
+    void profilesEventsThenUsers() {
+        profileCombined(false);
     }
 
-    // A minimal paged JPQL query, using the same factory, entity mapping,
-    // explicit count query and parser machinery as the production methods.
-    // Never discovered as a Spring Data bean and never executed.
-    @NoRepositoryBean
-    public interface ControlRepository extends Repository<User, Integer> {
-        @Query(value = "SELECT u FROM User u",
-            countQuery = "SELECT COUNT(u) FROM User u")
-        Page<User> findControlPage(Pageable pageable);
+    private void profileCombined(boolean usersFirst) {
+        long started = System.nanoTime();
+        if (usersFirst) {
+            profile(UserRepository.class, "searchAdminUsers");
+            profile(EventRepository.class, "findWithLocaleById");
+        } else {
+            profile(EventRepository.class, "findWithLocaleById");
+            profile(UserRepository.class, "searchAdminUsers");
+        }
+        System.out.printf("JPA_QUERY_PROFILE combined_order=%s total_ms=%d%n",
+            usersFirst ? "users_then_events" : "events_then_users", elapsedMillis(started));
     }
 
     private void profile(Class<?> repository, String expectedMethod) {
@@ -76,7 +75,11 @@ class RepositoryQueryStartupDiagnosticsTest {
             var factory = new TimedRepositoryFactory(em);
             long started = System.nanoTime();
             long cpuStarted = threadCpuNanos();
-            factory.getRepository(repository);
+            if (repository == EventRepository.class) {
+                factory.getRepository(repository, RepositoryFragments.just(new EventListingRepositoryImpl(em)));
+            } else {
+                factory.getRepository(repository);
+            }
             System.out.printf("JPA_QUERY_PROFILE repository=%s total_ms=%d methods=%d thread_cpu_ms=%d%n",
                 repository.getSimpleName(), elapsedMillis(started), factory.resolved.size(),
                 elapsedCpuMillis(cpuStarted));
@@ -84,6 +87,10 @@ class RepositoryQueryStartupDiagnosticsTest {
                 "Expected the declared query to be resolved by Spring Data");
             if (repository == UserRepository.class) {
                 assertFalse(factory.resolved.stream().anyMatch(method -> method.getName().equals("searchAdminUsersFiltered")),
+                    "Criteria-based user search must not resolve a declared JPQL query at startup");
+            }
+            if (repository == EventRepository.class) {
+                assertFalse(factory.resolved.stream().anyMatch(method -> method.getName().equals("findUserEventsListing")),
                     "Criteria-based search must not resolve a declared JPQL query at startup");
             }
         }
