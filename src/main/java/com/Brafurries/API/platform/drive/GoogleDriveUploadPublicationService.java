@@ -48,15 +48,18 @@ public class GoogleDriveUploadPublicationService {
             // an uncertain provider result. A crash leaves PUBLISHING hidden.
             var current=acl.browsePolicy(auth);
             requireScope(r,current);
-            requireDestination(token,r,current);
+            var currentPath=requireDestination(token,r,current);
             requireStaging(token,r);
             validateStaged(google.uploadedFile(token,r.providerId()),r);
+            // Fresh ACL after all pre-move provider I/O.
+            requireLocal(r,acl.browsePolicy(auth),currentPath);
             GoogleDriveUploadPolicy.requirePublishedFile(
                 google.moveUploadedFile(token,r.providerId(),r.staging(),r.destination()),r);
             GoogleDriveUploadPolicy.requirePublishedFile(google.uploadedFile(token,r.providerId()),r);
             var after=acl.browsePolicy(auth);
             requireScope(r,after);
-            requireDestination(token,r,after);
+            var finalPath=requireDestination(token,r,after);
+            requireLocal(r,acl.browsePolicy(auth),finalPath);
             ledger.finishPublication(r);
             return new Result(sessionId,"PUBLISHED");
         } catch (GoogleDriveOAuthClient.ProviderFailure ex) {
@@ -87,13 +90,10 @@ public class GoogleDriveUploadPublicationService {
         GoogleDriveBrowserService.requireAnchor(policy,r.anchor());
     }
 
-    private void requireDestination(String token,GoogleDriveUploadLedger.Reservation r,
+    private List<String> requireDestination(String token,GoogleDriveUploadLedger.Reservation r,
             GoogleDriveFolderAccessService.BrowsePolicy policy) {
         var path=browser.verifyPath(token,policy,r.anchor(),r.destination());
-        for(String id:path) if(policy.registered().contains(id)&&!policy.canView(id))
-            throw GoogleDriveBrowserService.inaccessible();
-        if (!GoogleDriveBrowserService.operationAllowed(policy,path,GoogleDriveFolderAccessService.Permission.UPLOAD))
-            throw GoogleDriveBrowserService.inaccessible();
+        requireLocal(r,policy,path);
         JsonNode target=google.uploadFolderMetadata(token,r.destination());
         // Deliberately private destinations during pilot. Moving into a shared
         // folder grants external inherited access before local commit.
@@ -103,6 +103,15 @@ public class GoogleDriveUploadPublicationService {
             !target.path("shared").isBoolean() || target.path("shared").asBoolean() ||
             !target.path("capabilities").path("canAddChildren").isBoolean() ||
             !target.path("capabilities").path("canAddChildren").asBoolean())
+            throw GoogleDriveBrowserService.inaccessible();
+        return path;
+    }
+    private void requireLocal(GoogleDriveUploadLedger.Reservation r,
+            GoogleDriveFolderAccessService.BrowsePolicy policy,List<String> path) {
+        requireScope(r,policy);
+        for(String id:path) if(policy.registered().contains(id)&&!policy.canView(id))
+            throw GoogleDriveBrowserService.inaccessible();
+        if (!GoogleDriveBrowserService.operationAllowed(policy,path,GoogleDriveFolderAccessService.Permission.UPLOAD))
             throw GoogleDriveBrowserService.inaccessible();
     }
     private void requireStaging(String token,GoogleDriveUploadLedger.Reservation r) {
