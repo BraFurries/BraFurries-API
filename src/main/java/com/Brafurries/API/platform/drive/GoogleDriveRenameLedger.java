@@ -34,7 +34,8 @@ public class GoogleDriveRenameLedger {
             Boolean.TRUE.equals(jdbc.queryForObject("""
                 SELECT EXISTS(SELECT 1 FROM platform_google_drive_replacement_commits
                     WHERE google_subject=? AND active_file_id=?)
-                """,Boolean.class,r.scope().subject(),r.file())))
+                OR EXISTS(SELECT 1 FROM platform_google_drive_transfer_operations WHERE google_subject=? AND active_file_id=?)
+                """,Boolean.class,r.scope().subject(),r.file(),r.scope().subject(),r.file())))
             throw new ResponseStatusException(HttpStatus.CONFLICT,"Arquivo com operação pendente");
         var recent=jdbc.queryForList("""
             SELECT id FROM platform_google_drive_rename_operations
