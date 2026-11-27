@@ -37,7 +37,8 @@ public class GoogleDriveDownloadTicketService {
     @Transactional
     public Ticket issue(Authentication auth,GoogleDriveConnectionService.FolderScope scope,String anchor,String folder,String file) {
         var actor=authorization.currentUser(auth);
-        if(actor.getAuthVersion()==null||actor.getMergedIntoUser()!=null)throw unavailable();
+        if(actor.getAuthVersion()==null||actor.getMergedIntoUser()!=null ||
+            !(auth.getDetails() instanceof Number signedVersion)||signedVersion.longValue()!=actor.getAuthVersion().longValue())throw unavailable();
         jdbc.queryForObject("SELECT id FROM users WHERE id=? FOR UPDATE",Integer.class,actor.getId());
         var recent=jdbc.queryForList("""
             SELECT ticket_hash FROM platform_google_drive_download_tickets
@@ -78,13 +79,17 @@ public class GoogleDriveDownloadTicketService {
     // Only called with a target recovered from the consumed server-side ticket.
     // Do not set a SecurityContext or accept user identity supplied by the client.
     Authentication authenticate(Target target) {
+        // JDBC bypasses the request's JPA persistence context for revocation checks.
+        var current=jdbc.queryForList("SELECT email FROM users WHERE id=? AND auth_version=? AND merged_into_user_id IS NULL",
+            String.class,target.actor(),target.authVersion());
+        if(current.size()!=1||current.getFirst()==null||current.getFirst().isBlank())throw unavailable();
         var user=users.findById(target.actor()).orElseThrow(GoogleDriveDownloadTicketService::unavailable);
         if(user.getMergedIntoUser()!=null||user.getAuthVersion()==null||
             user.getAuthVersion().longValue()!=target.authVersion()||
-            user.getEmail()==null||user.getEmail().isBlank()||
+            !current.getFirst().equals(user.getEmail())||
             tokens.existsByUserAndTypeAndUsedAtIsNullAndRevokedAtIsNull(user,UserTokenType.EMAIL_VERIFICATION))
             throw unavailable();
-        return UsernamePasswordAuthenticationToken.authenticated(user.getEmail(),null,List.of());
+        return UsernamePasswordAuthenticationToken.authenticated(current.getFirst(),null,List.of());
     }
 
     private static byte[] hash(String ticket) {
