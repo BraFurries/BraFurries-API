@@ -55,7 +55,7 @@ class GoogleDriveOAuthClient {
         params.put("q","'"+parent+"' in parents and trashed = false");
         params.put("pageSize","100");
         params.put("orderBy","folder,name");
-        params.put("fields","nextPageToken,incompleteSearch,files(id,name,mimeType,parents,trashed,ownedByMe,size,modifiedTime)");
+        params.put("fields","nextPageToken,incompleteSearch,files(id,name,mimeType,parents,trashed,ownedByMe,size,modifiedTime,version)");
         if (pageToken!=null && !pageToken.isBlank()) params.put("pageToken",pageToken);
         return send(HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files?"+form(params)))
             .header("Authorization","Bearer "+token).GET());
@@ -222,6 +222,23 @@ class GoogleDriveOAuthClient {
         return send(HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files?fields=id,name,mimeType,parents,trashed,ownedByMe,shared,appProperties"))
             .header("Authorization","Bearer "+token).header("Content-Type","application/json")
             .POST(HttpRequest.BodyPublishers.ofString(metadata.toString())));
+    }
+
+    JsonNode renameMetadata(String token,String id) {
+        if(!GoogleDriveConnectionService.validFolderId(id))throw new IllegalArgumentException("Invalid resource");
+        return send(HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files/"+id+
+            "?fields=id,name,mimeType,parents,trashed,ownedByMe,shared,version,capabilities(canRename)"))
+            .header("Authorization","Bearer "+token).GET());
+    }
+
+    JsonNode rename(String token,String id,String name) {
+        if(!GoogleDriveConnectionService.validFolderId(id)||!GoogleDriveUploadPolicy.validName(name))
+            throw new IllegalArgumentException("Invalid rename");
+        var metadata=json.createObjectNode().put("name",name);
+        return send(HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files/"+id+
+            "?fields=id,name,mimeType,parents,trashed,ownedByMe,shared,version,capabilities(canRename)"))
+            .header("Authorization","Bearer "+token).header("Content-Type","application/json")
+            .method("PATCH",HttpRequest.BodyPublishers.ofString(metadata.toString())));
     }
 
     private JsonNode send(HttpRequest.Builder builder) {
