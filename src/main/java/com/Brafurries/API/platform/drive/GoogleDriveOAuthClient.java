@@ -334,6 +334,18 @@ class GoogleDriveOAuthClient {
             .POST(HttpRequest.BodyPublishers.ofString(metadata.toString())));
     }
 
+    private static final String TRASH_FIELDS="id,name,mimeType,parents,trashed,explicitlyTrashed,ownedByMe,shared,version,capabilities(canTrash,canUntrash)";
+    JsonNode trashMetadata(String token,String id){
+        if(!GoogleDriveConnectionService.validFolderId(id))throw new IllegalArgumentException("Invalid resource");
+        return send(HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files/"+id+"?fields="+TRASH_FIELDS))
+            .header("Authorization","Bearer "+token).GET());
+    }
+    JsonNode setTrashed(String token,String id,boolean trashed){
+        if(!GoogleDriveConnectionService.validFolderId(id))throw new IllegalArgumentException("Invalid resource");
+        return send(HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files/"+id+"?fields="+TRASH_FIELDS))
+            .header("Authorization","Bearer "+token).header("Content-Type","application/json")
+            .method("PATCH",HttpRequest.BodyPublishers.ofString(json.createObjectNode().put("trashed",trashed).toString())));
+    }
     private JsonNode send(HttpRequest.Builder builder) {
         try {
             var response = http.send(builder.timeout(Duration.ofSeconds(10)).build(),
