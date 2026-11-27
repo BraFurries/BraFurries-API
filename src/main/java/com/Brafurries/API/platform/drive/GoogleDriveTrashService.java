@@ -122,6 +122,8 @@ public class GoogleDriveTrashService {
         int actor=authorization.currentUser(auth).getId();
         var policy=acl.browsePolicy(auth);
         requireAnchor(policy,anchor);
+        if(policy.rights().entrySet().stream().noneMatch(e->policy.canView(e.getKey())&&e.getValue().contains(TRASH)))
+            return new Page(List.of(),null);
         var rows=ledger.page(policy.scope(),anchor,cursor);
         if(rows.isEmpty())return new Page(List.of(),null);
         try{
