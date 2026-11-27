@@ -33,7 +33,7 @@ final class AdminUserSearchSpecification {
             } else if (search != null) {
                 // Keep database-side case folding and the existing LIKE wildcard semantics.
                 Expression<String> pattern = cb.lower(cb.concat(
-                    cb.concat(cb.literal("%"), cb.literal(search)), cb.literal("%")));
+                    cb.concat(cb.literal("%"), search), cb.literal("%")));
                 var identityQuery = query.subquery(Integer.class);
                 var identity = identityQuery.from(UserDiscord.class);
                 identityQuery.select(identity.<Integer>get("id")).where(
@@ -57,8 +57,8 @@ final class AdminUserSearchSpecification {
                     cb.equal(ban.get("user"), user), cb.isNull(ban.get("revokedAt")), validity);
                 Predicate banned = cb.exists(banQuery);
                 // Keep database comparison semantics for filter strings, including collation.
-                filters.add(cb.or(cb.and(cb.equal(cb.literal(status), "banned"), banned),
-                    cb.and(cb.equal(cb.literal(status), "active"), cb.not(banned))));
+                filters.add(cb.or(cb.and(cb.equal(cb.literal("banned"), status), banned),
+                    cb.and(cb.equal(cb.literal("active"), status), cb.not(banned))));
             }
 
             if (role != null) {
@@ -67,10 +67,10 @@ final class AdminUserSearchSpecification {
                 Predicate supporter = hasRole(user, query, cb, "supporter");
                 // Same highest-role precedence as the previous JPQL.
                 filters.add(cb.or(
-                    cb.and(cb.equal(cb.literal(role), "admin"), admin),
-                    cb.and(cb.equal(cb.literal(role), "moderator"), cb.not(admin), moderator),
-                    cb.and(cb.equal(cb.literal(role), "supporter"), cb.not(admin), cb.not(moderator), supporter),
-                    cb.and(cb.equal(cb.literal(role), "member"), cb.not(admin), cb.not(moderator), cb.not(supporter))
+                    cb.and(cb.equal(cb.literal("admin"), role), admin),
+                    cb.and(cb.equal(cb.literal("moderator"), role), cb.not(admin), moderator),
+                    cb.and(cb.equal(cb.literal("supporter"), role), cb.not(admin), cb.not(moderator), supporter),
+                    cb.and(cb.equal(cb.literal("member"), role), cb.not(admin), cb.not(moderator), cb.not(supporter))
                 ));
             }
             return cb.and(filters.toArray(Predicate[]::new));
