@@ -85,4 +85,23 @@ class GoogleDriveBrowserServiceTest {
         when(google.children("access","anchor_folder",null)).thenReturn(page);
         assertThrows(ResponseStatusException.class,()->service.list(auth,"anchor_folder","anchor_folder",null));
     }
+
+    @Test void incompleteProviderSearchDoesNotLookLikeAnEmptyFolder() {
+        setup();
+        var page=json.createObjectNode().put("incompleteSearch",true);page.putArray("files");
+        when(google.children("access","anchor_folder",null)).thenReturn(page);
+        assertEquals(503,assertThrows(ResponseStatusException.class,
+            ()->service.list(auth,"anchor_folder","anchor_folder",null)).getStatusCode().value());
+    }
+
+    @Test void newExplicitBoundaryDuringListingFailsClosed() {
+        setup();folder("child_folder","anchor_folder");
+        var page=json.createObjectNode();page.putArray("files");
+        when(google.children("access","child_folder",null)).thenReturn(page);
+        var changed=new GoogleDriveFolderAccessService.BrowsePolicy(scope,
+            Set.of("anchor_folder","secret_folder","child_folder"),Map.of("anchor_folder","Eventos"));
+        when(acl.browsePolicy(auth)).thenReturn(policy(true),changed);
+        assertEquals(404,assertThrows(ResponseStatusException.class,
+            ()->service.list(auth,"anchor_folder","child_folder",null)).getStatusCode().value());
+    }
 }
