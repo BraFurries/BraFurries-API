@@ -78,6 +78,12 @@ jobs:
       - name: Validate UserBan mapping (no Docker dependency)
         run: ./mvnw -B -Dtest=UserBanReasonMappingTest test
 
+      - name: Profile optimized EventRepository in a fresh test JVM
+        run: ./mvnw -B -Dtest=RepositoryQueryStartupDiagnosticsTest#profilesEventRepository test
+
+      - name: Profile optimized EventRepository after JPQL control
+        run: ./mvnw -B -Dtest=RepositoryQueryStartupDiagnosticsTest#profilesEventRepositoryAfterControl test
+
       - name: Run tests
         run: ./mvnw test
 
