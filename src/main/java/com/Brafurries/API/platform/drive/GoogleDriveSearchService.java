@@ -36,6 +36,8 @@ public class GoogleDriveSearchService {
         this.acl=acl;this.connection=connection;this.google=google;this.authorization=authorization;this.enabled=enabled;
     }
 
+    public boolean available(Authentication auth){return enabled&&!acl.browsePolicy(auth).visible().isEmpty();}
+
     public Page search(Authentication auth,String raw,String cursor){
         if(!enabled)throw unavailable();
         String query=normalize(raw);
