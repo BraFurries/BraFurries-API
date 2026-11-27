@@ -147,7 +147,7 @@ public class GoogleDriveTransferService {
     }
     static String copyName(String original){
         String result="Cópia de "+original;
-        return result.codePointCount(0,result.length())<=255?result:result.substring(0,result.offsetByCodePoints(0,255));
+        return result.codePointCount(0,result.length())<=255?result:result.substring(0,result.offsetByCodePoints(0,255)).stripTrailing();
     }
     private static void requirePrivateFolder(JsonNode n,String id){
         if(n==null||!id.equals(n.path("id").asText())||!FOLDER.equals(n.path("mimeType").asText())||!isOwnedLive(n)||
