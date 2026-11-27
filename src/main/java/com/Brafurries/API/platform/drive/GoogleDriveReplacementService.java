@@ -102,6 +102,7 @@ public class GoogleDriveReplacementService {
                         requirePreserved(google.revision(currentToken,intent.target(),intent.previousRevision()),intent.previousRevision());
                         if(!pinned.equals(inspect(auth,r,intent,currentToken)))throw conflict();
                     }
+                    if(System.nanoTime()-deadline>=0)throw conflict();
                     google.replacementChunk(uri,intent.target(),r.mime(),offset,r.size(),bytes);
                     offset+=length;
                 }
@@ -127,7 +128,7 @@ public class GoogleDriveReplacementService {
 
     private GoogleDriveRevisionService.Snapshot inspect(Authentication auth,GoogleDriveUploadLedger.Reservation r,
             GoogleDriveUploadLedger.Replacement i,String token){
-        if(authorization.currentUser(auth).getId()!=r.actor())throw inaccessible();
+        if(authorization.requireOwner(auth).getId()!=r.actor()||authorization.currentUser(auth).getId()!=r.actor())throw inaccessible();
         return revisions.inspect(auth,r.scope(),token,r.anchor(),r.destination(),i.target(),true).snapshot();
     }
     private void verifyStaging(String token,GoogleDriveUploadLedger.Reservation r){
