@@ -321,21 +321,8 @@ jobs:
       - name: Package without rerunning tests
         run: ./mvnw -DskipTests package
 
-      - name: Verify prebuilt runtime image contains the exact packaged JAR
-        run: |
-          set -euo pipefail
-          context="$(mktemp -d "${RUNNER_TEMP}/api-image-context.XXXXXX")"
-          trap 'rm -rf -- "$context"' EXIT
-          install -m 0644 target/API-0.0.1-SNAPSHOT.jar "$context/app.jar"
-          test -s "$context/app.jar"
-          docker build --target ci-runtime --file "$GITHUB_WORKSPACE/Dockerfile" \
-            --tag brafurries-api:ci-check "$context"
-          expected="$(sha256sum "$context/app.jar" | cut -d ' ' -f 1)"
-          actual="$(docker run --rm --entrypoint sha256sum brafurries-api:ci-check /app/app.jar | cut -d ' ' -f 1)"
-          test "$expected" = "$actual"
-          test "$(docker image inspect --format '{{.Config.User}}' brafurries-api:ci-check)" = 'app:app'
-          test "$(docker image inspect --format '{{json .Config.Entrypoint}}' brafurries-api:ci-check)" = '["java","-Djava.io.tmpdir=/app/tmp","-jar","/app/app.jar"]'
-          docker run --rm --entrypoint sh brafurries-api:ci-check -c 'test "$(id -u)" = 10001 && test -w /app/tmp && test -r /app/app.jar'
+      - name: Verify layered runtime image and dependency reuse
+        run: bash scripts/ci/check_layered_image.sh
 
   # Independent of existing smoke; no shared datasource, scheduler, SMTP or DML in production.
   creator-studio-disposable-integration:

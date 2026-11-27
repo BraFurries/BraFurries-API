@@ -26,8 +26,19 @@ USER app:app
 ENTRYPOINT ["java", "-Djava.io.tmpdir=/app/tmp", "-jar", "/app/app.jar"]
 
 # CI supplies only the JAR produced by Maven's successful package lifecycle.
+# Spring Boot 3.5 tools mode extracts libraries and creates an application JAR
+# with an ordered manifest classpath, without running the application.
+FROM eclipse-temurin:21-jre-jammy AS ci-extract
+WORKDIR /extract
+COPY app.jar ./app.jar
+RUN java -Djarmode=tools -jar app.jar extract --layers --destination layers \
+    && find layers -exec touch -h -d '@0' {} +
+
 FROM runtime-base AS ci-runtime
-COPY app.jar ${APP_HOME}/app.jar
+COPY --from=ci-extract /extract/layers/dependencies/ ${APP_HOME}/
+COPY --from=ci-extract /extract/layers/spring-boot-loader/ ${APP_HOME}/
+COPY --from=ci-extract /extract/layers/snapshot-dependencies/ ${APP_HOME}/
+COPY --from=ci-extract /extract/layers/application/ ${APP_HOME}/
 
 # Keep the default source build usable outside CI (BuildKit).
 FROM runtime-base AS runtime
