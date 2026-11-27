@@ -272,6 +272,33 @@ public class GoogleDriveConnectionService {
         return new FolderScope(existing.subject(), folderId);
     }
 
+    // Internal-only token issuance. Caller must authorize the local operation first.
+    @Transactional
+    public String browserAccessToken(FolderScope expected) {
+        requireConfigured();
+        Connection existing=connection(true);
+        if (!matchesConfig(existing) || !expected.equals(new FolderScope(existing.subject(),folderId)))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"Conexão institucional alterada");
+        try {
+            String refresh=cipher.decrypt(existing.ciphertext(),REFRESH_PURPOSE);
+            JsonNode token=google.token(Map.of("grant_type","refresh_token","client_id",clientId,
+                "client_secret",clientSecret,"refresh_token",refresh));
+            String access=token.path("access_token").asText("");
+            if (access.isBlank()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Google indisponível");
+            String rotated=token.path("refresh_token").asText("");
+            if (!rotated.isBlank()) {
+                if (rotated.length()>4000) throw new ResponseStatusException(HttpStatus.CONFLICT,"Reconexão institucional necessária");
+                jdbc.update("UPDATE platform_google_drive_connection SET refresh_token_ciphertext=? WHERE id=1",
+                    cipher.encrypt(rotated,REFRESH_PURPOSE));
+            }
+            return access;
+        } catch (GoogleDriveOAuthClient.ProviderFailure ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Conexão institucional indisponível");
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Conexão institucional indisponível");
+        }
+    }
+
     public record ManagedFolder(String folderId, String parentFolderId, String name, Instant verifiedAt) {}
     record VerifiedFolder(String parentId, String name) {}
 
