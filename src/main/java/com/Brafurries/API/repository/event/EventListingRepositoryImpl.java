@@ -47,6 +47,11 @@ public class EventListingRepositoryImpl implements EventListingRepository {
         apply(cb, query, event, filter, true, pageable);
         query.select(event);
         var selection = em.createQuery(query);
+        // Preserve the original @EntityGraph: controller DTO mapping uses these
+        // associations with open-in-view disabled, after the repository call.
+        var graph = em.createEntityGraph(Event.class);
+        graph.addAttributeNodes("locale", "hostUser");
+        selection.setHint("jakarta.persistence.fetchgraph", graph);
         if (pageable.isPaged()) {
             selection.setFirstResult(Math.toIntExact(pageable.getOffset()));
             selection.setMaxResults(pageable.getPageSize());
