@@ -54,7 +54,25 @@ public final class UserQueryStartupProfiling
             LOG.warn("STARTUP_QUERY_PROFILE skipped reason=unexpected_factory");
             return;
         }
-        definition.setBeanClassName(ProfiledFactoryBean.class.getName());
+        // Repository registrars may already have populated merged-definition
+        // and type caches during postprocessor discovery. Re-register a copy
+        // to invalidate those caches instead of mutating the original in place.
+        if (!(beans instanceof org.springframework.beans.factory.support.BeanDefinitionRegistry registry)
+                || !(definition instanceof org.springframework.beans.factory.support.AbstractBeanDefinition original)) {
+            LOG.warn("STARTUP_QUERY_PROFILE skipped reason=unsupported_registry");
+            return;
+        }
+        if (beans.containsSingleton(BEAN)) {
+            LOG.warn("STARTUP_QUERY_PROFILE skipped reason=already_initialized");
+            return;
+        }
+        var replacement = original.cloneBeanDefinition();
+        replacement.setBeanClass(ProfiledFactoryBean.class);
+        // Explicit target type can still describe the original factory class.
+        if (replacement instanceof org.springframework.beans.factory.support.RootBeanDefinition root) {
+            root.setTargetType((org.springframework.core.ResolvableType) null);
+        }
+        registry.registerBeanDefinition(BEAN, replacement);
         try {
             LOG.info("STARTUP_QUERY_PROFILE enabled repository=UserRepository processors={} max_heap_mib={}",
                 Runtime.getRuntime().availableProcessors(), Runtime.getRuntime().maxMemory() / (1024 * 1024));
