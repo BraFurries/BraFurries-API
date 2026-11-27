@@ -24,7 +24,9 @@ public class GoogleDriveBrowserService {
     }
     public record Mount(String id,String name) {}
     public record Entry(String id,String name,String mimeType,boolean folder,String size,String modifiedTime) {}
-    public record Page(List<Entry> entries,String nextPageToken,boolean canDownload) {}
+    public record Page(List<Entry> entries,String nextPageToken,boolean canDownload,boolean canUpload) {
+        public Page(List<Entry> entries,String nextPageToken,boolean canDownload){this(entries,nextPageToken,canDownload,false);}
+    }
 
     public List<Mount> mounts(Authentication auth) {
         var policy=acl.browsePolicy(auth);
@@ -75,7 +77,8 @@ public class GoogleDriveBrowserService {
             String next=response.path("nextPageToken").asText("");
             if (next.length()>2048) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Paginação indisponível");
             return new Page(List.copyOf(entries),next.isBlank()?null:next,
-                operationAllowed(after,path,GoogleDriveFolderAccessService.Permission.DOWNLOAD));
+                operationAllowed(after,path,GoogleDriveFolderAccessService.Permission.DOWNLOAD),
+                operationAllowed(after,path,GoogleDriveFolderAccessService.Permission.UPLOAD));
         } catch (GoogleDriveOAuthClient.ProviderFailure ex) {
             if (ex.status==403 || ex.status==404) throw inaccessible();
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Não foi possível consultar o Google");
