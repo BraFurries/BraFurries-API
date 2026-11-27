@@ -41,6 +41,18 @@ public class GoogleDriveUploadSessionService {
     }
 
     Start begin(Authentication auth,String anchor,String destination,String name,String mime,long size) {
+        return beginInternal(auth,anchor,destination,name,mime,size,null,null);
+    }
+
+    Start beginReplacement(Authentication auth,String anchor,String destination,String name,String mime,long size,
+            GoogleDriveUploadLedger.Replacement replacement,GoogleDriveConnectionService.FolderScope expectedScope) {
+        java.util.Objects.requireNonNull(replacement);java.util.Objects.requireNonNull(expectedScope);
+        return beginInternal(auth,anchor,destination,name,mime,size,replacement,expectedScope);
+    }
+
+    private Start beginInternal(Authentication auth,String anchor,String destination,String name,String mime,long size,
+            GoogleDriveUploadLedger.Replacement replacement,GoogleDriveConnectionService.FolderScope expectedScope) {
+        var permission=replacement==null?GoogleDriveFolderAccessService.Permission.UPLOAD:GoogleDriveFolderAccessService.Permission.REPLACE;
         if (!GoogleDriveConnectionService.validFolderId(staging) || maxBytes<=0)
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Upload institucional não configurado");
         if (!GoogleDriveConnectionService.validFolderId(anchor) ||
@@ -50,12 +62,13 @@ public class GoogleDriveUploadSessionService {
         if (size>maxBytes) throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE,"Arquivo excede o limite permitido");
         int actor=authorization.currentUser(auth).getId();
         var before=acl.browsePolicy(auth);
+        if(expectedScope!=null&&!expectedScope.equals(before.scope()))throw GoogleDriveBrowserService.inaccessible();
         requireDestination(before,anchor,destination);
         String token=connection.browserAccessToken(before.scope());
         GoogleDriveUploadLedger.Reservation reservation=null;
         try {
             var path=browser.verifyPath(token,before,anchor,destination);
-            requireUpload(before,path);
+            requireOperation(before,path,permission);
             var destinationMeta=google.uploadFolderMetadata(token,destination);
             if (destinationMeta==null || !destination.equals(destinationMeta.path("id").asText()) ||
                 !GoogleDriveBrowserService.isOwnedLive(destinationMeta) ||
@@ -70,10 +83,10 @@ public class GoogleDriveUploadSessionService {
             if (!before.scope().equals(after.scope()) || actor!=authorization.currentUser(auth).getId())
                 throw GoogleDriveBrowserService.inaccessible();
             requireDestination(after,anchor,destination);
-            requireUpload(after,path);
+            requireOperation(after,path,permission);
             var r=new GoogleDriveUploadLedger.Reservation(UUID.randomUUID().toString(),actor,
                 before.scope(),anchor,destination,staging,providerId,name,mime,size);
-            ledger.reserve(r);
+            if(replacement==null)ledger.reserve(r);else ledger.reserveReplacement(r,replacement);
             reservation=r;
             // The committed reservation always precedes creation of the provider session.
             URI uri=google.beginResumableUpload(token,providerId,staging,r.id(),name,mime,size);
@@ -81,7 +94,7 @@ public class GoogleDriveUploadSessionService {
             if (!before.scope().equals(current.scope()) || actor!=authorization.currentUser(auth).getId())
                 throw GoogleDriveBrowserService.inaccessible();
             requireDestination(current,anchor,destination);
-            requireUpload(current,browser.verifyPath(token,current,anchor,destination));
+            requireOperation(current,browser.verifyPath(token,current,anchor,destination),permission);
             verifyStaging(token,current);
             if (!ledger.markOpen(r)) throw new ResponseStatusException(HttpStatus.CONFLICT,"Sessão de upload expirada");
             return new Start(r.id(),uri);
@@ -108,10 +121,10 @@ public class GoogleDriveUploadSessionService {
             throw GoogleDriveBrowserService.inaccessible();
     }
 
-    private static void requireUpload(GoogleDriveFolderAccessService.BrowsePolicy policy,List<String> path) {
+    private static void requireOperation(GoogleDriveFolderAccessService.BrowsePolicy policy,List<String> path,GoogleDriveFolderAccessService.Permission permission) {
         for (String id:path) if (policy.registered().contains(id)&&!policy.canView(id))
             throw GoogleDriveBrowserService.inaccessible();
-        if (!GoogleDriveBrowserService.operationAllowed(policy,path,GoogleDriveFolderAccessService.Permission.UPLOAD))
+        if (!GoogleDriveBrowserService.operationAllowed(policy,path,permission))
             throw GoogleDriveBrowserService.inaccessible();
     }
 }
