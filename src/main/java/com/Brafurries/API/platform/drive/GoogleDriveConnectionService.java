@@ -312,7 +312,8 @@ public class GoogleDriveConnectionService {
                 WHERE google_subject=? AND status<>'CREATED'
             UNION SELECT result_file_id FROM platform_google_drive_transfer_operations
                 WHERE google_subject=? AND status IN ('PENDING','RECONCILE_REQUIRED')
-            """,String.class,scope.subject(),scope.subject(),scope.subject(),scope.subject()));
+            UNION SELECT file_id FROM platform_google_drive_trash_operations WHERE google_subject=? AND active_file_id IS NOT NULL
+            """,String.class,scope.subject(),scope.subject(),scope.subject(),scope.subject(),scope.subject()));
         if (validFolderId(configuredStaging.trim())) hidden.add(configuredStaging.trim());
         return Set.copyOf(hidden);
     }
