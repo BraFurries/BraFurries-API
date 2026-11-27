@@ -66,7 +66,7 @@ public class GoogleDriveContentService {
             String access=connection.browserAccessToken(before.scope());
             List<String> path=browser.verifyPath(access,before,anchor,folder);
             requireOperation(before,path,preview);
-            if (before.registered().contains(file)) throw inaccessible();
+            if (before.registered().contains(file) || connection.hiddenUploadResources(before.scope()).contains(file)) throw inaccessible();
             FileInfo meta=verifyFile(google.fileMetadata(access,file),file,folder);
             Format format=format(meta.mime(),preview);
             if (format.exportMime()==null && meta.size()!=null) {
@@ -82,6 +82,8 @@ public class GoogleDriveContentService {
             if (!meta.equals(current) || !path.equals(browser.verifyPath(access,before,anchor,folder))) throw inaccessible();
             var after=acl.browsePolicy(auth);
             if (!before.scope().equals(after.scope()) || after.registered().contains(file)) throw inaccessible();
+            var hidden=connection.hiddenUploadResources(after.scope());
+            if (hidden.contains(file) || path.stream().anyMatch(hidden::contains)) throw inaccessible();
             requireAnchor(after,anchor);
             requireOperation(after,path,preview);
             if (preview && IMAGES.contains(format.outputMime()) && !validImage(bytes,format.outputMime()))
