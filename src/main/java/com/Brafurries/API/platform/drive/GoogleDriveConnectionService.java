@@ -8,6 +8,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.HashSet;
+import java.util.Set;
+import java.time.LocalDateTime;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -30,6 +35,8 @@ public class GoogleDriveConnectionService {
     private final String clientId, clientSecret, account, folderId, redirectUri;
     private final boolean enabled;
     private final DriveTokenCipher cipher;
+    @Value("${GOOGLE_DRIVE_UPLOAD_STAGING_FOLDER_ID:}")
+    private String configuredStaging="";
 
     public GoogleDriveConnectionService(
         PlatformAuthorizationService authorization, JdbcTemplate jdbc, GoogleDriveOAuthClient google,
@@ -87,11 +94,13 @@ public class GoogleDriveConnectionService {
         jdbc.queryForObject("SELECT id FROM users WHERE id=? FOR UPDATE", Integer.class, owner);
     }
 
-    private Connection connection() {
+    private Connection connection() { return connection(false); }
+
+    private Connection connection(boolean lock) {
         List<Connection> rows = jdbc.query("""
             SELECT google_subject, google_email, oauth_client_id, refresh_token_ciphertext
             FROM platform_google_drive_connection WHERE id=1
-            """, (rs, i) -> new Connection(rs.getString(1), rs.getString(2),
+            """+(lock?" FOR UPDATE":""), (rs, i) -> new Connection(rs.getString(1), rs.getString(2),
                 rs.getString(3), rs.getBytes(4)));
         return rows.isEmpty() ? null : rows.getFirst();
     }
@@ -170,7 +179,7 @@ public class GoogleDriveConnectionService {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
                 "Autorização inválida. Selecione a conta institucional e conceda o acesso solicitado.");
         }
-        Connection previous = connection();
+        Connection previous = connection(true);
         // Do not silently replace an established Google subject, even if its email matches.
         if (previous != null && !previous.subject().equals(subject)) {
             audit(owner, "AUTHORIZATION_FAILED");
@@ -219,7 +228,7 @@ public class GoogleDriveConnectionService {
         int owner = authorization.requireOwner(auth).getId();
         requireConfigured();
         lockOwner(owner);
-        Connection existing = connection();
+        Connection existing = connection(true);
         if (!matchesConfig(existing)) return new RootCheck("RECONNECT_REQUIRED");
         try {
             String refresh = cipher.decrypt(existing.ciphertext(), REFRESH_PURPOSE);
@@ -250,6 +259,167 @@ public class GoogleDriveConnectionService {
         } catch (IllegalStateException ex) {
             return new RootCheck("RECONNECT_REQUIRED");
         }
+    }
+
+    record FolderScope(String subject, String rootId) {}
+
+    // Internal metadata only; no credentials cross this boundary.
+    FolderScope folderScope() { return folderScope(false); }
+
+    FolderScope folderScope(boolean lock) {
+        requireConfigured();
+        Connection existing = connection(lock);
+        if (!matchesConfig(existing)) throw new ResponseStatusException(HttpStatus.CONFLICT,
+            "Conecte a conta institucional primeiro");
+        return new FolderScope(existing.subject(), folderId);
+    }
+
+    // Internal-only token issuance. Caller must authorize the local operation first.
+    @Transactional
+    public String browserAccessToken(FolderScope expected) {
+        requireConfigured();
+        Connection existing=connection(true);
+        if (!matchesConfig(existing) || !expected.equals(new FolderScope(existing.subject(),folderId)))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"Conexão institucional alterada");
+        try {
+            String refresh=cipher.decrypt(existing.ciphertext(),REFRESH_PURPOSE);
+            JsonNode token=google.token(Map.of("grant_type","refresh_token","client_id",clientId,
+                "client_secret",clientSecret,"refresh_token",refresh));
+            String access=token.path("access_token").asText("");
+            if (access.isBlank()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Google indisponível");
+            String rotated=token.path("refresh_token").asText("");
+            if (!rotated.isBlank()) {
+                if (rotated.length()>4000) throw new ResponseStatusException(HttpStatus.CONFLICT,"Reconexão institucional necessária");
+                jdbc.update("UPDATE platform_google_drive_connection SET refresh_token_ciphertext=? WHERE id=1",
+                    cipher.encrypt(rotated,REFRESH_PURPOSE));
+            }
+            return access;
+        } catch (GoogleDriveOAuthClient.ProviderFailure ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Conexão institucional indisponível");
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Conexão institucional indisponível");
+        }
+    }
+
+    // All historical staging folders remain private even after configuration
+    // changes. Unpublished provider IDs are excluded from every read path.
+    Set<String> hiddenUploadResources(FolderScope scope) {
+        var hidden=new HashSet<>(jdbc.queryForList("""
+            SELECT DISTINCT staging_folder_id FROM platform_google_drive_upload_sessions WHERE google_subject=?
+            UNION SELECT provider_file_id FROM platform_google_drive_upload_sessions
+                WHERE google_subject=? AND status<>'PUBLISHED'
+            """,String.class,scope.subject(),scope.subject()));
+        if (validFolderId(configuredStaging.trim())) hidden.add(configuredStaging.trim());
+        return Set.copyOf(hidden);
+    }
+
+    public record ManagedFolder(String folderId, String parentFolderId, String name, Instant verifiedAt) {}
+    record VerifiedFolder(String parentId, String name) {}
+
+    @Transactional(readOnly = true)
+    public List<ManagedFolder> managedFolders(Authentication auth) {
+        authorization.requireOwner(auth);
+        requireConfigured();
+        Connection existing = connection();
+        if (!matchesConfig(existing)) throw new ResponseStatusException(HttpStatus.CONFLICT,
+            "Conecte a conta institucional primeiro");
+        return jdbc.query("""
+            SELECT folder_id,parent_folder_id,folder_name,verified_at
+            FROM platform_google_drive_managed_folders
+            WHERE google_subject=? AND root_folder_id=?
+            ORDER BY folder_name,folder_id
+            """, (rs,i) -> new ManagedFolder(rs.getString(1),rs.getString(2),rs.getString(3),
+                rs.getObject(4,LocalDateTime.class).toInstant(ZoneOffset.UTC)), existing.subject(),folderId);
+    }
+
+    static boolean validFolderId(String id) {
+        return id != null && id.matches("[A-Za-z0-9_-]{5,200}");
+    }
+
+    // No permission mutation here. Validate each ancestor server-side, including
+    // the configured root. Shortcuts, incomplete metadata and cycles fail closed.
+    VerifiedFolder verifyFolder(String access, String target) {
+        return verifyFolder(access,target,Set.of());
+    }
+
+    private VerifiedFolder verifyFolder(String access,String target,Set<String> hidden) {
+        if (!validFolderId(target) || target.equals(folderId))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Selecione uma subpasta da raiz institucional");
+        Set<String> visited = new HashSet<>();
+        String current = target;
+        VerifiedFolder result = null;
+        for (int depth=0; depth<32; depth++) {
+            if (hidden.contains(current) || !visited.add(current)) break;
+            JsonNode node = google.root(access,current);
+            if (!"ACCESSIBLE".equals(classifyRoot(node,current).status()))
+                throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                    "Pasta indisponível, não institucional ou sem capacidade de compartilhar");
+            if (current.equals(folderId)) return result;
+            JsonNode parents = node.path("parents");
+            if (!parents.isArray() || parents.size()!=1 || !parents.get(0).isTextual()) break;
+            String parent = parents.get(0).asText();
+            if (!validFolderId(parent) || parent.equals(current)) break;
+            if (result == null) {
+                JsonNode name = node.path("name");
+                if (!name.isTextual() || name.asText().isBlank() ||
+                    name.asText().codePointCount(0,name.asText().length())>255)
+                    throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"Nome de pasta inválido");
+                result = new VerifiedFolder(parent,name.asText());
+            }
+            current = parent;
+        }
+        throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+            "Não foi possível comprovar que a pasta pertence à raiz institucional");
+    }
+
+    @Transactional(noRollbackFor = ResponseStatusException.class)
+    public ManagedFolder registerFolder(Authentication auth, String target) {
+        int owner = authorization.requireOwner(auth).getId();
+        requireConfigured();
+        if (!validFolderId(target) || target.equals(folderId))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Selecione uma subpasta da raiz institucional");
+        lockOwner(owner);
+        Connection existing = connection(true);
+        if (!matchesConfig(existing)) throw new ResponseStatusException(HttpStatus.CONFLICT,
+            "Conecte a conta institucional primeiro");
+        VerifiedFolder verified;
+        try {
+            String refresh = cipher.decrypt(existing.ciphertext(), REFRESH_PURPOSE);
+            JsonNode token = google.token(Map.of("grant_type","refresh_token",
+                "client_id",clientId,"client_secret",clientSecret,"refresh_token",refresh));
+            String access = token.path("access_token").asText("");
+            if (access.isBlank()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Google indisponível");
+            String rotated = token.path("refresh_token").asText("");
+            if (!rotated.isBlank()) {
+                if (rotated.length()>4000) throw new ResponseStatusException(HttpStatus.CONFLICT,"Reconecte a conta institucional");
+                jdbc.update("UPDATE platform_google_drive_connection SET refresh_token_ciphertext=? WHERE id=1",
+                    cipher.encrypt(rotated,REFRESH_PURPOSE));
+            }
+            verified = verifyFolder(access,target,hiddenUploadResources(new FolderScope(existing.subject(),folderId)));
+        } catch (GoogleDriveOAuthClient.ProviderFailure ex) {
+            throw new ResponseStatusException(switch (ex.status) {
+                case 400,401 -> HttpStatus.CONFLICT;
+                case 403,404 -> HttpStatus.UNPROCESSABLE_ENTITY;
+                default -> HttpStatus.SERVICE_UNAVAILABLE;
+            }, "Não foi possível verificar a pasta no Google; autorize a pasta e seus ancestrais ou reconecte a conta");
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"Reconecte a conta institucional");
+        }
+        jdbc.update("""
+            INSERT INTO platform_google_drive_managed_folders
+              (google_subject,root_folder_id,folder_id,parent_folder_id,folder_name,
+               registered_by_user_id,registered_at,verified_by_user_id,verified_at)
+            VALUES (?,?,?,?,?,?,UTC_TIMESTAMP(6),?,UTC_TIMESTAMP(6))
+            ON DUPLICATE KEY UPDATE parent_folder_id=VALUES(parent_folder_id),
+                folder_name=VALUES(folder_name),verified_by_user_id=VALUES(verified_by_user_id),
+                verified_at=VALUES(verified_at)
+            """,existing.subject(),folderId,target,verified.parentId(),verified.name(),owner,owner);
+        return jdbc.queryForObject("""
+            SELECT folder_id,parent_folder_id,folder_name,verified_at
+            FROM platform_google_drive_managed_folders
+            WHERE google_subject=? AND root_folder_id=? AND folder_id=?
+            """,(rs,i)->new ManagedFolder(rs.getString(1),rs.getString(2),rs.getString(3),
+                rs.getObject(4,LocalDateTime.class).toInstant(ZoneOffset.UTC)),existing.subject(),folderId,target);
     }
 
     // Local removal only. Google grant revocation is explicit in the Google account.
