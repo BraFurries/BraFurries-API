@@ -64,7 +64,7 @@ class UserIdentityLinkServiceTest {
         assertEquals(10, result.userA().userId());
         assertEquals(20, result.userB().userId());
         assertEquals("mesma pessoa", result.reason());
-        verify(users, never()).delete(any());
+        verify(users, never()).delete(org.mockito.ArgumentMatchers.<User>any());
         verify(users, never()).deleteById(any());
         verify(discord, never()).save(any());
         verify(banPropagation).propagateForConfirmedCluster(10);
