@@ -71,7 +71,8 @@ class GoogleDriveFolderCreationServiceTest {
         assertThrows(ResponseStatusException.class,this::create);verify(ledger).uncertain(any());
         when(ledger.find(operation)).thenReturn(new GoogleDriveFolderCreationLedger.Operation(operation,8,scope,
             "anchor_folder","child_folder","new_folder","Nova pasta","RECONCILE_REQUIRED"));
-        assertThrows(ResponseStatusException.class,this::create);
+        assertEquals("new_folder",create().id());
+        verify(ledger).confirmReconciled(any());
         verify(google,times(1)).createFolder(anyString(),anyString(),anyString(),anyString(),anyString());
     }
     @Test void rejectsSharedParent(){
