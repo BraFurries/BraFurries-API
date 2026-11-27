@@ -54,6 +54,15 @@ public class GoogleDriveFolderCreationLedger {
     }
 
     @Transactional(propagation=Propagation.REQUIRES_NEW)
+    public void confirmReconciled(Operation r) {
+        int changed=jdbc.update("""
+            UPDATE platform_google_drive_folder_operations SET status='CREATED',updated_at=UTC_TIMESTAMP(6)
+            WHERE id=? AND actor_user_id=? AND status='RECONCILE_REQUIRED'
+            """,r.id(),r.actor());
+        if(changed!=1)throw new ResponseStatusException(HttpStatus.CONFLICT,"Operação exige reconciliação");
+    }
+
+    @Transactional(propagation=Propagation.REQUIRES_NEW)
     public void uncertain(Operation r) {
         jdbc.update("""
             UPDATE platform_google_drive_folder_operations SET status='RECONCILE_REQUIRED',updated_at=UTC_TIMESTAMP(6)
