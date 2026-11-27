@@ -35,6 +35,8 @@ public class GoogleDriveConnectionService {
     private final String clientId, clientSecret, account, folderId, redirectUri;
     private final boolean enabled;
     private final DriveTokenCipher cipher;
+    @Value("${GOOGLE_DRIVE_UPLOAD_STAGING_FOLDER_ID:}")
+    private String configuredStaging="";
 
     public GoogleDriveConnectionService(
         PlatformAuthorizationService authorization, JdbcTemplate jdbc, GoogleDriveOAuthClient google,
@@ -299,6 +301,18 @@ public class GoogleDriveConnectionService {
         }
     }
 
+    // All historical staging folders remain private even after configuration
+    // changes. Unpublished provider IDs are excluded from every read path.
+    Set<String> hiddenUploadResources(FolderScope scope) {
+        var hidden=new HashSet<>(jdbc.queryForList("""
+            SELECT DISTINCT staging_folder_id FROM platform_google_drive_upload_sessions WHERE google_subject=?
+            UNION SELECT provider_file_id FROM platform_google_drive_upload_sessions
+                WHERE google_subject=? AND status<>'PUBLISHED'
+            """,String.class,scope.subject(),scope.subject()));
+        if (validFolderId(configuredStaging.trim())) hidden.add(configuredStaging.trim());
+        return Set.copyOf(hidden);
+    }
+
     public record ManagedFolder(String folderId, String parentFolderId, String name, Instant verifiedAt) {}
     record VerifiedFolder(String parentId, String name) {}
 
@@ -325,13 +339,17 @@ public class GoogleDriveConnectionService {
     // No permission mutation here. Validate each ancestor server-side, including
     // the configured root. Shortcuts, incomplete metadata and cycles fail closed.
     VerifiedFolder verifyFolder(String access, String target) {
+        return verifyFolder(access,target,Set.of());
+    }
+
+    private VerifiedFolder verifyFolder(String access,String target,Set<String> hidden) {
         if (!validFolderId(target) || target.equals(folderId))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Selecione uma subpasta da raiz institucional");
         Set<String> visited = new HashSet<>();
         String current = target;
         VerifiedFolder result = null;
         for (int depth=0; depth<32; depth++) {
-            if (!visited.add(current)) break;
+            if (hidden.contains(current) || !visited.add(current)) break;
             JsonNode node = google.root(access,current);
             if (!"ACCESSIBLE".equals(classifyRoot(node,current).status()))
                 throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
@@ -377,7 +395,7 @@ public class GoogleDriveConnectionService {
                 jdbc.update("UPDATE platform_google_drive_connection SET refresh_token_ciphertext=? WHERE id=1",
                     cipher.encrypt(rotated,REFRESH_PURPOSE));
             }
-            verified = verifyFolder(access,target);
+            verified = verifyFolder(access,target,hiddenUploadResources(new FolderScope(existing.subject(),folderId)));
         } catch (GoogleDriveOAuthClient.ProviderFailure ex) {
             throw new ResponseStatusException(switch (ex.status) {
                 case 400,401 -> HttpStatus.CONFLICT;
