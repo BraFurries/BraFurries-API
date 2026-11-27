@@ -161,6 +161,26 @@ class GoogleDriveOAuthClient {
         } catch (java.io.IOException ex) {throw new ProviderFailure(0);}
     }
 
+    JsonNode moveUploadedFile(String token,String id,String from,String to) {
+        if (!GoogleDriveConnectionService.validFolderId(id) ||
+            !GoogleDriveConnectionService.validFolderId(from) ||
+            !GoogleDriveConnectionService.validFolderId(to) || from.equals(to))
+            throw new IllegalArgumentException("Invalid move");
+        String query=form(Map.of("addParents",to,"removeParents",from,
+            "fields","id,name,mimeType,parents,trashed,ownedByMe,shared,size,version,appProperties"));
+        return send(HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files/"+id+"?"+query))
+            .header("Authorization","Bearer "+token).header("Content-Type","application/json")
+            .method("PATCH",HttpRequest.BodyPublishers.ofString("{}")));
+    }
+
+    JsonNode trashStagedFile(String token,String id) {
+        if (!GoogleDriveConnectionService.validFolderId(id)) throw new IllegalArgumentException("Invalid file");
+        return send(HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files/"+id+
+            "?fields=id,parents,trashed,ownedByMe,appProperties"))
+            .header("Authorization","Bearer "+token).header("Content-Type","application/json")
+            .method("PATCH",HttpRequest.BodyPublishers.ofString("{\"trashed\":true}")));
+    }
+
     private JsonNode send(HttpRequest.Builder builder) {
         try {
             var response = http.send(builder.timeout(Duration.ofSeconds(10)).build(),
