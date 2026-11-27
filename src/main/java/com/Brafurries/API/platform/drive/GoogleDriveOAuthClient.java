@@ -49,6 +49,18 @@ class GoogleDriveOAuthClient {
             .header("Authorization", "Bearer " + token).GET());
     }
 
+    JsonNode children(String token,String parent,String pageToken) {
+        if (!GoogleDriveConnectionService.validFolderId(parent)) throw new IllegalArgumentException("Invalid parent");
+        var params=new java.util.HashMap<String,String>();
+        params.put("q","'"+parent+"' in parents and trashed = false");
+        params.put("pageSize","100");
+        params.put("orderBy","folder,name");
+        params.put("fields","nextPageToken,incompleteSearch,files(id,name,mimeType,parents,trashed,ownedByMe,size,modifiedTime)");
+        if (pageToken!=null && !pageToken.isBlank()) params.put("pageToken",pageToken);
+        return send(HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files?"+form(params)))
+            .header("Authorization","Bearer "+token).GET());
+    }
+
     private JsonNode send(HttpRequest.Builder builder) {
         try {
             var response = http.send(builder.timeout(Duration.ofSeconds(10)).build(),
