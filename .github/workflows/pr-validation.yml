@@ -339,7 +339,9 @@ jobs:
           echo 'matches=false' >> "$GITHUB_OUTPUT"
           [[ "$PR_HEAD" =~ ^[a-f0-9]{40}$ ]] || exit 0
           [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]] || exit 0
-          git diff --quiet HEAD -- || exit 0
+          # The workflow deliberately chmods the non-executable tracked mvnw.
+          # Ignore that mode change, but refuse altered tracked contents.
+          git -c core.fileMode=false diff --quiet HEAD -- || exit 0
           if ! git cat-file -e "$PR_HEAD^{tree}" 2>/dev/null; then
             git fetch --no-tags --depth=1 origin "$PR_HEAD" || exit 0
           fi

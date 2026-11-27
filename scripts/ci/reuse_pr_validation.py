@@ -73,7 +73,7 @@ def prove(get, sha, tree):
     response = get(f"/actions/runs?{params}")
     # If pagination hides possible newer runs, conservatively refuse reuse.
     runs = response["workflow_runs"]
-    if response.get("total_count", 0) > len(runs):
+    if response.get("total_count") != len(runs):
         return False, "ambiguous_workflow_history"
     matches = [
         run for run in runs
@@ -93,7 +93,7 @@ def prove(get, sha, tree):
         return False, "validation_not_successful_first_attempt"
     result = get(f"/actions/runs/{run_id}/attempts/1/jobs?per_page=100")
     jobs = result["jobs"]
-    if result.get("total_count", 0) != len(jobs):
+    if result.get("total_count") != len(jobs):
         return False, "incomplete_job_metadata"
     if not all(unique_success(jobs, name) for name in REQUIRED_JOBS):
         return False, "required_jobs_not_successful"

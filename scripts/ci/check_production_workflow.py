@@ -31,10 +31,10 @@ build = before_production.split("  build-image:\n", 1)[1]
 assert "actions: read" in build and "pull-requests: read" in build
 assert "run: python3 scripts/ci/reuse_pr_validation.py" in build
 assert "if: ${{ github.event_name == 'push' }}" in build
-assert "if: ${{ steps.validation.outputs.reuse != 'true' }}\n        run: ./mvnw -B package" in build
-assert "if: ${{ steps.validation.outputs.reuse == 'true' }}\n        run: ./mvnw -B -DskipTests package" in build
+assert "if: ${{ steps.validation.outcome != 'success' || steps.validation.outputs.reuse != 'true' }}\n        run: ./mvnw -B package" in build
+assert "if: ${{ steps.validation.outcome == 'success' && steps.validation.outputs.reuse == 'true' }}\n        run: ./mvnw -B -DskipTests package" in build
 assert build.count("-DskipTests") == 1 and "maven.test.skip" not in build
-assert "id: validation" in build
+assert "id: validation" in build and "continue-on-error: true" in build
 assert build.index("id: validation") < build.index("run: ./mvnw -B package")
 pr_workflow = (ROOT / ".github/workflows/pr-validation.yml").read_text(encoding="utf-8")
 assert 'git rev-parse HEAD' in pr_workflow

@@ -1,8 +1,12 @@
 """Offline tests for the deploy validation reuse gate."""
 import copy
+import os
+from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
 
-from reuse_pr_validation import REPOSITORY, REQUIRED_JOBS, REQUIRED_TEST_STEPS, WORKFLOW, prove
+from reuse_pr_validation import REPOSITORY, REQUIRED_JOBS, REQUIRED_TEST_STEPS, WORKFLOW, main, prove
 
 SHA = "a" * 40
 HEAD = "b" * 40
@@ -118,6 +122,37 @@ class ReusePolicyTest(unittest.TestCase):
     def test_ambiguous_pr(self):
         self.associated.append(copy.deepcopy(self.pr))
         self.assert_denied()
+
+    def test_incomplete_workflow_history(self):
+        def incomplete(path):
+            result = self.get(path)
+            if path.startswith("/actions/runs?"):
+                result["total_count"] += 1
+            return result
+        self.assertFalse(prove(incomplete, SHA, TREE)[0])
+
+    def test_manual_dispatch_always_runs_tests(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            with patch.dict(os.environ, {
+                "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main",
+                "GITHUB_REPOSITORY": REPOSITORY, "GITHUB_OUTPUT": str(output),
+            }, clear=True), patch("urllib.request.urlopen") as api:
+                main()
+                api.assert_not_called()
+            self.assertEqual("reuse=false\n", output.read_text())
+
+    def test_api_failure_falls_back_to_full_tests(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            with patch.dict(os.environ, {
+                "GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/main",
+                "GITHUB_REPOSITORY": REPOSITORY, "GITHUB_SHA": SHA, "GITHUB_OUTPUT": str(output),
+                "GH_TOKEN": "fake-test-token",
+            }, clear=True), patch("subprocess.check_output", side_effect=[SHA, TREE]), \
+                    patch("urllib.request.urlopen", side_effect=TimeoutError):
+                main()
+            self.assertEqual("reuse=false\n", output.read_text())
 
 
 if __name__ == "__main__":

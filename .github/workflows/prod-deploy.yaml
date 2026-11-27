@@ -73,16 +73,17 @@ jobs:
       - name: Verify reusable PR validation for this exact main tree
         id: validation
         if: ${{ github.event_name == 'push' }}
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/ci/reuse_pr_validation.py
 
       - name: Test and package once on GitHub-hosted runner
-        if: ${{ steps.validation.outputs.reuse != 'true' }}
+        if: ${{ steps.validation.outcome != 'success' || steps.validation.outputs.reuse != 'true' }}
         run: ./mvnw -B package
 
       - name: Package already validated main tree
-        if: ${{ steps.validation.outputs.reuse == 'true' }}
+        if: ${{ steps.validation.outcome == 'success' && steps.validation.outputs.reuse == 'true' }}
         run: ./mvnw -B -DskipTests package
 
       - name: Stage only the tested API artifact
