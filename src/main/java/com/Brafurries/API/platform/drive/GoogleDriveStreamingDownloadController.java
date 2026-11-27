@@ -29,6 +29,15 @@ public class GoogleDriveStreamingDownloadController {
         if(request.getQueryString()!=null||request.getParameterValues("ticket").length!=1)
             throw GoogleDriveBrowserService.inaccessible();
         response.setHeader("Cache-Control","no-store");
-        service.download(ticket,response);
+        try{service.download(ticket,response);}
+        catch(IOException ex){
+            if(!response.isCommitted()){
+                response.reset();response.setHeader("Cache-Control","no-store");
+                throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,"Download interrompido");
+            }
+            // Do not append an error JSON to a partially transmitted attachment.
+            // Content-Length lets the browser detect a truncated response.
+            try{response.getOutputStream().close();}catch(IOException ignored){}
+        }
     }
 }
