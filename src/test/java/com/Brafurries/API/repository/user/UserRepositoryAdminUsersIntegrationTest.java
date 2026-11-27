@@ -270,6 +270,9 @@ class UserRepositoryAdminUsersIntegrationTest {
         Community community = new Community();
         community.setName("Ban scope");
         community = communities.saveAndFlush(community);
+        Community otherCommunity = new Community();
+        otherCommunity.setName("Other ban scope");
+        otherCommunity = communities.saveAndFlush(otherCommunity);
         User expired = user("BanScope Expired");
         User revoked = user("BanScope Revoked");
         User expiresToday = user("BanScope Today");
@@ -278,7 +281,7 @@ class UserRepositoryAdminUsersIntegrationTest {
         saveBan(expired, community, today.minusDays(1), null, today);
         saveBan(revoked, community, null, today.atStartOfDay(), today);
         saveBan(expiresToday, community, today, null, today);
-        saveBan(indefinite, community, null, null, today);
+        saveBan(indefinite, otherCommunity, null, null, today);
         entityManager.flush();
         entityManager.clear();
         var sorted = PageRequest.of(0, 20, Sort.by("id"));
