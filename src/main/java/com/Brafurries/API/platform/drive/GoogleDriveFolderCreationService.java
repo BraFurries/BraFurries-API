@@ -48,7 +48,19 @@ public class GoogleDriveFolderCreationService {
             var path=verifyParent(token,policy,anchor,parent);
             requireLocal(auth,actor,policy.scope(),anchor,path);
             var old=ledger.find(operationId);
-            if(old!=null)return existing(old,actor,policy.scope(),anchor,parent,name);
+            if(old!=null){
+                requireSameOperation(old,actor,policy.scope(),anchor,parent,name);
+                if("CREATED".equals(old.status()))return new Result(old.providerId(),old.name());
+                if(!"RECONCILE_REQUIRED".equals(old.status()))throw conflict();
+                // Confirm the reserved provider ID only; never replay a write.
+                validateCreated(google.uploadedFile(token,old.providerId()),old);
+                var current=acl.browsePolicy(auth);
+                if(!old.scope().equals(current.scope()))throw inaccessible();
+                path=verifyParent(token,current,anchor,parent);
+                requireLocal(auth,actor,old.scope(),anchor,path);
+                ledger.confirmReconciled(old);
+                return new Result(old.providerId(),old.name());
+            }
             String id=GoogleDriveUploadPolicy.generatedFileId(google.generateUploadId(token));
             var r=new GoogleDriveFolderCreationLedger.Operation(operationId,actor,policy.scope(),anchor,parent,id,name,"PENDING");
             try {ledger.reserve(r);} catch(DuplicateKeyException ex) {throw conflict();}
@@ -74,12 +86,10 @@ public class GoogleDriveFolderCreationService {
         }
     }
 
-    private static Result existing(GoogleDriveFolderCreationLedger.Operation r,int actor,
+    private static void requireSameOperation(GoogleDriveFolderCreationLedger.Operation r,int actor,
             GoogleDriveConnectionService.FolderScope scope,String anchor,String parent,String name) {
         if(r.actor()!=actor||!r.scope().equals(scope)||!r.anchor().equals(anchor)||!r.parent().equals(parent)||!r.name().equals(name))
             throw inaccessible();
-        if(!"CREATED".equals(r.status()))throw conflict();
-        return new Result(r.providerId(),r.name());
     }
     private List<String> verifyParent(String token,GoogleDriveFolderAccessService.BrowsePolicy policy,String anchor,String parent) {
         var path=browser.verifyPath(token,policy,anchor,parent);
