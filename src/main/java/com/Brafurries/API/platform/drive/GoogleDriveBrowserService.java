@@ -46,8 +46,8 @@ public class GoogleDriveBrowserService {
     public record Entry(String id,String name,String mimeType,boolean folder,String size,String modifiedTime,String version,boolean canRename,boolean canViewHistory,boolean canReplace,boolean canMove,boolean canCopy,boolean canTrash) {
         public Entry(String id,String name,String mimeType,boolean folder,String size,String modifiedTime){this(id,name,mimeType,folder,size,modifiedTime,null,false,false,false,false,false,false);}
     }
-    public record Page(List<Entry> entries,String nextPageToken,boolean canDownload,boolean canUpload,boolean canCreateFolder,boolean canStreamDownload,long streamMaxBytes) {
-        public Page(List<Entry> entries,String nextPageToken,boolean canDownload){this(entries,nextPageToken,canDownload,false,false,false,0);}
+    public record Page(List<Entry> entries,String nextPageToken,boolean canDownload,boolean canUpload,boolean canCreateFolder,boolean canStreamDownload,long streamMaxBytes,boolean canViewTrash) {
+        public Page(List<Entry> entries,String nextPageToken,boolean canDownload){this(entries,nextPageToken,canDownload,false,false,false,0,false);}
     }
 
     public List<Mount> mounts(Authentication auth) {
@@ -116,7 +116,8 @@ public class GoogleDriveBrowserService {
                 operationAllowed(after,path,GoogleDriveFolderAccessService.Permission.UPLOAD),
                 createFolderEnabled&&operationAllowed(after,path,GoogleDriveFolderAccessService.Permission.CREATE_FOLDER),
                 streamEnabled&&streamMaxBytes>0&&operationAllowed(after,path,GoogleDriveFolderAccessService.Permission.DOWNLOAD),
-                streamEnabled&&streamMaxBytes>0?streamMaxBytes:0);
+                streamEnabled&&streamMaxBytes>0?streamMaxBytes:0,
+                trashEnabled&&operationAllowed(after,path,GoogleDriveFolderAccessService.Permission.TRASH));
         } catch (GoogleDriveOAuthClient.ProviderFailure ex) {
             if (ex.status==403 || ex.status==404) throw inaccessible();
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Não foi possível consultar o Google");
