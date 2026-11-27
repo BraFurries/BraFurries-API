@@ -78,12 +78,6 @@ jobs:
       - name: Validate UserBan mapping (no Docker dependency)
         run: ./mvnw -B -Dtest=UserBanReasonMappingTest test
 
-      - name: Profile both optimized repositories (users then events)
-        run: ./mvnw -B -Dtest=RepositoryQueryStartupDiagnosticsTest#profilesUsersThenEvents test
-
-      - name: Profile both optimized repositories (events then users)
-        run: ./mvnw -B -Dtest=RepositoryQueryStartupDiagnosticsTest#profilesEventsThenUsers test
-
       - name: Run tests
         run: ./mvnw test
 
