@@ -38,7 +38,8 @@ public class GoogleDriveReplacementLedger {
             SELECT EXISTS(SELECT 1 FROM platform_google_drive_rename_operations
                 WHERE google_subject=? AND active_file_id=?)
                 OR EXISTS(SELECT 1 FROM platform_google_drive_transfer_operations WHERE google_subject=? AND active_file_id=?)
-            """,Boolean.class,r.scope().subject(),i.target(),r.scope().subject(),i.target())))throw conflict();
+                OR EXISTS(SELECT 1 FROM platform_google_drive_trash_operations WHERE google_subject=? AND active_file_id=?)
+            """,Boolean.class,r.scope().subject(),i.target(),r.scope().subject(),i.target(),r.scope().subject(),i.target())))throw conflict();
         if(jdbc.update("""
             UPDATE platform_google_drive_upload_sessions SET status='PUBLISHING',updated_at=UTC_TIMESTAMP(6),next_reconcile_at=NULL
             WHERE id=? AND actor_user_id=? AND status='OPEN' AND expires_at>UTC_TIMESTAMP(6)
