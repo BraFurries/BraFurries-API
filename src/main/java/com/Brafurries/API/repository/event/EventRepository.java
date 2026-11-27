@@ -125,9 +125,6 @@ public interface EventRepository extends JpaRepository<Event, Integer>, EventLis
             """)
     List<Event> findPendingApprovalEventsByRelatedUserId(@Param("relatedUserId") Integer relatedUserId);
 
-    @EntityGraph(attributePaths = {"locale", "hostUser"})
-
-
     @EntityGraph(attributePaths = {"hostUser"})
     List<Event> findByHostUserId(Integer userId);
 
