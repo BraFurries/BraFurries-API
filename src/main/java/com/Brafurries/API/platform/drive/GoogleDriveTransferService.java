@@ -69,12 +69,13 @@ public class GoogleDriveTransferService {
             if(!paths.equals(current)||!meta.equals(verify(google.transferMetadata(token,file),file,parent,action)))throw conflict();
             checkFolderMove(acl.browsePolicy(auth),current,sourceAnchor,destinationAnchor,file,meta,action);
             local(auth,actor,r.scope(),sourceAnchor,parent,file,destinationAnchor,destination,current,action,true);
+            String resultName=action==Action.COPY&&parent.equals(destination)?copyName(meta.name()):meta.name();
             attempted=true;
             JsonNode response=action==Action.MOVE?google.moveUploadedFile(token,file,parent,destination):
-                google.copyFile(token,file,resultId,destination,meta.name(),operationId);
+                google.copyFile(token,file,resultId,destination,resultName,operationId);
             if(response==null||!resultId.equals(response.path("id").asText()))throw conflict();
             var result=verify(google.transferMetadata(token,resultId),resultId,destination,null);
-            if(!meta.name().equals(result.name())||!meta.mime().equals(result.mime())||!meta.hash().equals(result.hash())||
+            if(!resultName.equals(result.name())||!meta.mime().equals(result.mime())||!meta.hash().equals(result.hash())||
                 !meta.size().equals(result.size()))throw conflict();
             if(action==Action.COPY){
                 var copy=google.uploadedFile(token,resultId);
@@ -143,6 +144,10 @@ public class GoogleDriveTransferService {
         if(action==Action.COPY&&(!GoogleDriveUploadPolicy.validMime(mime)||!hash.matches("[0-9a-f]{64}")||
             !size.matches("[0-9]{1,20}")||!n.path("capabilities").path("canCopy").asBoolean(false)))throw inaccessible();
         return new Metadata(n.path("name").asText(),mime,n.path("version").asText(),hash,size);
+    }
+    static String copyName(String original){
+        String result="Cópia de "+original;
+        return result.codePointCount(0,result.length())<=255?result:result.substring(0,result.offsetByCodePoints(0,255));
     }
     private static void requirePrivateFolder(JsonNode n,String id){
         if(n==null||!id.equals(n.path("id").asText())||!FOLDER.equals(n.path("mimeType").asText())||!isOwnedLive(n)||
