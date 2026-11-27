@@ -45,7 +45,8 @@ class GoogleDriveBrowserServiceTest {
     @Test void mountListUsesOnlyAuthorizedRegistry() {
         when(acl.browsePolicy(auth)).thenReturn(policy(true));
         assertEquals(List.of(new GoogleDriveBrowserService.Mount("anchor_folder","Eventos")),service.mounts(auth));
-        verifyNoInteractions(connection,google);
+        verify(connection).hiddenUploadResources(scope);
+        verifyNoInteractions(google);
     }
     @Test void rejectsOutsideRootAndManagedBoundary() {
         setup();
@@ -103,5 +104,21 @@ class GoogleDriveBrowserServiceTest {
         when(acl.browsePolicy(auth)).thenReturn(policy(true),changed);
         assertEquals(404,assertThrows(ResponseStatusException.class,
             ()->service.list(auth,"anchor_folder","child_folder",null)).getStatusCode().value());
+    }
+
+    @Test void stagingFolderRemainsHiddenEvenWhenRegisteredOrMoved() {
+        setup();
+        when(connection.hiddenUploadResources(scope)).thenReturn(Set.of("anchor_folder"));
+        assertTrue(service.mounts(auth).isEmpty());
+        assertThrows(ResponseStatusException.class,()->service.list(auth,"anchor_folder","anchor_folder",null));
+        verifyNoInteractions(google);
+    }
+    @Test void unpublishedFileIsHiddenEvenInsideAuthorizedDestination() {
+        setup();
+        when(connection.hiddenUploadResources(scope)).thenReturn(Set.of("normal_file"));
+        var page=json.createObjectNode();
+        page.putArray("files").add(file("normal_file","anchor_folder","application/pdf"));
+        when(google.children("access","anchor_folder",null)).thenReturn(page);
+        assertTrue(service.list(auth,"anchor_folder","anchor_folder",null).entries().isEmpty());
     }
 }
