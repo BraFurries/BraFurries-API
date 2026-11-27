@@ -177,7 +177,7 @@ public class GoogleDriveConnectionService {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
                 "Autorização inválida. Selecione a conta institucional e conceda o acesso solicitado.");
         }
-        Connection previous = connection();
+        Connection previous = connection(true);
         // Do not silently replace an established Google subject, even if its email matches.
         if (previous != null && !previous.subject().equals(subject)) {
             audit(owner, "AUTHORIZATION_FAILED");
@@ -226,7 +226,7 @@ public class GoogleDriveConnectionService {
         int owner = authorization.requireOwner(auth).getId();
         requireConfigured();
         lockOwner(owner);
-        Connection existing = connection();
+        Connection existing = connection(true);
         if (!matchesConfig(existing)) return new RootCheck("RECONNECT_REQUIRED");
         try {
             String refresh = cipher.decrypt(existing.ciphertext(), REFRESH_PURPOSE);
@@ -361,7 +361,7 @@ public class GoogleDriveConnectionService {
         if (!validFolderId(target) || target.equals(folderId))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Selecione uma subpasta da raiz institucional");
         lockOwner(owner);
-        Connection existing = connection();
+        Connection existing = connection(true);
         if (!matchesConfig(existing)) throw new ResponseStatusException(HttpStatus.CONFLICT,
             "Conecte a conta institucional primeiro");
         VerifiedFolder verified;
