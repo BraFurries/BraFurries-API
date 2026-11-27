@@ -21,6 +21,7 @@ public class GoogleDriveUploadCleanupService {
         initialDelayString="${GOOGLE_DRIVE_UPLOAD_CLEANUP_DELAY_MS:900000}")
     public void reconcile() {
         if (!enabled) return;
+        ledger.flagStalePublications();
         for (var session:ledger.due()) {
             try {cleanup(session);}
             catch (RuntimeException ignored) {
