@@ -23,13 +23,17 @@ public class GoogleDriveBrowserService {
     private long streamMaxBytes=5368709120L;
     @org.springframework.beans.factory.annotation.Value("${GOOGLE_DRIVE_CREATE_FOLDER_ENABLED:false}")
     private boolean createFolderEnabled;
+    @org.springframework.beans.factory.annotation.Value("${GOOGLE_DRIVE_RENAME_ENABLED:false}")
+    private boolean renameEnabled;
 
     public GoogleDriveBrowserService(GoogleDriveFolderAccessService acl,
             GoogleDriveConnectionService connection,GoogleDriveOAuthClient google) {
         this.acl=acl;this.connection=connection;this.google=google;
     }
     public record Mount(String id,String name) {}
-    public record Entry(String id,String name,String mimeType,boolean folder,String size,String modifiedTime) {}
+    public record Entry(String id,String name,String mimeType,boolean folder,String size,String modifiedTime,String version,boolean canRename) {
+        public Entry(String id,String name,String mimeType,boolean folder,String size,String modifiedTime){this(id,name,mimeType,folder,size,modifiedTime,null,false);}
+    }
     public record Page(List<Entry> entries,String nextPageToken,boolean canDownload,boolean canUpload,boolean canCreateFolder,boolean canStreamDownload,long streamMaxBytes) {
         public Page(List<Entry> entries,String nextPageToken,boolean canDownload){this(entries,nextPageToken,canDownload,false,false,false,0);}
     }
@@ -78,7 +82,10 @@ public class GoogleDriveBrowserService {
                 if (after.registered().contains(id) && !after.canView(id)) continue;
                 entries.add(new Entry(id,file.path("name").asText(),type,FOLDER.equals(type),
                     file.path("size").isTextual()?file.path("size").asText():null,
-                    file.path("modifiedTime").isTextual()?file.path("modifiedTime").asText():null));
+                    file.path("modifiedTime").isTextual()?file.path("modifiedTime").asText():null,
+                    file.path("version").isTextual()?file.path("version").asText():null,
+                    renameEnabled&&!after.registered().contains(id)&&GoogleDriveRenameService.validVersion(file.path("version").asText(""))&&
+                        operationAllowed(after,path,GoogleDriveFolderAccessService.Permission.RENAME)));
             }
             String next=response.path("nextPageToken").asText("");
             if (next.length()>2048) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Paginação indisponível");
