@@ -323,6 +323,164 @@ class UserRepositoryAdminUsersIntegrationTest {
         bans.saveAndFlush(ban);
     }
 
+    /** Compare against the exact pre-refactor JPQL, retained only as a test oracle. */
+    @Test
+    void criteriaMatchesLegacyJpqlAcrossFiltersAndPages() {
+        int admin = role("admin");
+        int moderator = role("moderator");
+        int supporter = role("supporter");
+        User first = user("Parity Alpha");
+        assignRole(first, admin);
+        assignRole(first, moderator);
+        User second = user("Parity Beta");
+        assignRole(second, supporter);
+        User third = user("Parity O'Neil");
+        User fourth = users.saveAndFlush(new User());
+        discordIdentity(fourth, 823456789012345678L, "parity.discord", "Parity Visible");
+        discordIdentity(fourth, 923456789012345678L, "parity.alt", "Other");
+        ban(second);
+        entityManager.flush();
+        entityManager.clear();
+        LocalDate today = LocalDate.now();
+
+        record Filter(String text, Long discordId, String status, String role) {}
+        var filters = List.of(
+            new Filter(null, null, null, null),
+            new Filter("PARITY", null, null, null),
+            new Filter("Parity", null, "active", "admin"),
+            new Filter("Parity", null, "banned", "supporter"),
+            new Filter("Parity", null, "active", "member"),
+            new Filter("Parity", null, null, "moderator"),
+            new Filter("Parity", null, null, "unknown"),
+            new Filter("Parity", null, "unknown", null),
+            new Filter("Parity", null, "ACTIVE", "MEMBER"),
+            new Filter("O'Neil", null, null, null),
+            new Filter("Parity%", null, null, null),
+            new Filter("Parity _", null, null, null),
+            new Filter("does not match", 823456789012345678L, "active", "member"),
+            new Filter(null, 823456789012345678L, "banned", null)
+        );
+        for (var filter : filters) {
+            var expected = entityManager.createQuery(LEGACY_ADMIN_SEARCH + " ORDER BY u.id", User.class)
+                .setParameter("search", filter.text())
+                .setParameter("discordUserId", filter.discordId())
+                .setParameter("status", filter.status())
+                .setParameter("role", filter.role())
+                .setParameter("today", today)
+                .getResultList().stream().map(User::getId).toList();
+            for (int page = 0; page <= 1; page++) {
+                var actual = users.searchAdminUsersFiltered(filter.text(), filter.discordId(),
+                    filter.status(), filter.role(), today, PageRequest.of(page, 2, Sort.by("id")));
+                assertEquals(expected.size(), actual.getTotalElements(), filter.toString());
+                assertEquals(expected.stream().skip(page * 2L).limit(2).toList(),
+                    actual.map(User::getId).getContent(), filter.toString());
+            }
+        }
+    }
+
+    private static final String LEGACY_ADMIN_SEARCH = """
+            SELECT u
+            FROM User u
+            WHERE (
+                (:discordUserId IS NOT NULL AND EXISTS (
+                    SELECT ud.id
+                    FROM UserDiscord ud
+                    WHERE ud.user = u AND ud.discordUserId = :discordUserId
+                ))
+                OR (:discordUserId IS NULL AND (
+                    :search IS NULL
+                    OR LOWER(COALESCE(u.displayName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+                    OR LOWER(COALESCE(u.username, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+                    OR LOWER(COALESCE(u.email, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+                    OR EXISTS (
+                        SELECT identity.id
+                        FROM UserDiscord identity
+                        WHERE identity.user = u
+                          AND (
+                              LOWER(COALESCE(identity.username, ''))
+                                  LIKE LOWER(CONCAT('%', :search, '%'))
+                              OR LOWER(COALESCE(identity.displayName, ''))
+                                  LIKE LOWER(CONCAT('%', :search, '%'))
+                          )
+                    )
+                ))
+            )
+            AND (
+                :status IS NULL
+                OR (
+                    :status = 'banned'
+                    AND EXISTS (
+                        SELECT ub.id
+                        FROM UserBan ub
+                        WHERE ub.user.id = u.id
+                          AND ub.revokedAt IS NULL
+                          AND (ub.validUntil IS NULL OR ub.validUntil >= :today)
+                    )
+                )
+                OR (
+                    :status = 'active'
+                    AND NOT EXISTS (
+                        SELECT ub.id
+                        FROM UserBan ub
+                        WHERE ub.user.id = u.id
+                          AND ub.revokedAt IS NULL
+                          AND (ub.validUntil IS NULL OR ub.validUntil >= :today)
+                    )
+                )
+            )
+            AND (
+                :role IS NULL
+                OR (
+                    :role = 'admin'
+                    AND EXISTS (
+                        SELECT ur.user.id
+                        FROM ApiUserRole ur
+                        WHERE ur.user.id = u.id
+                          AND LOWER(ur.role.name) = 'admin'
+                    )
+                )
+                OR (
+                    :role = 'moderator'
+                    AND NOT EXISTS (
+                        SELECT ur.user.id
+                        FROM ApiUserRole ur
+                        WHERE ur.user.id = u.id
+                          AND LOWER(ur.role.name) = 'admin'
+                    )
+                    AND EXISTS (
+                        SELECT ur.user.id
+                        FROM ApiUserRole ur
+                        WHERE ur.user.id = u.id
+                          AND LOWER(ur.role.name) = 'moderator'
+                    )
+                )
+                OR (
+                    :role = 'supporter'
+                    AND NOT EXISTS (
+                        SELECT ur.user.id
+                        FROM ApiUserRole ur
+                        WHERE ur.user.id = u.id
+                          AND LOWER(ur.role.name) IN ('admin', 'moderator')
+                    )
+                    AND EXISTS (
+                        SELECT ur.user.id
+                        FROM ApiUserRole ur
+                        WHERE ur.user.id = u.id
+                          AND LOWER(ur.role.name) = 'supporter'
+                    )
+                )
+                OR (
+                    :role = 'member'
+                    AND NOT EXISTS (
+                        SELECT ur.user.id
+                        FROM ApiUserRole ur
+                        WHERE ur.user.id = u.id
+                          AND LOWER(ur.role.name) IN ('admin', 'moderator', 'supporter')
+                    )
+                )
+            )
+            """;
+
     private UserCommunityStatus membership(User user, Community community, String displayName) {
         UserCommunityStatus membership = new UserCommunityStatus();
         membership.setUser(user);
