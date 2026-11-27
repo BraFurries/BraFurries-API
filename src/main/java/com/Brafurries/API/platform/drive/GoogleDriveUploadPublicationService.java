@@ -32,6 +32,7 @@ public class GoogleDriveUploadPublicationService {
     Result publish(Authentication auth,String sessionId) {
         var session=owned(auth,sessionId);
         var r=session.reservation();
+        if (ledger.isReplacement(sessionId)) throw conflict();
         if ("PUBLISHED".equals(session.status())) return new Result(sessionId,"PUBLISHED");
         if (session.expired() || !"OPEN".equals(session.status())) throw conflict();
         boolean claimed=false;
