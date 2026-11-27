@@ -35,7 +35,8 @@ public class GoogleDriveTransferLedger {
         if(Boolean.TRUE.equals(jdbc.queryForObject("""
             SELECT EXISTS(SELECT 1 FROM platform_google_drive_rename_operations WHERE google_subject=? AND active_file_id=?)
                 OR EXISTS(SELECT 1 FROM platform_google_drive_replacement_commits WHERE google_subject=? AND active_file_id=?)
-            """,Boolean.class,r.scope().subject(),r.file(),r.scope().subject(),r.file())))throw conflict();
+                OR EXISTS(SELECT 1 FROM platform_google_drive_trash_operations WHERE google_subject=? AND active_file_id=?)
+            """,Boolean.class,r.scope().subject(),r.file(),r.scope().subject(),r.file(),r.scope().subject(),r.file())))throw conflict();
         var recent=jdbc.queryForList("""
             SELECT id FROM platform_google_drive_transfer_operations WHERE actor_user_id=?
             AND created_at>=UTC_TIMESTAMP(6)-INTERVAL 1 MINUTE LIMIT 20 FOR UPDATE
