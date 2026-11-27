@@ -29,6 +29,13 @@ public class GoogleDriveRenameLedger {
     @Transactional(propagation=Propagation.REQUIRES_NEW)
     public void reserve(Operation r) {
         jdbc.queryForObject("SELECT id FROM users WHERE id=? FOR UPDATE",Integer.class,r.actor());
+        var connected=jdbc.queryForList("SELECT google_subject FROM platform_google_drive_connection WHERE id=1 FOR UPDATE",String.class);
+        if(connected.size()!=1||!r.scope().subject().equals(connected.getFirst())||
+            Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS(SELECT 1 FROM platform_google_drive_replacement_commits
+                    WHERE google_subject=? AND active_file_id=?)
+                """,Boolean.class,r.scope().subject(),r.file())))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"Arquivo com operação pendente");
         var recent=jdbc.queryForList("""
             SELECT id FROM platform_google_drive_rename_operations
             WHERE actor_user_id=? AND created_at>=UTC_TIMESTAMP(6)-INTERVAL 1 MINUTE LIMIT 20 FOR UPDATE
