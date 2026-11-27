@@ -44,9 +44,12 @@ class RepositoryQueryStartupDiagnosticsTest {
     @Autowired EntityManagerFactory entityManagerFactory;
 
     @Test
-    void measuresRealQueryResolutionForSlowRepositories() {
-        // Keep order explicit: EventRepository may benefit from JVM/parser warmup.
+    void profilesUserRepository() {
         profile(UserRepository.class, "searchAdminUsersFiltered");
+    }
+
+    @Test
+    void profilesEventRepository() {
         profile(EventRepository.class, "findUserEventsListing");
     }
 
