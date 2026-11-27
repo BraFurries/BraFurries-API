@@ -1,7 +1,6 @@
 package com.Brafurries.API.platform.drive;
 
 import com.Brafurries.API.platform.PlatformAuthorizationService;
-import com.fasterxml.jackson.databind.JsonNode;
 import java.io.IOException;
 import java.security.MessageDigest;
 import java.util.HexFormat;
@@ -14,7 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import static com.Brafurries.API.platform.drive.GoogleDriveBrowserService.inaccessible;
 
-/** Internal pilot only. No user-facing mutation endpoint until real provider validation. */
+/** Owner-only gated pilot. Google owns revision retention. */
 @Service
 public class GoogleDriveReplacementService {
     static final int CHUNK=8*1024*1024;
@@ -69,17 +68,9 @@ public class GoogleDriveReplacementService {
             claimed=true;
             if(!original.equals(inspect(auth,r,intent,token))||!source.equals(stage(token,r)))throw conflict();
             verifyStaging(token,r);
-            // Pin the OLD head before creating the new head. Never unpin automatically.
+            // Let Google manage revision retention; never pin every replacement.
+            if(!original.equals(inspect(auth,r,intent,token))||!source.equals(stage(token,r)))throw conflict();
             mutationAttempted=true;
-            var old=google.revision(token,intent.target(),intent.previousRevision());
-            if(!preserved(old,intent.previousRevision()))
-                requirePreserved(google.preserveRevision(token,intent.target(),intent.previousRevision()),intent.previousRevision());
-            requirePreserved(google.revision(token,intent.target(),intent.previousRevision()),intent.previousRevision());
-            var pinned=inspect(auth,r,intent,token);
-            // Pinning may advance the metadata version, but must not change the bytes or head.
-            if(!sameOriginalContent(original,pinned))throw conflict();
-            if(!source.equals(stage(token,r)))throw conflict();
-            verifyStaging(token,r);
             var uri=google.beginReplacementUpdate(token,intent.target(),r.mime(),r.size());
             var digest=sha256();
             long deadline=System.nanoTime()+java.time.Duration.ofMinutes(20).toNanos();
@@ -95,12 +86,11 @@ public class GoogleDriveReplacementService {
                     if(last&&(media.input().read()!=-1||!HexFormat.of().formatHex(digest.digest()).equals(source.sha256())))
                         throw conflict();
                     String currentToken=connection.browserAccessToken(r.scope());
-                    if(!pinned.equals(inspect(auth,r,intent,currentToken)))throw conflict();
+                    if(!original.equals(inspect(auth,r,intent,currentToken)))throw conflict();
                     if(last){
                         verifyStaging(currentToken,r);
                         if(!source.equals(stage(currentToken,r)))throw conflict();
-                        requirePreserved(google.revision(currentToken,intent.target(),intent.previousRevision()),intent.previousRevision());
-                        if(!pinned.equals(inspect(auth,r,intent,currentToken)))throw conflict();
+                        if(!original.equals(inspect(auth,r,intent,currentToken)))throw conflict();
                     }
                     if(System.nanoTime()-deadline>=0)throw conflict();
                     google.replacementChunk(uri,intent.target(),r.mime(),offset,r.size(),bytes);
@@ -112,8 +102,7 @@ public class GoogleDriveReplacementService {
             if(!original.name().equals(applied.name())||!r.mime().equals(applied.mime())||
                 !Long.toString(r.size()).equals(applied.size())||!source.sha256().equals(applied.sha256())||
                 original.head().equals(applied.head())||
-                new java.math.BigInteger(applied.version()).compareTo(new java.math.BigInteger(pinned.version()))<=0)throw conflict();
-            requirePreserved(google.revision(afterToken,intent.target(),intent.previousRevision()),intent.previousRevision());
+                new java.math.BigInteger(applied.version()).compareTo(new java.math.BigInteger(original.version()))<=0)throw conflict();
             if(!applied.equals(inspect(auth,r,intent,afterToken)))throw conflict();
             ledger.complete(r,applied.head());
             return new Result(sessionId,applied.head());
@@ -152,15 +141,6 @@ public class GoogleDriveReplacementService {
             snapshot.sha256().equals(i.previousSha256())&&snapshot.name().equals(i.previousName())&&
             snapshot.name().equals(r.name())&&snapshot.mime().equals(r.mime());
     }
-    static boolean sameOriginalContent(GoogleDriveRevisionService.Snapshot a,GoogleDriveRevisionService.Snapshot b){
-        return a.name().equals(b.name())&&a.mime().equals(b.mime())&&a.head().equals(b.head())&&
-            a.sha256().equals(b.sha256())&&a.size().equals(b.size());
-    }
-    private static boolean preserved(JsonNode revision,String id){
-        return revision!=null&&id.equals(revision.path("id").asText())&&
-            revision.path("keepForever").isBoolean()&&revision.path("keepForever").asBoolean();
-    }
-    private static void requirePreserved(JsonNode revision,String id){if(!preserved(revision,id))throw conflict();}
     private static MessageDigest sha256(){
         try{return MessageDigest.getInstance("SHA-256");}
         catch(java.security.NoSuchAlgorithmException ex){throw new IllegalStateException(ex);}
