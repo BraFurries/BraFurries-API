@@ -45,7 +45,7 @@ public class GoogleDriveUploadPilotController {
     public record Started(String sessionId,String uploadUri) {
         @Override public String toString(){return "Started[sessionId="+sessionId+",uploadUri=REDACTED]";}
     }
-    public record Status(String sessionId,String status,boolean expired) {}
+    public record Status(String sessionId,String status,boolean expired,boolean resumeAllowed) {}
 
     @GetMapping("/pilot")
     public ResponseEntity<Capability> capability(Authentication auth) {
@@ -65,7 +65,7 @@ public class GoogleDriveUploadPilotController {
         int actor=authorization.requireOwner(auth).getId();
         if (!GoogleDriveUploadPolicy.validSessionId(id)) throw GoogleDriveBrowserService.inaccessible();
         var session=ledger.owned(id,actor);
-        return response(new Status(id,session.status(),session.expired()));
+        return response(new Status(id,session.status(),session.expired(),enabled&&!session.expired()&&"OPEN".equals(session.status())));
     }
 
     @PostMapping("/{id}/publish")
