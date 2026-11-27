@@ -181,6 +181,49 @@ class GoogleDriveOAuthClient {
             .method("PATCH",HttpRequest.BodyPublishers.ofString("{\"trashed\":true}")));
     }
 
+    // Fixed provider host, bounded connect/read idle time, no redirects.
+    MediaStream openMedia(String token,String id,long expectedSize) {
+        if (!GoogleDriveConnectionService.validFolderId(id) || expectedSize<0) throw new IllegalArgumentException("Invalid media");
+        java.net.HttpURLConnection request=null;
+        try {
+            request=(java.net.HttpURLConnection)URI.create("https://www.googleapis.com/drive/v3/files/"+id+"?alt=media").toURL().openConnection();
+            request.setInstanceFollowRedirects(false);
+            request.setConnectTimeout(5000);request.setReadTimeout(30000);
+            request.setRequestProperty("Authorization","Bearer "+token);
+            request.setRequestProperty("Accept-Encoding","identity");
+            int status=request.getResponseCode();
+            if (status!=200) throw new ProviderFailure(status);
+            long length=request.getContentLengthLong();
+            if ((length>=0&&length!=expectedSize) ||
+                (request.getContentEncoding()!=null&&!"identity".equalsIgnoreCase(request.getContentEncoding())))
+                throw new ProviderFailure(0);
+            return new MediaStream(request,request.getInputStream());
+        } catch (java.io.IOException ex) {
+            if(request!=null)request.disconnect();
+            throw new ProviderFailure(0);
+        } catch (RuntimeException ex) {
+            if(request!=null)request.disconnect();
+            throw ex;
+        }
+    }
+    record MediaStream(java.net.HttpURLConnection connection,java.io.InputStream input) implements AutoCloseable {
+        @Override public void close() {
+            try {input.close();}catch(java.io.IOException ignored){}finally{connection.disconnect();}
+        }
+    }
+
+    JsonNode createFolder(String token,String id,String parent,String name,String operationId) {
+        if (!GoogleDriveConnectionService.validFolderId(id)||!GoogleDriveConnectionService.validFolderId(parent)||
+            !GoogleDriveUploadPolicy.validName(name)||!GoogleDriveUploadPolicy.validSessionId(operationId))
+            throw new IllegalArgumentException("Invalid folder metadata");
+        var metadata=json.createObjectNode().put("id",id).put("name",name).put("mimeType","application/vnd.google-apps.folder");
+        metadata.putArray("parents").add(parent);
+        metadata.putObject("appProperties").put("brafurriesFolderOperation",operationId);
+        return send(HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files?fields=id,name,mimeType,parents,trashed,ownedByMe,shared,appProperties"))
+            .header("Authorization","Bearer "+token).header("Content-Type","application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(metadata.toString())));
+    }
+
     private JsonNode send(HttpRequest.Builder builder) {
         try {
             var response = http.send(builder.timeout(Duration.ofSeconds(10)).build(),
