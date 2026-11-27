@@ -1,6 +1,7 @@
 package com.Brafurries.API.repository.event;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.Brafurries.API.entity.event.Event;
 import com.Brafurries.API.entity.event.EventScheduling;
@@ -98,9 +99,15 @@ class EventListingRepositoryIntegrationTest {
                 long count = bind(em.createQuery(LEGACY_COUNT, Long.class), f, email).getSingleResult();
                 assertEquals(expected.size(), count, "Legacy fixture count: " + f);
                 for (int page = 0; page <= 4; page++) {
+                    em.clear();
                     var actual = events.findUserEventsListing(email, f.seeAll(), f.manageAll(), f.approved(),
                         f.state(), f.location(), f.name(), f.monthStart(), f.monthEnd(), f.weekStart(), f.weekEnd(),
                         f.type(), f.scope(), f.related(), f.staffOnly(), f.upcoming(), NOW, PageRequest.of(page, 2));
+                    var persistence = em.getEntityManagerFactory().getPersistenceUnitUtil();
+                    for (Event event : actual.getContent()) {
+                        assertTrue(persistence.isLoaded(event, "locale"), "Locale must be loaded");
+                        assertTrue(persistence.isLoaded(event, "hostUser"), "Host must be loaded");
+                    }
                     assertEquals(count, actual.getTotalElements(), f.toString());
                     assertEquals(expected.stream().skip(page * 2L).limit(2).toList(),
                         actual.map(Event::getId).getContent(), f.toString());
