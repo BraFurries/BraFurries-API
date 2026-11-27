@@ -101,8 +101,16 @@ public class GoogleDriveFolderAccessService {
 
     record BrowsePolicy(GoogleDriveConnectionService.FolderScope scope,
                         java.util.Set<String> registered,
-                        java.util.Map<String,String> visible) {
+                        java.util.Map<String,String> visible,
+                        java.util.Map<String,List<Permission>> rights) {
         boolean canView(String folder) { return visible.containsKey(folder); }
+        boolean permits(String folder,Permission permission) {
+            return rights.getOrDefault(folder,List.of()).contains(permission);
+        }
+        BrowsePolicy(GoogleDriveConnectionService.FolderScope scope,java.util.Set<String> registered,
+                     java.util.Map<String,String> visible) {
+            this(scope,registered,visible,java.util.Map.of());
+        }
     }
 
     @Transactional(readOnly=true)
@@ -112,6 +120,7 @@ public class GoogleDriveFolderAccessService {
         var scope=connection.folderScope();
         var permissions=actor.access().owner()?java.util.Map.<String,List<Permission>>of():effectiveByFolder(actor,scope);
         var registered=new java.util.HashSet<String>();
+        var rights=new java.util.HashMap<String,List<Permission>>();
         var visible=new java.util.LinkedHashMap<String,String>();
         jdbc.query("""
             SELECT folder_id,folder_name FROM platform_google_drive_managed_folders
@@ -119,11 +128,12 @@ public class GoogleDriveFolderAccessService {
             """,rs->{
             String id=rs.getString(1);
             registered.add(id);
+            rights.put(id,actor.access().owner()?List.of(Permission.values()):List.copyOf(permissions.getOrDefault(id,List.of())));
             if (actor.access().owner() || permissions.getOrDefault(id,List.of()).contains(Permission.VIEW))
                 visible.put(id,rs.getString(2));
         },scope.subject(),scope.rootId());
         return new BrowsePolicy(scope,java.util.Set.copyOf(registered),
-            java.util.Collections.unmodifiableMap(visible));
+            java.util.Collections.unmodifiableMap(visible),java.util.Map.copyOf(rights));
     }
 
     // Atomic replacement for one principal, using optimistic comparison of the
