@@ -234,6 +234,92 @@ class UserRepositoryAdminUsersIntegrationTest {
         assertEquals(0, denied.getTotalElements());
     }
 
+    @Test
+    void preservesRolePrecedenceAndUnknownRoleFiltering() {
+        int admin = role("admin");
+        int moderator = role("moderator");
+        int supporter = role("supporter");
+        int custom = role("custom");
+        User adminUser = user("Rank Admin");
+        assignRole(adminUser, admin);
+        assignRole(adminUser, supporter);
+        User modUser = user("Rank Moderator");
+        assignRole(modUser, moderator);
+        assignRole(modUser, supporter);
+        User supporterUser = user("Rank Supporter");
+        assignRole(supporterUser, supporter);
+        User memberUser = user("Rank Member");
+        assignRole(memberUser, custom);
+        User noRoles = user("Rank No Roles");
+        var sorted = PageRequest.of(0, 1, Sort.by("id"));
+        var today = LocalDate.now();
+        assertEquals(adminUser.getId(), users.searchAdminUsersFiltered("Rank", null, null, "admin", today, sorted).getContent().getFirst().getId());
+        assertEquals(modUser.getId(), users.searchAdminUsersFiltered("Rank", null, null, "moderator", today, sorted).getContent().getFirst().getId());
+        assertEquals(supporterUser.getId(), users.searchAdminUsersFiltered("Rank", null, null, "supporter", today, sorted).getContent().getFirst().getId());
+        var members = users.searchAdminUsersFiltered("Rank", null, null, "member", today, sorted);
+        assertEquals(2, members.getTotalElements());
+        assertEquals(memberUser.getId(), members.getContent().getFirst().getId());
+        assertEquals(noRoles.getId(), users.searchAdminUsersFiltered("Rank", null, null, "member", today,
+            PageRequest.of(1, 1, Sort.by("id"))).getContent().getFirst().getId());
+        assertEquals(0, users.searchAdminUsersFiltered("Rank", null, null, "unknown", today, sorted).getTotalElements());
+    }
+
+    @Test
+    void keepsBanExpiryInclusiveAndIgnoresRevokedBansAcrossCommunities() {
+        LocalDate today = LocalDate.of(2026, 11, 27);
+        Community community = new Community();
+        community.setName("Ban scope");
+        community = communities.saveAndFlush(community);
+        User expired = user("BanScope Expired");
+        User revoked = user("BanScope Revoked");
+        User expiresToday = user("BanScope Today");
+        User indefinite = user("BanScope Indefinite");
+        User unbanned = user("BanScope Unbanned");
+        saveBan(expired, community, today.minusDays(1), null, today);
+        saveBan(revoked, community, null, today.atStartOfDay(), today);
+        saveBan(expiresToday, community, today, null, today);
+        saveBan(indefinite, community, null, null, today);
+        entityManager.flush();
+        entityManager.clear();
+        var sorted = PageRequest.of(0, 20, Sort.by("id"));
+        assertEquals(List.of(expiresToday.getId(), indefinite.getId()),
+            users.searchAdminUsersFiltered("BanScope", null, "banned", null, today, sorted)
+                .map(User::getId).getContent());
+        assertEquals(List.of(expired.getId(), revoked.getId(), unbanned.getId()),
+            users.searchAdminUsersFiltered("BanScope", null, "active", null, today, sorted)
+                .map(User::getId).getContent());
+        assertEquals(0, users.searchAdminUsersFiltered("BanScope", null, "unknown", null, today, sorted).getTotalElements());
+        assertEquals(List.of(indefinite.getId()),
+            users.searchAdminUsersFiltered("BanScope", null, "banned", null, null, sorted)
+                .map(User::getId).getContent());
+    }
+
+    @Test
+    void exactDiscordIdTakesPrecedenceOverTextButNotRoleOrStatus() {
+        User matched = user("Exact match");
+        discordIdentity(matched, 723456789012345678L, "exact.match", "Exact");
+        var sorted = PageRequest.of(0, 20, Sort.by("id"));
+        var today = LocalDate.now();
+        assertEquals(List.of(matched.getId()),
+            users.searchAdminUsersFiltered("no match", 723456789012345678L, "active", "member", today, sorted)
+                .map(User::getId).getContent());
+        assertEquals(0, users.searchAdminUsersFiltered("Exact", 723456789012345678L, "banned", null, today, sorted).getTotalElements());
+        assertEquals(0, users.searchAdminUsersFiltered("Exact", 723456789012345678L, null, "admin", today, sorted).getTotalElements());
+    }
+
+    private void saveBan(User user, Community community, LocalDate validUntil, LocalDateTime revokedAt, LocalDate today) {
+        UserBan ban = new UserBan();
+        ban.setUser(user);
+        ban.setCommunity(community);
+        ban.setDate(today.minusDays(5));
+        ban.setReason("Integration test");
+        ban.setCanAppeal(true);
+        ban.setRegisteredAt(today.minusDays(5).atStartOfDay());
+        ban.setValidUntil(validUntil);
+        ban.setRevokedAt(revokedAt);
+        bans.saveAndFlush(ban);
+    }
+
     private UserCommunityStatus membership(User user, Community community, String displayName) {
         UserCommunityStatus membership = new UserCommunityStatus();
         membership.setUser(user);
