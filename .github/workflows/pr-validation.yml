@@ -84,6 +84,12 @@ jobs:
       - name: Profile EventRepository in a fresh test JVM
         run: ./mvnw -B -Dtest=RepositoryQueryStartupDiagnosticsTest#profilesEventRepository test
 
+      - name: Profile UserRepository after a simple JPQL control in a fresh JVM
+        run: ./mvnw -B -Dtest=RepositoryQueryStartupDiagnosticsTest#profilesUserRepositoryAfterControl test
+
+      - name: Profile EventRepository after a simple JPQL control in a fresh JVM
+        run: ./mvnw -B -Dtest=RepositoryQueryStartupDiagnosticsTest#profilesEventRepositoryAfterControl test
+
       - name: Run tests
         run: ./mvnw test
 
