@@ -24,7 +24,7 @@ public class GoogleDriveBrowserService {
     }
     public record Mount(String id,String name) {}
     public record Entry(String id,String name,String mimeType,boolean folder,String size,String modifiedTime) {}
-    public record Page(List<Entry> entries,String nextPageToken) {}
+    public record Page(List<Entry> entries,String nextPageToken,boolean canDownload) {}
 
     public List<Mount> mounts(Authentication auth) {
         return acl.browsePolicy(auth).visible().entrySet().stream()
@@ -70,7 +70,8 @@ public class GoogleDriveBrowserService {
             }
             String next=response.path("nextPageToken").asText("");
             if (next.length()>2048) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Paginação indisponível");
-            return new Page(List.copyOf(entries),next.isBlank()?null:next);
+            return new Page(List.copyOf(entries),next.isBlank()?null:next,
+                operationAllowed(after,path,GoogleDriveFolderAccessService.Permission.DOWNLOAD));
         } catch (GoogleDriveOAuthClient.ProviderFailure ex) {
             if (ex.status==403 || ex.status==404) throw inaccessible();
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"Não foi possível consultar o Google");
@@ -104,18 +105,27 @@ public class GoogleDriveBrowserService {
         throw inaccessible();
     }
 
-    private static boolean isOwnedLive(JsonNode node) {
+    // Closest registered ancestor determines operation rights; all boundaries
+    // on the navigated path still require VIEW. No fall-back to broader grants.
+    static boolean operationAllowed(GoogleDriveFolderAccessService.BrowsePolicy policy,
+            List<String> path,GoogleDriveFolderAccessService.Permission permission) {
+        for (String id:path)
+            if (policy.registered().contains(id)) return policy.canView(id)&&policy.permits(id,permission);
+        return false;
+    }
+
+    static boolean isOwnedLive(JsonNode node) {
         return node.path("ownedByMe").isBoolean() && node.path("ownedByMe").asBoolean() &&
             node.path("trashed").isBoolean() && !node.path("trashed").asBoolean();
     }
-    private static String singleParent(JsonNode node) {
+    static String singleParent(JsonNode node) {
         JsonNode parents=node.path("parents");
         return parents.isArray() && parents.size()==1 && parents.get(0).isTextual()?parents.get(0).asText():null;
     }
-    private static void requireAnchor(GoogleDriveFolderAccessService.BrowsePolicy policy,String anchor) {
+    static void requireAnchor(GoogleDriveFolderAccessService.BrowsePolicy policy,String anchor) {
         if (!policy.canView(anchor)) throw inaccessible();
     }
-    private static ResponseStatusException inaccessible() {
+    static ResponseStatusException inaccessible() {
         return new ResponseStatusException(HttpStatus.NOT_FOUND,"Pasta indisponível ou sem acesso");
     }
 }
