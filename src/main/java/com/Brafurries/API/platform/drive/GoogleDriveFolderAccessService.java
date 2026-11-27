@@ -29,6 +29,20 @@ public class GoogleDriveFolderAccessService {
         this.jdbc=jdbc;
     }
 
+    private static final String EFFECTIVE_FROM = """
+            FROM platform_google_drive_person_grants p
+            JOIN platform_authorized_users approved ON approved.user_id=p.user_id
+            JOIN platform_google_drive_role_grants g ON g.google_subject=p.google_subject
+                AND g.root_folder_id=p.root_folder_id AND g.folder_id=p.folder_id
+                AND g.permission_code=p.permission_code
+            JOIN community_team_roles role ON role.id=g.role_id AND role.community_id=? AND role.active=1
+            JOIN community_team_role_assignments a ON a.role_id=role.id
+                AND a.community_id=role.community_id AND a.user_id=p.user_id
+            JOIN user_community_status m ON m.community_id=role.community_id AND m.user_id=p.user_id
+            WHERE p.google_subject=? AND p.root_folder_id=?
+            AND m.is_present=1 AND COALESCE(m.banned,0)=0
+            AND (m.approval_required=0 OR m.approved=1)
+            """;
     private static final String FOLDER_KEY="google_subject=? AND root_folder_id=? AND folder_id=?";
     private static String table(Principal principal) {
         return principal==Principal.PERSON ? "platform_google_drive_person_grants" : "platform_google_drive_role_grants";
@@ -71,44 +85,14 @@ public class GoogleDriveFolderAccessService {
         var scope=connection.folderScope();
         if (!registered(scope,folder,false)) return List.of();
         if (actor.access().owner()) return List.of(Permission.values());
-        return jdbc.queryForList("""
-            SELECT DISTINCT p.permission_code
-            FROM platform_google_drive_person_grants p
-            JOIN platform_authorized_users approved ON approved.user_id=p.user_id
-            JOIN platform_google_drive_role_grants g ON g.google_subject=p.google_subject
-                AND g.root_folder_id=p.root_folder_id AND g.folder_id=p.folder_id
-                AND g.permission_code=p.permission_code
-            JOIN community_team_roles role ON role.id=g.role_id AND role.community_id=? AND role.active=1
-            JOIN community_team_role_assignments a ON a.role_id=role.id
-                AND a.community_id=role.community_id AND a.user_id=p.user_id
-            JOIN user_community_status m ON m.community_id=role.community_id AND m.user_id=p.user_id
-            WHERE p.google_subject=? AND p.root_folder_id=? AND p.folder_id=? AND p.user_id=?
-                AND m.is_present=1 AND COALESCE(m.banned,0)=0
-                AND (m.approval_required=0 OR m.approved=1)
-            ORDER BY p.permission_code
-            """,String.class,authorization.officialCommunityId(),scope.subject(),scope.rootId(),folder,actor.user().getId())
+        return jdbc.queryForList(("SELECT DISTINCT p.permission_code "+EFFECTIVE_FROM+" AND p.folder_id=? AND p.user_id=? ORDER BY p.permission_code"),String.class,authorization.officialCommunityId(),scope.subject(),scope.rootId(),folder,actor.user().getId())
             .stream().map(Permission::valueOf).toList();
     }
 
     private java.util.Map<String,List<Permission>> effectiveByFolder(
             PlatformAuthorizationService.Actor actor,GoogleDriveConnectionService.FolderScope scope) {
         var result=new java.util.HashMap<String,List<Permission>>();
-        jdbc.query("""
-            SELECT DISTINCT p.folder_id,p.permission_code
-            FROM platform_google_drive_person_grants p
-            JOIN platform_authorized_users approved ON approved.user_id=p.user_id
-            JOIN platform_google_drive_role_grants g ON g.google_subject=p.google_subject
-                AND g.root_folder_id=p.root_folder_id AND g.folder_id=p.folder_id
-                AND g.permission_code=p.permission_code
-            JOIN community_team_roles role ON role.id=g.role_id AND role.community_id=? AND role.active=1
-            JOIN community_team_role_assignments a ON a.role_id=role.id
-                AND a.community_id=role.community_id AND a.user_id=p.user_id
-            JOIN user_community_status m ON m.community_id=role.community_id AND m.user_id=p.user_id
-            WHERE p.google_subject=? AND p.root_folder_id=? AND p.user_id=?
-                AND m.is_present=1 AND COALESCE(m.banned,0)=0
-                AND (m.approval_required=0 OR m.approved=1)
-            ORDER BY p.folder_id,p.permission_code
-            """,rs->{
+        jdbc.query(("SELECT DISTINCT p.folder_id,p.permission_code "+EFFECTIVE_FROM+" AND p.user_id=? ORDER BY p.folder_id,p.permission_code"),rs->{
             result.computeIfAbsent(rs.getString(1),ignored->new java.util.ArrayList<>())
                 .add(Permission.valueOf(rs.getString(2)));
         },authorization.officialCommunityId(),scope.subject(),scope.rootId(),actor.user().getId());
