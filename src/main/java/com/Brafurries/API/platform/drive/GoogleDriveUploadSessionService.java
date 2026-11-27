@@ -60,6 +60,7 @@ public class GoogleDriveUploadSessionService {
             if (destinationMeta==null || !destination.equals(destinationMeta.path("id").asText()) ||
                 !GoogleDriveBrowserService.isOwnedLive(destinationMeta) ||
                 !"application/vnd.google-apps.folder".equals(destinationMeta.path("mimeType").asText()) ||
+                !destinationMeta.path("shared").isBoolean() || destinationMeta.path("shared").asBoolean() ||
                 !destinationMeta.path("capabilities").path("canAddChildren").isBoolean() ||
                 !destinationMeta.path("capabilities").path("canAddChildren").asBoolean())
                 throw GoogleDriveBrowserService.inaccessible();
