@@ -19,8 +19,18 @@ public class GoogleDriveUploadLedger {
                        String anchor,String destination,String staging,String providerId,
                        String name,String mime,long size) {}
 
+    record Replacement(String target,String expectedVersion,String previousRevision,String previousSha256,String previousName) {}
+
     @Transactional(propagation=Propagation.REQUIRES_NEW)
-    public void reserve(Reservation r) {
+    public void reserve(Reservation r) {reserveInternal(r,null);}
+
+    @Transactional(propagation=Propagation.REQUIRES_NEW)
+    public void reserveReplacement(Reservation r,Replacement replacement) {
+        java.util.Objects.requireNonNull(replacement);
+        reserveInternal(r,replacement);
+    }
+
+    private void reserveInternal(Reservation r,Replacement replacement) {
         // Per-user serialization, independent of selected Community. Include unresolved
         // expired/canceled operations: a provider capability may still be alive.
         jdbc.queryForObject("SELECT id FROM users WHERE id=? FOR UPDATE",Integer.class,r.actor());
@@ -47,6 +57,12 @@ public class GoogleDriveUploadLedger {
                 UTC_TIMESTAMP(6)+INTERVAL 2 HOUR,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)+INTERVAL 2 HOUR)
             """,r.id(),r.scope().subject(),r.scope().rootId(),r.anchor(),r.destination(),
             r.staging(),r.actor(),r.providerId(),r.name(),r.mime(),r.size());
+        if(replacement!=null)jdbc.update("""
+            INSERT INTO platform_google_drive_replacement_intents
+            (session_id,google_subject,target_file_id,expected_version,previous_revision_id,previous_sha256,previous_name)
+            VALUES (?,?,?,?,?,?,?)
+            """,r.id(),r.scope().subject(),replacement.target(),replacement.expectedVersion(),
+            replacement.previousRevision(),replacement.previousSha256(),replacement.previousName());
         audit(r,"RESERVED");
     }
 
@@ -94,13 +110,21 @@ public class GoogleDriveUploadLedger {
         return rows.getFirst();
     }
 
+    @Transactional(readOnly=true,propagation=Propagation.REQUIRES_NEW)
+    public boolean isReplacement(String sessionId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+            SELECT EXISTS(SELECT 1 FROM platform_google_drive_replacement_intents WHERE session_id=?)
+            """,Boolean.class,sessionId));
+    }
+
     @Transactional(propagation=Propagation.REQUIRES_NEW)
     public boolean claimPublication(Reservation r) {
         int changed=jdbc.update("""
             UPDATE platform_google_drive_upload_sessions
             SET status='PUBLISHING',updated_at=UTC_TIMESTAMP(6),next_reconcile_at=NULL
             WHERE id=? AND actor_user_id=? AND status='OPEN' AND expires_at>UTC_TIMESTAMP(6)
-            """,r.id(),r.actor());
+              AND NOT EXISTS (SELECT 1 FROM platform_google_drive_replacement_intents WHERE session_id=?)
+            """,r.id(),r.actor(),r.id());
         if (changed==1) audit(r,"PUBLISH_STARTED");
         return changed==1;
     }
