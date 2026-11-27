@@ -15,6 +15,7 @@ on:
       - 'docs/**'
       - '.github/workflows/pr-validation.yml'
       - '.github/workflows/prod-deploy.yaml'
+      - 'scripts/ci/**'
       - '.gitignore'
 
 permissions:
@@ -49,6 +50,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      actions: read
+      pull-requests: read
 
     outputs:
       digest: ${{ steps.build.outputs.digest }}
@@ -67,8 +70,20 @@ jobs:
       - name: Make Maven Wrapper executable
         run: chmod +x mvnw
 
+      - name: Verify reusable PR validation for this exact main tree
+        id: validation
+        if: ${{ github.event_name == 'push' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/reuse_pr_validation.py
+
       - name: Test and package once on GitHub-hosted runner
+        if: ${{ steps.validation.outputs.reuse != 'true' }}
         run: ./mvnw -B package
+
+      - name: Package already validated main tree
+        if: ${{ steps.validation.outputs.reuse == 'true' }}
+        run: ./mvnw -B -DskipTests package
 
       - name: Stage only the tested API artifact
         id: package-context
