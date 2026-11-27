@@ -257,6 +257,64 @@ class GoogleDriveOAuthClient {
             .header("Authorization","Bearer "+token).GET());
     }
 
+    JsonNode revision(String token,String file,String revision) {
+        return revisionRequest(token,file,revision,false);
+    }
+
+    JsonNode preserveRevision(String token,String file,String revision) {
+        return revisionRequest(token,file,revision,true);
+    }
+
+    private JsonNode revisionRequest(String token,String file,String revision,boolean preserve) {
+        if(!GoogleDriveConnectionService.validFolderId(file)||!GoogleDriveRevisionService.validRevisionId(revision))
+            throw new IllegalArgumentException("Invalid revision");
+        var builder=HttpRequest.newBuilder(URI.create("https://www.googleapis.com/drive/v3/files/"+file+
+            "/revisions/"+revision+"?fields=id,keepForever,size,mimeType"))
+            .header("Authorization","Bearer "+token);
+        if(preserve)builder.header("Content-Type","application/json").method("PATCH",HttpRequest.BodyPublishers.ofString("{\"keepForever\":true}"));
+        else builder.GET();
+        return send(builder);
+    }
+
+    // This capability is used exclusively by the server, never returned to a browser.
+    URI beginReplacementUpdate(String token,String file,String mime,long size) {
+        if(!GoogleDriveConnectionService.validFolderId(file)||!GoogleDriveUploadPolicy.validMime(mime)||size<=0)
+            throw new IllegalArgumentException("Invalid replacement");
+        var request=HttpRequest.newBuilder(URI.create("https://www.googleapis.com/upload/drive/v3/files/"+file+"?uploadType=resumable"))
+            .timeout(Duration.ofSeconds(30)).header("Authorization","Bearer "+token)
+            .header("Content-Type","application/json; charset=UTF-8")
+            .header("X-Upload-Content-Type",mime).header("X-Upload-Content-Length",Long.toString(size))
+            .method("PATCH",HttpRequest.BodyPublishers.ofString("{}")).build();
+        try{
+            var response=http.send(request,HttpResponse.BodyHandlers.discarding());
+            if(response.statusCode()!=200)throw new ProviderFailure(response.statusCode());
+            return GoogleDriveUploadPolicy.sessionUri(response.headers().firstValue("Location").orElse(""),file);
+        }catch(InterruptedException ex){Thread.currentThread().interrupt();throw new ProviderFailure(0);}
+        catch(java.io.IOException ex){throw new ProviderFailure(0);}
+    }
+
+    void replacementChunk(URI session,String file,String mime,long offset,long total,byte[] bytes) {
+        URI safe=GoogleDriveUploadPolicy.sessionUri(session.toString(),file);
+        if(!GoogleDriveUploadPolicy.validMime(mime)||offset<0||total<=0||bytes.length==0||
+            bytes.length>8*1024*1024||offset>=total||bytes.length>total-offset||
+            (offset+bytes.length<total&&bytes.length%(256*1024)!=0))
+            throw new IllegalArgumentException("Invalid replacement chunk");
+        long end=offset+bytes.length-1;
+        var request=HttpRequest.newBuilder(safe).timeout(Duration.ofSeconds(60))
+            .header("Content-Type",mime).header("Content-Range","bytes "+offset+"-"+end+"/"+total)
+            .PUT(HttpRequest.BodyPublishers.ofByteArray(bytes)).build();
+        try{
+            var response=http.send(request,HttpResponse.BodyHandlers.discarding());
+            // Never blindly resend after an ambiguous provider acknowledgement.
+            if(end+1==total){
+                if(response.statusCode()!=200&&response.statusCode()!=201)throw new ProviderFailure(response.statusCode());
+            }else if(response.statusCode()!=308||
+                !("bytes=0-"+end).equals(response.headers().firstValue("Range").orElse("")))
+                throw new ProviderFailure(response.statusCode());
+        }catch(InterruptedException ex){Thread.currentThread().interrupt();throw new ProviderFailure(0);}
+        catch(java.io.IOException ex){throw new ProviderFailure(0);}
+    }
+
     private JsonNode send(HttpRequest.Builder builder) {
         try {
             var response = http.send(builder.timeout(Duration.ofSeconds(10)).build(),
