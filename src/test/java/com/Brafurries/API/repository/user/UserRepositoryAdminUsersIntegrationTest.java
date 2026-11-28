@@ -481,6 +481,207 @@ class UserRepositoryAdminUsersIntegrationTest {
             )
             """;
 
+    // The exact legacy predicates (including the separately declared count queries)
+    // serve as the oracle for the Criteria implementation.
+    private static final String LEGACY_MEMBER_LIST = """
+        SELECT u
+        FROM User u
+        WHERE EXISTS (
+        SELECT membership.id
+        FROM UserCommunityStatus membership
+        WHERE membership.user = u
+        AND membership.community.id = :communityId
+        )
+        AND (
+        :search IS NULL
+        OR LOWER(COALESCE(u.displayName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+        OR LOWER(COALESCE(u.username, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+        OR EXISTS (
+        SELECT matchingMembership.id
+        FROM UserCommunityStatus matchingMembership
+        WHERE matchingMembership.user = u
+        AND matchingMembership.community.id = :communityId
+        AND LOWER(COALESCE(matchingMembership.displayName, ''))
+        LIKE LOWER(CONCAT('%', :search, '%'))
+        )
+        OR EXISTS (
+        SELECT identity.id
+        FROM UserDiscord identity
+        WHERE identity.user = u
+        AND (
+        LOWER(COALESCE(identity.username, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+        OR LOWER(COALESCE(identity.displayName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+        )
+        )
+        )
+        """;
+    private static final String LEGACY_MEMBER_COUNT = """
+        SELECT COUNT(u)
+        FROM User u
+        WHERE EXISTS (
+        SELECT membership.id
+        FROM UserCommunityStatus membership
+        WHERE membership.user = u
+        AND membership.community.id = :communityId
+        )
+        AND (
+        :search IS NULL
+        OR LOWER(COALESCE(u.displayName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+        OR LOWER(COALESCE(u.username, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+        OR EXISTS (
+        SELECT matchingMembership.id
+        FROM UserCommunityStatus matchingMembership
+        WHERE matchingMembership.user = u
+        AND matchingMembership.community.id = :communityId
+        AND LOWER(COALESCE(matchingMembership.displayName, ''))
+        LIKE LOWER(CONCAT('%', :search, '%'))
+        )
+        OR EXISTS (
+        SELECT identity.id
+        FROM UserDiscord identity
+        WHERE identity.user = u
+        AND (
+        LOWER(COALESCE(identity.username, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+        OR LOWER(COALESCE(identity.displayName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+        )
+        )
+        )
+        """;
+    private static final String LEGACY_ELIGIBLE_LIST = """
+        SELECT u
+        FROM User u
+        WHERE EXISTS (
+        SELECT membership.id
+        FROM UserCommunityStatus membership
+        WHERE membership.user = u
+        AND membership.community.id = :communityId
+        AND membership.approved = true
+        AND membership.banned = false
+        AND membership.isPresent = true
+        )
+        AND (
+        :search IS NULL
+        OR LOWER(COALESCE(u.displayName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+        OR LOWER(COALESCE(u.username, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+        OR EXISTS (
+        SELECT matchingMembership.id
+        FROM UserCommunityStatus matchingMembership
+        WHERE matchingMembership.user = u
+        AND matchingMembership.community.id = :communityId
+        AND LOWER(COALESCE(matchingMembership.displayName, ''))
+        LIKE LOWER(CONCAT('%', :search, '%'))
+        )
+        OR EXISTS (
+        SELECT identity.id
+        FROM UserDiscord identity
+        WHERE identity.user = u
+        AND (
+        LOWER(COALESCE(identity.username, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+        OR LOWER(COALESCE(identity.displayName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+        )
+        )
+        )
+        """;
+    private static final String LEGACY_ELIGIBLE_COUNT = """
+        SELECT COUNT(u)
+        FROM User u
+        WHERE EXISTS (
+        SELECT membership.id
+        FROM UserCommunityStatus membership
+        WHERE membership.user = u
+        AND membership.community.id = :communityId
+        AND membership.approved = true
+        AND membership.banned = false
+        AND membership.isPresent = true
+        )
+        AND (
+        :search IS NULL
+        OR LOWER(COALESCE(u.displayName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+        OR LOWER(COALESCE(u.username, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+        OR EXISTS (
+        SELECT matchingMembership.id
+        FROM UserCommunityStatus matchingMembership
+        WHERE matchingMembership.user = u
+        AND matchingMembership.community.id = :communityId
+        AND LOWER(COALESCE(matchingMembership.displayName, ''))
+        LIKE LOWER(CONCAT('%', :search, '%'))
+        )
+        OR EXISTS (
+        SELECT identity.id
+        FROM UserDiscord identity
+        WHERE identity.user = u
+        AND (
+        LOWER(COALESCE(identity.username, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+        OR LOWER(COALESCE(identity.displayName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
+        )
+        )
+        )
+        """;
+
+    @Test
+    void communityCriteriaMatchesLegacyQueriesAcrossTenantsEligibilityAndPages() {
+        Community a = new Community();
+        a.setName("Tenant A");
+        a = communities.saveAndFlush(a);
+        Community b = new Community();
+        b.setName("Tenant B");
+        b = communities.saveAndFlush(b);
+
+        User global = user("Alpha Global");
+        membership(global, a, null);
+        User local = user(null);
+        membership(local, a, "Café Local");
+        membership(local, b, "OtherTenantSecret");
+        User multiple = user(null);
+        membership(multiple, a, null);
+        discordIdentity(multiple, 723456789012345678L, "alpha.one", "Alpha");
+        discordIdentity(multiple, 823456789012345678L, "alpha.two", null);
+        User banned = user("Alpha Banned");
+        membership(banned, a, null).setBanned(true);
+        User pending = user("Alpha Pending");
+        membership(pending, a, null).setApproved(false);
+        User absent = user("Alpha Absent");
+        membership(absent, a, null).setIsPresent(false);
+        User unknown = user("Alpha Unknown");
+        membership(unknown, a, null).setIsPresent(null);
+        User foreign = user("Alpha Foreign");
+        membership(foreign, b, "Foreign");
+        User username = user(null);
+        username.setUsername("alpha_username");
+        membership(username, a, null);
+        user("Alpha Without Membership");
+        entityManager.flush();
+        entityManager.clear();
+
+        for (Integer tenant : java.util.Arrays.asList(a.getId(), b.getId(), null, -1)) {
+            for (String search : java.util.Arrays.asList(null, "", "ALPHA", "café", "OtherTenantSecret",
+                    "alpha_", "%", "no-match")) {
+                for (boolean eligible : new boolean[]{false, true}) {
+                    String list = eligible ? LEGACY_ELIGIBLE_LIST : LEGACY_MEMBER_LIST;
+                    String count = eligible ? LEGACY_ELIGIBLE_COUNT : LEGACY_MEMBER_COUNT;
+                    for (int p = 0; p < 3; p++) {
+                        var pageable = PageRequest.of(p, 2, Sort.by("id"));
+                        var expected = entityManager.createQuery(list + " ORDER BY u.id", User.class)
+                            .setParameter("communityId", tenant).setParameter("search", search)
+                            .setFirstResult(p * 2).setMaxResults(2).getResultList();
+                        long total = entityManager.createQuery(count, Long.class)
+                            .setParameter("communityId", tenant).setParameter("search", search).getSingleResult();
+                        var actual = eligible ? users.searchEligibleCommunityTeamCandidates(tenant, search, pageable)
+                            : users.searchCommunityMembers(tenant, search, pageable);
+                        String context = "tenant=" + tenant + " search=" + search + " eligible=" + eligible + " page=" + p;
+                        assertEquals(expected.stream().map(User::getId).toList(),
+                            actual.getContent().stream().map(User::getId).toList(), context);
+                        assertEquals(total, actual.getTotalElements(), context);
+                    }
+                }
+            }
+        }
+        assertEquals(0, users.searchCommunityMembers(a.getId(), "OtherTenantSecret", PageRequest.of(0, 20)).getTotalElements());
+        assertEquals(1, users.searchEligibleCommunityTeamCandidates(a.getId(), "alpha.one", PageRequest.of(0, 20)).getTotalElements());
+        assertEquals(3, users.searchEligibleCommunityTeamCandidates(a.getId(), "alpha", PageRequest.of(0, 20)).getTotalElements());
+        assertEquals(7, users.searchCommunityMembers(a.getId(), "alpha", PageRequest.of(0, 20)).getTotalElements());
+    }
+
     private UserCommunityStatus membership(User user, Community community, String displayName) {
         UserCommunityStatus membership = new UserCommunityStatus();
         membership.setUser(user);

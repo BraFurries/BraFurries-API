@@ -61,77 +61,9 @@ public interface UserRepository extends JpaRepository<User, Integer>, JpaSpecifi
         return findAll(AdminUserSearchSpecification.matching(search, discordUserId, status, role, today), pageable);
     }
 
-    @Query(
-        value = """
-            SELECT u
-            FROM User u
-            WHERE EXISTS (
-                SELECT membership.id
-                FROM UserCommunityStatus membership
-                WHERE membership.user = u
-                  AND membership.community.id = :communityId
-            )
-            AND (
-                :search IS NULL
-                OR LOWER(COALESCE(u.displayName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
-                OR LOWER(COALESCE(u.username, '')) LIKE LOWER(CONCAT('%', :search, '%'))
-                OR EXISTS (
-                    SELECT matchingMembership.id
-                    FROM UserCommunityStatus matchingMembership
-                    WHERE matchingMembership.user = u
-                      AND matchingMembership.community.id = :communityId
-                      AND LOWER(COALESCE(matchingMembership.displayName, ''))
-                          LIKE LOWER(CONCAT('%', :search, '%'))
-                )
-                OR EXISTS (
-                    SELECT identity.id
-                    FROM UserDiscord identity
-                    WHERE identity.user = u
-                      AND (
-                          LOWER(COALESCE(identity.username, '')) LIKE LOWER(CONCAT('%', :search, '%'))
-                          OR LOWER(COALESCE(identity.displayName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
-                      )
-                )
-            )
-            """,
-        countQuery = """
-            SELECT COUNT(u)
-            FROM User u
-            WHERE EXISTS (
-                SELECT membership.id
-                FROM UserCommunityStatus membership
-                WHERE membership.user = u
-                  AND membership.community.id = :communityId
-            )
-            AND (
-                :search IS NULL
-                OR LOWER(COALESCE(u.displayName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
-                OR LOWER(COALESCE(u.username, '')) LIKE LOWER(CONCAT('%', :search, '%'))
-                OR EXISTS (
-                    SELECT matchingMembership.id
-                    FROM UserCommunityStatus matchingMembership
-                    WHERE matchingMembership.user = u
-                      AND matchingMembership.community.id = :communityId
-                      AND LOWER(COALESCE(matchingMembership.displayName, ''))
-                          LIKE LOWER(CONCAT('%', :search, '%'))
-                )
-                OR EXISTS (
-                    SELECT identity.id
-                    FROM UserDiscord identity
-                    WHERE identity.user = u
-                      AND (
-                          LOWER(COALESCE(identity.username, '')) LIKE LOWER(CONCAT('%', :search, '%'))
-                          OR LOWER(COALESCE(identity.displayName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
-                      )
-                )
-            )
-            """
-    )
-    Page<User> searchCommunityMembers(
-        @Param("communityId") Integer communityId,
-        @Param("search") String search,
-        Pageable pageable
-    );
+    default Page<User> searchCommunityMembers(Integer communityId, String search, Pageable pageable) {
+        return findAll(CommunityUserSearchSpecification.matching(communityId, search, false), pageable);
+    }
 
 
     @Query(
@@ -168,82 +100,8 @@ public interface UserRepository extends JpaRepository<User, Integer>, JpaSpecifi
         Pageable pageable
     );
 
-    @Query(
-        value = """
-            SELECT u
-            FROM User u
-            WHERE EXISTS (
-                SELECT membership.id
-                FROM UserCommunityStatus membership
-                WHERE membership.user = u
-                  AND membership.community.id = :communityId
-                  AND membership.approved = true
-                  AND membership.banned = false
-                  AND membership.isPresent = true
-            )
-            AND (
-                :search IS NULL
-                OR LOWER(COALESCE(u.displayName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
-                OR LOWER(COALESCE(u.username, '')) LIKE LOWER(CONCAT('%', :search, '%'))
-                OR EXISTS (
-                    SELECT matchingMembership.id
-                    FROM UserCommunityStatus matchingMembership
-                    WHERE matchingMembership.user = u
-                      AND matchingMembership.community.id = :communityId
-                      AND LOWER(COALESCE(matchingMembership.displayName, ''))
-                          LIKE LOWER(CONCAT('%', :search, '%'))
-                )
-                OR EXISTS (
-                    SELECT identity.id
-                    FROM UserDiscord identity
-                    WHERE identity.user = u
-                      AND (
-                          LOWER(COALESCE(identity.username, '')) LIKE LOWER(CONCAT('%', :search, '%'))
-                          OR LOWER(COALESCE(identity.displayName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
-                      )
-                )
-            )
-            """,
-        countQuery = """
-            SELECT COUNT(u)
-            FROM User u
-            WHERE EXISTS (
-                SELECT membership.id
-                FROM UserCommunityStatus membership
-                WHERE membership.user = u
-                  AND membership.community.id = :communityId
-                  AND membership.approved = true
-                  AND membership.banned = false
-                  AND membership.isPresent = true
-            )
-            AND (
-                :search IS NULL
-                OR LOWER(COALESCE(u.displayName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
-                OR LOWER(COALESCE(u.username, '')) LIKE LOWER(CONCAT('%', :search, '%'))
-                OR EXISTS (
-                    SELECT matchingMembership.id
-                    FROM UserCommunityStatus matchingMembership
-                    WHERE matchingMembership.user = u
-                      AND matchingMembership.community.id = :communityId
-                      AND LOWER(COALESCE(matchingMembership.displayName, ''))
-                          LIKE LOWER(CONCAT('%', :search, '%'))
-                )
-                OR EXISTS (
-                    SELECT identity.id
-                    FROM UserDiscord identity
-                    WHERE identity.user = u
-                      AND (
-                          LOWER(COALESCE(identity.username, '')) LIKE LOWER(CONCAT('%', :search, '%'))
-                          OR LOWER(COALESCE(identity.displayName, '')) LIKE LOWER(CONCAT('%', :search, '%'))
-                      )
-                )
-            )
-            """
-    )
-    Page<User> searchEligibleCommunityTeamCandidates(
-        @Param("communityId") Integer communityId,
-        @Param("search") String search,
-        Pageable pageable
-    );
+    default Page<User> searchEligibleCommunityTeamCandidates(Integer communityId, String search, Pageable pageable) {
+        return findAll(CommunityUserSearchSpecification.matching(communityId, search, true), pageable);
+    }
 
 }
