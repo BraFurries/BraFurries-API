@@ -13,18 +13,21 @@ import urllib.request
 
 REPOSITORY = "BraFurries/BraFurries-API"
 WORKFLOW = ".github/workflows/pr-validation.yml"
-REQUIRED_JOBS = {"secret-scan", "test", "Creator Studio on disposable MariaDB"}
+REQUIRED_JOBS = {"secret-scan", "test", "core-tests", "database-contracts", "Creator Studio on disposable MariaDB"}
 REQUIRED_TEST_STEPS = {
     "Check production workflow safety invariants",
     "Test PR validation reuse policy",
     "Validate UserBan mapping (no Docker dependency)",
     "Run tests",
-    "Verify baseline source and run opt-in MariaDB Testcontainers compatibility",
-    "Verify actual Coddy to Spring loopback HTTP contract on disposable MariaDB",
-    "Verify recruitment drafts JDBC with canonical baseline plus additive migration",
     "Package without rerunning tests",
     "Verify layered runtime image and dependency reuse",
     "Compare validated checkout with PR head tree",
+}
+
+REQUIRED_CONTRACT_STEPS = {
+    "Verify baseline source and run opt-in MariaDB Testcontainers compatibility",
+    "Verify actual Coddy to Spring loopback HTTP contract on disposable MariaDB",
+    "Verify recruitment drafts JDBC with canonical baseline plus additive migration",
 }
 
 
@@ -97,8 +100,14 @@ def prove(get, sha, tree):
         return False, "incomplete_job_metadata"
     if not all(unique_success(jobs, name) for name in REQUIRED_JOBS):
         return False, "required_jobs_not_successful"
-    test = next(job for job in jobs if job["name"] == "test")
-    steps = test["steps"]
+    core = next(job for job in jobs if job["name"] == "core-tests")
+    contracts = next(job for job in jobs if job["name"] == "database-contracts")
+    aggregate = next(job for job in jobs if job["name"] == "test")
+    if not all(unique_success(contracts["steps"], name) for name in REQUIRED_CONTRACT_STEPS):
+        return False, "missing_contract_test_evidence"
+    if not unique_success(aggregate["steps"], "Require both independent test groups"):
+        return False, "missing_aggregate_evidence"
+    steps = core["steps"]
     marker = f"Reusable validation for PR #{number}"
     if not all(unique_success(steps, name) for name in REQUIRED_TEST_STEPS | {marker}):
         return False, "missing_exact_tree_or_test_evidence"

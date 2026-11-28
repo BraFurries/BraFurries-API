@@ -43,6 +43,11 @@ assert 'github.base_ref == \'main\'' in pr_workflow
 assert 'github.event.pull_request.head.repo.full_name == github.repository' in pr_workflow
 assert 'if: ${{ steps.validated-tree.outputs.matches == \'true\' }}' in pr_workflow
 assert pr_workflow.index("Verify layered runtime image") < pr_workflow.index("Reusable validation for PR #")
+assert "  core-tests:\n" in pr_workflow
+assert "  database-contracts:\n" in pr_workflow
+assert "  test:\n    if: ${{ always() }}\n    needs: [core-tests, database-contracts]" in pr_workflow
+assert 'test "$CORE_RESULT" = success' in pr_workflow
+assert 'test "$CONTRACTS_RESULT" = success' in pr_workflow
 assert "install -m 0644 target/API-0.0.1-SNAPSHOT.jar" in build
 assert "context: ${{ steps.package-context.outputs.path }}" in build
 assert "target: ci-runtime" in build

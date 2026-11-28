@@ -6,7 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from reuse_pr_validation import REPOSITORY, REQUIRED_JOBS, REQUIRED_TEST_STEPS, WORKFLOW, main, prove
+from reuse_pr_validation import (REPOSITORY, REQUIRED_JOBS, REQUIRED_TEST_STEPS,
+                                 REQUIRED_CONTRACT_STEPS, WORKFLOW, main, prove)
 
 SHA = "a" * 40
 HEAD = "b" * 40
@@ -35,7 +36,11 @@ class ReusePolicyTest(unittest.TestCase):
         }
         self.runs = [self.run]
         self.jobs = [succeeded(name) for name in sorted(REQUIRED_JOBS)]
-        self.test = next(j for j in self.jobs if j["name"] == "test")
+        self.test = next(j for j in self.jobs if j["name"] == "core-tests")
+        self.contracts = next(j for j in self.jobs if j["name"] == "database-contracts")
+        self.contracts["steps"] = [succeeded(name) for name in sorted(REQUIRED_CONTRACT_STEPS)]
+        self.aggregate = next(j for j in self.jobs if j["name"] == "test")
+        self.aggregate["steps"] = [succeeded("Require both independent test groups")]
         self.test["steps"] = [succeeded(name) for name in sorted(REQUIRED_TEST_STEPS)]
         self.test["steps"].append(succeeded(f"Reusable validation for PR #{NUMBER}"))
         self.associated = [self.pr]
@@ -117,6 +122,18 @@ class ReusePolicyTest(unittest.TestCase):
 
     def test_required_tests_skipped(self):
         next(s for s in self.test["steps"] if s["name"] == "Run tests")["conclusion"] = "skipped"
+        self.assert_denied()
+
+    def test_contract_group_failure(self):
+        self.contracts["conclusion"] = "failure"
+        self.assert_denied()
+
+    def test_missing_contract_step(self):
+        self.contracts["steps"].pop()
+        self.assert_denied()
+
+    def test_aggregate_skipped(self):
+        self.aggregate["steps"][0]["conclusion"] = "skipped"
         self.assert_denied()
 
     def test_ambiguous_pr(self):
