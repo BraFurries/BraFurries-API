@@ -19,6 +19,7 @@ public class BraFurriesApiApplication {
 		var startup = StartupDiagnostics.create();
 		var application = new SpringApplication(BraFurriesApiApplication.class);
 		application.setApplicationStartup(startup);
+		application.addInitializers(new UserQueryStartupProfiling());
 		application.run(args);
 		StartupDiagnostics.report(startup);
 	}
