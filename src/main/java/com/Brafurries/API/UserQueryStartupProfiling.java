@@ -72,7 +72,17 @@ public final class UserQueryStartupProfiling
         if (replacement instanceof org.springframework.beans.factory.support.RootBeanDefinition root) {
             root.setTargetType((org.springframework.core.ResolvableType) null);
         }
-        registry.registerBeanDefinition(BEAN, replacement);
+        // Boot intentionally forbids overriding existing definitions. Remove
+        // only the uninstantiated, verified original before registering its
+        // clone; do not relax the global override policy.
+        registry.removeBeanDefinition(BEAN);
+        try {
+            registry.registerBeanDefinition(BEAN, replacement);
+        } catch (RuntimeException ex) {
+            registry.registerBeanDefinition(BEAN, original);
+            LOG.warn("STARTUP_QUERY_PROFILE skipped reason=registration_failed");
+            return;
+        }
         try {
             LOG.info("STARTUP_QUERY_PROFILE enabled repository=UserRepository processors={} max_heap_mib={}",
                 Runtime.getRuntime().availableProcessors(), Runtime.getRuntime().maxMemory() / (1024 * 1024));

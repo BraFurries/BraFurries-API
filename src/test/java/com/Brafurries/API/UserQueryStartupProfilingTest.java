@@ -14,6 +14,7 @@ class UserQueryStartupProfilingTest {
     @Test
     void changesOnlyTheExpectedRepositoryFactoryWithoutChangingItsDefinition() {
         var beans = new DefaultListableBeanFactory();
+        beans.setAllowBeanDefinitionOverriding(false);
         var user = new RootBeanDefinition(JpaRepositoryFactoryBean.class);
         user.getConstructorArgumentValues().addGenericArgumentValue(UserRepository.class);
         user.setLazyInit(true);
